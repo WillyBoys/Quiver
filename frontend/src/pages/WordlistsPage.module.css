@@ -1,0 +1,46 @@
+.page { padding: 32px; max-width: 1000px; }
+.header { margin-bottom: 20px; }
+.title { font-size: 22px; font-weight: 600; margin-bottom: 4px; }
+.subtitle { color: var(--text-secondary); font-size: 13px; }
+
+.dirStatus { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+.dirBadge {
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 12px; border-radius: 4px; font-size: 12px;
+}
+.dirOk { background: var(--accent-glow); color: var(--accent); border: 1px solid var(--accent-dim); }
+.dirMissing { background: rgba(255,68,68,0.08); color: var(--text-muted); border: 1px solid rgba(255,68,68,0.2); }
+
+.callout {
+  background: var(--bg-surface); border: 1px solid var(--border);
+  border-radius: 6px; padding: 24px; max-width: 600px;
+}
+.calloutTitle { font-size: 14px; font-weight: 600; margin-bottom: 8px; }
+.calloutText { font-size: 13px; color: var(--text-secondary); margin-bottom: 10px; }
+.calloutCode {
+  background: var(--bg-base); border: 1px solid var(--border);
+  border-radius: 4px; padding: 12px 14px; font-family: var(--font-mono);
+  font-size: 12px; color: var(--accent); margin-bottom: 10px;
+}
+
+.table { display: flex; flex-direction: column; }
+.tableHeader {
+  display: grid; grid-template-columns: 2fr 2fr 1fr 3fr;
+  padding: 8px 12px; font-size: 11px; font-weight: 600;
+  color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--border);
+}
+.tableRow {
+  display: grid; grid-template-columns: 2fr 2fr 1fr 3fr;
+  padding: 9px 12px; border-bottom: 1px solid var(--border-subtle);
+  transition: background 0.15s; align-items: center;
+}
+.tableRow:hover { background: var(--bg-surface); }
+
+.fileName { font-size: 13px; font-weight: 500; }
+.fileDir { font-size: 12px; color: var(--text-secondary); }
+.fileSize { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
+.filePath {
+  font-family: var(--font-mono); font-size: 11px; color: var(--text-muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}

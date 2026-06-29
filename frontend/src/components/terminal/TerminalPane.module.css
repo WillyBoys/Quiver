@@ -1,0 +1,126 @@
+.terminal {
+  background: #0a0e14;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  font-family: var(--font-mono);
+}
+
+.commandBar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: #0d1117;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.prompt {
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 700;
+  user-select: none;
+}
+
+.command {
+  flex: 1;
+  font-size: 12px;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.commandActions {
+  display: flex;
+  gap: 6px;
+}
+
+.copyBtn {
+  display: inline-flex;
+  align-items: center;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  border-radius: 3px;
+  padding: 3px 6px;
+  cursor: pointer;
+  font-size: 11px;
+  font-family: var(--font-ui);
+  transition: all 0.15s;
+}
+
+.copyBtn:hover {
+  color: var(--text-primary);
+  border-color: var(--text-muted);
+}
+
+.killBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(255, 68, 68, 0.1);
+  border: 1px solid rgba(255, 68, 68, 0.35);
+  color: var(--critical);
+  border-radius: 3px;
+  padding: 3px 8px;
+  cursor: pointer;
+  font-size: 11px;
+  font-family: var(--font-ui);
+  font-weight: 600;
+  transition: all 0.15s;
+}
+
+.killBtn:hover {
+  background: rgba(255, 68, 68, 0.2);
+  border-color: var(--critical);
+}
+
+.outputArea {
+  display: flex;
+  flex-direction: column;
+}
+
+.outputHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.statusDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.statusLabel {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.output {
+  padding: 14px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #c9d1d9;
+  white-space: pre-wrap;
+  word-break: break-all;
+  min-height: 120px;
+  max-height: 500px;
+  overflow-y: auto;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.cursor {
+  color: var(--accent);
+  animation: blink 1s step-end infinite;
+  font-size: 13px;
+}

@@ -1,0 +1,40 @@
+version: "3.9"
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: quiver_backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+      - ./data:/data
+      - wordlists:/wordlists
+    environment:
+      - DATABASE_URL=sqlite:////data/pentest.db
+      - WORDLISTS_DIR=/wordlists
+    privileged: true  # needed for some pentest tools (nmap raw sockets)
+    network_mode: host  # allows tools to reach target network directly
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: quiver_frontend
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend/src:/app/src
+    environment:
+      - VITE_API_URL=http://localhost:8000
+      - VITE_WS_URL=ws://localhost:8000
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  wordlists:
+    driver: local
