@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Play, Plus, Trash2, Flag, X } from "lucide-react";
+import { ArrowLeft, Play, Plus, Trash2, Flag, X, FolderOpen, Search } from "lucide-react";
 import { api, createRunSocket } from "../utils/api.js";
 import TerminalPane from "../components/terminal/TerminalPane.jsx";
 import styles from "./SessionDetailPage.module.css";
@@ -29,6 +29,10 @@ export default function SessionDetailPage() {
   const [notesValue, setNotesValue] = useState("");
   const [notesSaved, setNotesSaved] = useState(true);
   const notesTimerRef = useRef(null);
+
+  const [wordlistPicker, setWordlistPicker] = useState(null); // null | { toolId, paramName }
+  const [wordlists, setWordlists] = useState(null);           // null = not loaded yet
+  const [wordlistFilter, setWordlistFilter] = useState("");
 
   const wsRef = useRef(null);
 
@@ -112,6 +116,31 @@ export default function SessionDetailPage() {
     }, 800);
   }
 
+  function isWordlistParam(p) {
+    const name = p.name.toLowerCase();
+    const flag = (p.flag || "").toLowerCase();
+    const ph = (p.placeholder || "").toLowerCase();
+    return name.includes("wordlist") || flag === "-w" || flag === "--wordlist" || ph.includes("/wordlists/");
+  }
+
+  async function openWordlistPicker(toolId, paramName) {
+    setWordlistPicker({ toolId, paramName });
+    setWordlistFilter("");
+    if (!wordlists) {
+      const list = await api.wordlists.list().catch(() => []);
+      setWordlists(list);
+    }
+  }
+
+  function selectWordlist(path) {
+    const { toolId, paramName } = wordlistPicker;
+    setRunParams((rp) => ({
+      ...rp,
+      [toolId]: { ...(rp[toolId] || {}), [paramName]: path },
+    }));
+    setWordlistPicker(null);
+  }
+
   const activeRun = runs.find((r) => r.id === activeRunId);
   const activeOutput = liveOutput[activeRunId] || activeRun?.output || "";
   const isActiveStreaming = streaming[activeRunId] || false;
@@ -162,13 +191,30 @@ export default function SessionDetailPage() {
                       <label className={styles.paramLabel}>
                         {p.name}{p.required && <span style={{ color: "var(--critical)" }}> *</span>}
                       </label>
-                      <input className="input input-mono" style={{ fontSize: 11 }}
-                        placeholder={p.placeholder || p.name}
-                        value={params[p.name] || ""}
-                        onChange={(e) => setRunParams((rp) => ({
-                          ...rp,
-                          [tool.id]: { ...params, [p.name]: e.target.value },
-                        }))} />
+                      {isWordlistParam(p) ? (
+                        <div className={styles.wordlistInput}>
+                          <input className="input input-mono" style={{ fontSize: 11 }}
+                            placeholder={p.placeholder || p.name}
+                            value={params[p.name] || ""}
+                            onChange={(e) => setRunParams((rp) => ({
+                              ...rp,
+                              [tool.id]: { ...params, [p.name]: e.target.value },
+                            }))} />
+                          <button type="button" className={styles.browseBtn}
+                            title="Browse wordlists"
+                            onClick={() => openWordlistPicker(tool.id, p.name)}>
+                            <FolderOpen size={12} />
+                          </button>
+                        </div>
+                      ) : (
+                        <input className="input input-mono" style={{ fontSize: 11 }}
+                          placeholder={p.placeholder || p.name}
+                          value={params[p.name] || ""}
+                          onChange={(e) => setRunParams((rp) => ({
+                            ...rp,
+                            [tool.id]: { ...params, [p.name]: e.target.value },
+                          }))} />
+                      )}
                     </div>
                   ))}
 
@@ -278,6 +324,53 @@ export default function SessionDetailPage() {
           </div>
         </aside>
       </div>
+
+      {/* Wordlist picker modal */}
+      {wordlistPicker && (
+        <div className={styles.modal}>
+          <div className={styles.pickerBox}>
+            <div className={styles.pickerHeader}>
+              <h2 className={styles.modalTitle}>Select Wordlist</h2>
+              <button className={styles.delBtn} onClick={() => setWordlistPicker(null)}>
+                <X size={16} />
+              </button>
+            </div>
+            <div className={styles.pickerSearch}>
+              <Search size={13} className={styles.pickerSearchIcon} />
+              <input className={`input ${styles.pickerSearchInput}`}
+                placeholder="Filter by filename or path…"
+                value={wordlistFilter}
+                onChange={(e) => setWordlistFilter(e.target.value)}
+                autoFocus />
+            </div>
+            <div className={styles.pickerList}>
+              {wordlists === null && <p className={styles.empty} style={{ padding: "16px 20px" }}>Loading…</p>}
+              {wordlists !== null && wordlists.length === 0 && (
+                <div className={styles.pickerEmpty}>
+                  <p>No wordlists found.</p>
+                  <p className={styles.pickerHint}>
+                    Drop <code>.txt</code> files into <code>data/wordlists/</code>, or set{" "}
+                    <code>WORDLISTS_PATH</code> in <code>.env</code> to point at SecLists.
+                  </p>
+                </div>
+              )}
+              {wordlists !== null && wordlists
+                .filter((w) => !wordlistFilter ||
+                  w.filename.toLowerCase().includes(wordlistFilter.toLowerCase()) ||
+                  (w.directory || "").toLowerCase().includes(wordlistFilter.toLowerCase()))
+                .map((w) => (
+                  <button key={w.path} className={styles.pickerItem} onClick={() => selectWordlist(w.path)}>
+                    <div className={styles.pickerItemName}>{w.filename}</div>
+                    <div className={styles.pickerItemMeta}>
+                      <span className={styles.pickerItemDir}>{w.directory || w.base_dir}</span>
+                      <span className={styles.pickerItemSize}>{w.size_human}</span>
+                    </div>
+                  </button>
+                ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Finding modal */}
       {showFinding && (
