@@ -88,6 +88,70 @@
   border-bottom: 1px solid var(--border-subtle);
 }
 
+/* Filter */
+.filterWrap {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 4px;
+}
+.filterIcon { color: var(--text-muted); flex-shrink: 0; }
+.filterInput {
+  flex: 1;
+  max-width: 220px;
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  border-radius: 3px;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 2px 7px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.filterInput:focus { border-color: var(--accent); }
+.filterInput::placeholder { color: var(--text-muted); }
+.matchCount {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  min-width: 56px;
+  text-align: center;
+}
+.navBtn {
+  background: transparent; border: 1px solid var(--border-subtle);
+  color: var(--text-muted); cursor: pointer; padding: 2px 4px;
+  display: flex; align-items: center; border-radius: 2px;
+  transition: all 0.12s;
+}
+.navBtn:hover:not(:disabled) { color: var(--text-primary); border-color: var(--text-muted); }
+.navBtn:disabled { opacity: 0.35; cursor: default; }
+.clearFilter {
+  background: transparent; border: none; color: var(--text-muted);
+  cursor: pointer; padding: 2px; display: flex; align-items: center;
+  border-radius: 2px; margin-left: 2px;
+}
+.clearFilter:hover { color: var(--text-primary); }
+
+/* Highlighted match text */
+.highlight {
+  background: rgba(255, 165, 0, 0.2);
+  color: #ffa500;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+.highlightCurrent {
+  background: #ffa500;
+  color: #000;
+  border-radius: 2px;
+  padding: 0 3px;
+}
+.outputLine { display: block; }
+.outputLineCurrent {}
+.noMatches { color: var(--text-muted); font-style: italic; }
+
 .statusDot {
   width: 7px;
   height: 7px;
@@ -108,7 +172,7 @@
   line-height: 1.6;
   color: #c9d1d9;
   white-space: pre-wrap;
-  word-break: break-all;
+  overflow-wrap: break-word;
   min-height: 120px;
   max-height: 500px;
   overflow-y: auto;

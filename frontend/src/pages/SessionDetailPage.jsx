@@ -356,13 +356,13 @@ export default function SessionDetailPage() {
               )}
               {wordlists !== null && wordlists
                 .filter((w) => !wordlistFilter ||
-                  w.filename.toLowerCase().includes(wordlistFilter.toLowerCase()) ||
+                  w.name.toLowerCase().includes(wordlistFilter.toLowerCase()) ||
                   (w.directory || "").toLowerCase().includes(wordlistFilter.toLowerCase()))
                 .map((w) => (
                   <button key={w.path} className={styles.pickerItem} onClick={() => selectWordlist(w.path)}>
-                    <div className={styles.pickerItemName}>{w.filename}</div>
+                    <div className={styles.pickerItemName}>{w.name}</div>
                     <div className={styles.pickerItemMeta}>
-                      <span className={styles.pickerItemDir}>{w.directory || w.base_dir}</span>
+                      <span className={styles.pickerItemDir}>{w.directory || w.base}</span>
                       <span className={styles.pickerItemSize}>{w.size_human}</span>
                     </div>
                   </button>
