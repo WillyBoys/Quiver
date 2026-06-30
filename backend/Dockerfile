@@ -13,7 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     snmp \
     # Build dependencies + Perl (needed for nikto)
     gcc libffi-dev libssl-dev \
-    perl libnet-ssleay-perl libwhisker2-perl \
+    perl libnet-ssleay-perl libjson-perl libxml-writer-perl \
     && rm -rf /var/lib/apt/lists/*
 
 # nikto (removed from Debian repos — install from GitHub)
