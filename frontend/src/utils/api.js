@@ -25,6 +25,7 @@ export const api = {
   tools: {
     list: (category) => req(`/tools/${category ? `?category=${category}` : ""}`),
     get: (id) => req(`/tools/${id}`),
+    checkBinary: (binary) => req(`/tools/check-binary?binary=${encodeURIComponent(binary)}`),
     create: (body) => req("/tools/", { method: "POST", body: JSON.stringify(body) }),
     update: (id, body) => req(`/tools/${id}`, { method: "PUT", body: JSON.stringify(body) }),
     delete: (id) => req(`/tools/${id}`, { method: "DELETE" }),

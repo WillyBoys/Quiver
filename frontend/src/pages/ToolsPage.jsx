@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { Plus, Pencil, Trash2, ToggleLeft, ToggleRight, Search } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { Plus, Pencil, Trash2, ToggleLeft, ToggleRight, Search, CheckCircle, XCircle, Loader } from "lucide-react";
 import { api } from "../utils/api.js";
 import styles from "./ToolsPage.module.css";
 
@@ -17,6 +17,8 @@ export default function ToolsPage() {
   const [form, setForm] = useState(EMPTY_FORM);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [binaryCheck, setBinaryCheck] = useState(null); // null | "checking" | {found, path}
+  const binaryTimerRef = useRef(null);
 
   useEffect(() => {
     api.tools.list().then(setTools).finally(() => setLoading(false));
@@ -41,8 +43,25 @@ export default function ToolsPage() {
   const totalEnabled = tools.filter((t) => t.enabled).length;
   const totalCustom = tools.filter((t) => !t.is_builtin).length;
 
+  function handleBinaryChange(value) {
+    setForm((f) => ({ ...f, binary: value }));
+    setBinaryCheck(null);
+    clearTimeout(binaryTimerRef.current);
+    if (!value.trim()) return;
+    setBinaryCheck("checking");
+    binaryTimerRef.current = setTimeout(async () => {
+      try {
+        const result = await api.tools.checkBinary(value.trim());
+        setBinaryCheck(result);
+      } catch {
+        setBinaryCheck(null);
+      }
+    }, 500);
+  }
+
   function openNew() {
     setForm(EMPTY_FORM);
+    setBinaryCheck(null);
     setEditing("new");
   }
 
@@ -54,6 +73,7 @@ export default function ToolsPage() {
       workflow_tags: tool.workflow_tags || [],
       enabled: tool.enabled,
     });
+    setBinaryCheck(null);
     setEditing(tool);
   }
 
@@ -187,9 +207,25 @@ export default function ToolsPage() {
 
               <div className={styles.row}>
                 <label className={styles.label}>Binary / Command
-                  <input className="input input-mono" required value={form.binary}
-                    placeholder="gobuster"
-                    onChange={(e) => setForm({ ...form, binary: e.target.value })} />
+                  <div className={styles.binaryInputRow}>
+                    <input className="input input-mono" required value={form.binary}
+                      placeholder="gobuster"
+                      onChange={(e) => handleBinaryChange(e.target.value)} />
+                    <span className={styles.binaryStatus}>
+                      {binaryCheck === "checking" && <Loader size={14} className={styles.spinIcon} />}
+                      {binaryCheck && binaryCheck !== "checking" && binaryCheck.found && (
+                        <CheckCircle size={14} style={{ color: "var(--accent)" }} title={binaryCheck.path} />
+                      )}
+                      {binaryCheck && binaryCheck !== "checking" && !binaryCheck.found && (
+                        <XCircle size={14} style={{ color: "var(--critical)" }} title="Binary not found in container. Add it to user-tools.txt and rebuild." />
+                      )}
+                    </span>
+                  </div>
+                  {binaryCheck && binaryCheck !== "checking" && !binaryCheck.found && (
+                    <span className={styles.binaryWarning}>
+                      Not installed. Add <code>{form.binary}</code> to <code>backend/user-tools.txt</code> and run <code>docker-compose up --build backend</code>.
+                    </span>
+                  )}
                 </label>
                 <label className={styles.label}>Default Flags
                   <input className="input input-mono" value={form.default_flags}

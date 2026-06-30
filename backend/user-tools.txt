@@ -1,0 +1,14 @@
+# Quiver — User-added apt packages
+#
+# Add any apt package names here (one per line) and rebuild:
+#   docker-compose up --build backend
+#
+# Examples:
+#   masscan
+#   wfuzz
+#   dirb
+#   dnsrecon
+#   nbtscan
+#
+# For tools not in apt (Go binaries, GitHub releases, pip packages),
+# add a RUN step to the Dockerfile instead.

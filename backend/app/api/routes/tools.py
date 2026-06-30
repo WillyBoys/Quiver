@@ -5,6 +5,7 @@ from app.db.database import get_db
 from app.models.tool import Tool
 from pydantic import BaseModel
 from typing import Optional
+import shutil
 
 router = APIRouter()
 
@@ -29,6 +30,13 @@ class ToolCreate(BaseModel):
 
 class ToolUpdate(ToolCreate):
     enabled: Optional[bool] = True
+
+
+@router.get("/check-binary")
+async def check_binary(binary: str):
+    """Check whether a binary is available in the container's PATH."""
+    path = shutil.which(binary)
+    return {"binary": binary, "found": path is not None, "path": path}
 
 
 @router.get("/")
