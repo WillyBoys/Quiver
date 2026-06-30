@@ -28,7 +28,8 @@ All tools and dependencies are bundled in the image. 16 tools are pre-configured
 **Platform features:**
 - Session management — one session per engagement, tracks target, scope, and notes
 - Tool registry — all built-in tools pre-configured with stats bar, search/filter, workflow tags; add your own
-- Live terminal output — real-time streaming CLI output, screenshot-ready
+- Live terminal output — real-time streaming CLI output with ANSI color rendering, screenshot-ready
+- Terminal filter — search tool output with match count and keyboard navigation (Enter / Shift+Enter)
 - Kill button — terminate any long-running tool mid-stream
 - Extra flags — append one-off flags to any tool at run time without editing its definition
 - Session notes — auto-saving notes editor per engagement

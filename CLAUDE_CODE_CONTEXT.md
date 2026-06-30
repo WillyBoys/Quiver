@@ -57,7 +57,7 @@ pentest-platform/
 │       │   └── run.py          # Run model (command, output, status, exit_code)
 │       └── db/
 │           ├── database.py     # async engine, Base, get_db, init_db
-│           └── seed.py         # seeds 16 default tools on first boot
+│           └── seed.py         # seeds 16 default tools; also syncs default_flags/parameters for existing builtins on restart
 └── frontend/
     ├── Dockerfile
     ├── vite.config.js          # proxies /api (HTTP + WS) to backend:8000
@@ -73,7 +73,7 @@ pentest-platform/
         │   │   ├── Layout.jsx          # sidebar nav + main content area
         │   │   └── Layout.module.css
         │   └── terminal/
-        │       ├── TerminalPane.jsx    # key component — streaming CLI output pane + Kill button
+        │       ├── TerminalPane.jsx    # key component — streaming CLI output, ANSI colors, filter/search, Kill button
         │       └── TerminalPane.module.css
         └── pages/
             ├── SessionsPage.jsx        # list + create engagement sessions
@@ -132,11 +132,14 @@ pentest-platform/
 
 ## Bundled tools (installed in Docker image)
 
-Recon: nmap, whois, dig
-Web: gobuster, ffuf, nikto (from GitHub — requires libjson-perl, libxml-writer-perl), whatweb, curl
+Recon: nmap (quick/full/udp), whois, dig
+Web: gobuster (dir/vhost), ffuf, nikto (from GitHub), whatweb, curl
 Enum: enum4linux-ng, smbclient, snmpwalk
 Vuln: nuclei, sqlmap
-Util: hydra, john, netcat
+Util: hydra (SSH — params: userlist, passlist, target, protocol), john, netcat
+
+Note on Hydra: command builds as `hydra -t 4 -L <userlist> -P <passlist> <target> <protocol>`.
+The protocol field (placeholder "ssh") must be filled in at run time.
 
 ## Testing environment
 
@@ -157,13 +160,18 @@ Useful Juice Shop targets for testing:
 - WebSocket streaming execution with live terminal output
 - DB models and auto-seed on startup (16 default tools)
 - All four frontend pages functional
-- TerminalPane with live streaming, copy buttons, status indicator, Kill button
+- TerminalPane with:
+  - Live streaming output with ANSI color rendering (tool colors preserved in browser)
+  - `\r` carriage-return handling (progress bars display correctly)
+  - Filter/search with match count and up/down navigation (Enter/Shift+Enter)
+  - Copy output button (copies plain text, no escape codes)
+  - Status indicator and Kill button
 - Tool registry with stats bar, live search/filter, workflow tag chips, param count badges
 - Session management with findings tracker
 - Session notes editor — debounce-saves (800ms) to backend
 - Extra flags field on every tool card — appended to command at run time
 - Kill running process — SIGTERM to process group, Kill button in terminal
-- Wordlist browser with mount instructions
+- Wordlist browser with file picker modal on wordlist-type parameters
 - OWASP Juice Shop as a co-located test target
 
 ## What's planned next (priority order)
@@ -184,9 +192,11 @@ Useful Juice Shop targets for testing:
 - Frontend: CSS Modules for all component styles, no inline styles except one-offs,
   use existing CSS variables from index.css, don't introduce new dependencies without
   good reason
-- Keep the terminal output raw and unstyled — pentesters will screenshot it, it needs
-  to look like a real terminal not a UI component
+- Terminal output renders ANSI color codes as styled spans — do not strip colors from tool output
 - Built-in tools are protected from deletion (only disable), custom tools can be deleted
 - The command string shown in TerminalPane must always be the exact command that ran
-- vite.config.js changes require `docker-compose up --build frontend` (not hot-reloaded)
-- requirements.txt changes require `docker-compose up --build backend`
+- `frontend/src/` changes hot-reload automatically (Vite polling is enabled for Docker)
+- Changes to `vite.config.js` itself require `docker-compose restart frontend` to take effect
+- `requirements.txt` changes require `docker-compose up --build backend`
+- Builtin tool seed data (`seed.py`) is applied on every backend restart — editing DEFAULT_TOOLS
+  will update existing tools automatically, no DB wipe needed
