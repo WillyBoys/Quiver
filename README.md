@@ -57,24 +57,43 @@ The `docker-compose.yml` includes [OWASP Juice Shop](https://owasp.org/www-proje
 
 ---
 
-## Mounting wordlists (SecLists, custom lists)
+## Wordlists
 
-Add a volume mount to `docker-compose.yml`:
+Quiver mounts a wordlists directory into the container at `/wordlists`. Tools with wordlist parameters show a **Browse** button — click it to pick a file from a searchable modal rather than typing paths manually.
 
-```yaml
-services:
-  backend:
-    volumes:
-      - /path/to/SecLists:/wordlists:ro
+### Option 1 — Drop files into `data/wordlists/` (no config needed)
+
+The `data/wordlists/` folder in the project root is mounted by default. Drop any `.txt` wordlist files there and restart — they appear in the picker immediately.
+
+### Option 2 — Point at SecLists or another existing directory
+
+Copy `.env.example` to `.env` and set `WORDLISTS_PATH` for your OS:
+
+```bash
+cp .env.example .env
 ```
 
-Or on Linux with SecLists already installed:
+Then edit `.env` and uncomment the right line:
 
-```yaml
-      - /usr/share/seclists:/wordlists:ro
+| OS | Default SecLists path |
+|---|---|
+| macOS (Homebrew) | `/usr/share/seclists` |
+| Linux | `/usr/share/seclists` or `/usr/share/wordlists` |
+| Kali Linux | `/usr/share/wordlists` |
+| Windows (WSL2) | `/mnt/c/Users/yourname/SecLists` |
+
+Example `.env`:
+```
+WORDLISTS_PATH=/usr/share/seclists
 ```
 
-Wordlists appear automatically in the Wordlists tab with their full path for use in tool parameters.
+Restart the containers after setting the variable — no rebuild needed:
+
+```bash
+docker-compose down && docker-compose up
+```
+
+Wordlists appear automatically in the **Wordlists** tab and in the in-session picker.
 
 ---
 

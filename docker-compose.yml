@@ -9,7 +9,7 @@ services:
     volumes:
       - ./backend:/app
       - ./data:/data
-      - wordlists:/wordlists
+      - ${WORDLISTS_PATH:-./data/wordlists}:/wordlists:ro
     environment:
       - DATABASE_URL=sqlite:////data/pentest.db
       - WORDLISTS_DIR=/wordlists
@@ -39,6 +39,3 @@ services:
       - "3001:3000"
     restart: unless-stopped
 
-volumes:
-  wordlists:
-    driver: local
