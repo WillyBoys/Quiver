@@ -12,7 +12,7 @@ docker-compose up --build
 
 Then open [http://localhost:3000](http://localhost:3000).
 
-That's it. All tools and dependencies are bundled in the image.
+All tools and dependencies are bundled in the image. 16 tools are pre-configured and ready to use on first boot.
 
 ---
 
@@ -26,14 +26,34 @@ That's it. All tools and dependencies are bundled in the image.
 - **Utilities:** hydra, john, netcat, curl
 
 **Platform features:**
-- Session management — one session per engagement, tracks target and scope
-- Tool registry — all built-in tools pre-configured with stats bar, search/filter, workflow tags, and param count; add your own with a form
-- Live terminal output — real-time streaming CLI output, screenshot-ready; Kill button terminates long-running tools mid-stream
+- Session management — one session per engagement, tracks target, scope, and notes
+- Tool registry — all built-in tools pre-configured with stats bar, search/filter, workflow tags; add your own
+- Live terminal output — real-time streaming CLI output, screenshot-ready
+- Kill button — terminate any long-running tool mid-stream
 - Extra flags — append one-off flags to any tool at run time without editing its definition
 - Session notes — auto-saving notes editor per engagement
 - Findings tracker — log critical/high/medium/low/info findings per session
 - Wordlist browser — auto-discovers wordlists from mounted volumes
-- Run history — every command, every output, timestamped and searchable
+- Run history — every command, every output, timestamped
+
+---
+
+## Testing environment (OWASP Juice Shop)
+
+The `docker-compose.yml` includes [OWASP Juice Shop](https://owasp.org/www-project-juice-shop/) as a built-in vulnerable target for testing. It starts automatically alongside the platform.
+
+**Access Juice Shop in your browser:** [http://localhost:3001](http://localhost:3001)
+
+**Use these values in Quiver tool parameters** (tools run inside Docker and reach Juice Shop over the internal network):
+
+| Tool | Parameter |
+|---|---|
+| Nikto host | `juice-shop` port `3000` |
+| WhatWeb / Nuclei target | `http://juice-shop:3000` |
+| Gobuster / ffuf URL | `http://juice-shop:3000` |
+| SQLMap URL | `http://juice-shop:3000/rest/products/search?q=test` |
+
+> **Why not `localhost:3001`?** Tool commands execute inside the backend container, not on your machine. `localhost` inside the container refers to the container itself. Use the Docker service hostname `juice-shop` instead.
 
 ---
 
@@ -65,12 +85,12 @@ Open the **Tools** tab → **Add Tool**. Fill in:
 - **Binary** — the command name (must be installed in the container, or add it to the Dockerfile)
 - **Default flags** — flags always appended
 - **Parameters** — named slots filled in at run time (e.g. `target`, `wordlist`)
-- **Workflow tags** — group tools by engagement type
+- **Workflow tags** — group tools by engagement type (external / internal / web)
 
 To install a custom binary, add it to `backend/Dockerfile` and rebuild:
 
 ```bash
-docker-compose up --build
+docker-compose up --build backend
 ```
 
 ---
@@ -79,32 +99,33 @@ docker-compose up --build
 
 ```
 quiver/
-├── docker-compose.yml
-├── backend/                  # FastAPI + SQLite
-│   ├── Dockerfile
+├── docker-compose.yml        # backend + frontend + juice-shop
+├── backend/                  # FastAPI + SQLite (aiosqlite)
+│   ├── Dockerfile            # python:3.12-slim-bookworm
 │   ├── requirements.txt
 │   └── app/
 │       ├── main.py
 │       ├── api/routes/       # tools, sessions, runs, wordlists
 │       ├── models/           # SQLAlchemy models
 │       └── db/               # database init + seed
-└── frontend/                 # React + Vite
+└── frontend/                 # React 18 + Vite
+    ├── vite.config.js        # proxies /api (HTTP + WebSocket) to backend:8000
     └── src/
         ├── pages/            # Sessions, SessionDetail, Tools, Wordlists
         ├── components/       # TerminalPane, Layout
         └── utils/api.js      # API + WebSocket client
 ```
 
-Tool runs stream over **WebSockets** — the backend executes the command and pipes stdout/stderr line-by-line to the browser.
+Tool runs stream over **WebSockets** — the backend spawns the process and pipes stdout/stderr line-by-line to the browser in real time.
 
 ---
 
 ## Data persistence
 
-All session data, tool runs, and findings are stored in a SQLite database at `./data/pentest.db` on the host (mounted into the container). Safe across restarts.
+Session data, tool runs, and findings are stored in a SQLite database mounted at `./data/` on your host. The file survives container restarts and rebuilds.
 
 ---
 
 ## Security note
 
-This tool is designed to run on a dedicated pentest VM or isolated local machine, **not** exposed to the internet. The backend runs commands with the privileges of the Docker container. Use responsibly and only against systems you are authorized to test.
+Quiver is designed to run on a dedicated pentest VM or isolated local machine, **not** exposed to the internet. The backend executes commands with the privileges of the Docker container. Use responsibly and only against systems you are authorized to test.
