@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     hydra \
     john \
     smbclient \
+    samba-common-bin \
     snmp \
     # Ruby (needed for whatweb)
     ruby ruby-dev \
@@ -35,8 +36,8 @@ RUN curl -L https://github.com/ffuf/ffuf/releases/download/v2.1.0/ffuf_2.1.0_lin
 RUN curl -L https://github.com/projectdiscovery/nuclei/releases/download/v3.2.4/nuclei_3.2.4_linux_amd64.zip \
     -o /tmp/nuclei.zip && cd /tmp && unzip nuclei.zip && mv nuclei /usr/local/bin/ && chmod +x /usr/local/bin/nuclei
 
-# whatweb (gem install is unreliable on slim images — clone from GitHub instead)
-RUN gem install webrick && \
+# whatweb — install runtime gems only, skip bundler (Gemfile pulls heavy dev deps that need make)
+RUN gem install webrick addressable && \
     git clone --depth=1 https://github.com/urbanadventurer/WhatWeb /opt/whatweb && \
     ln -sf /opt/whatweb/whatweb /usr/local/bin/whatweb && \
     chmod +x /opt/whatweb/whatweb
