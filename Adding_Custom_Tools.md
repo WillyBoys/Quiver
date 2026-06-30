@@ -22,7 +22,10 @@ Edit `backend/user-tools.txt` and add one package name per line:
 fping
 masscan
 arp-scan
+dirb    # web content scanner — added for wordlist testing
 ```
+
+Lines starting with `#` are skipped entirely. Inline comments after a package name (like `dirb # my note`) are also stripped automatically, so either style works.
 
 Rebuild the backend container:
 
