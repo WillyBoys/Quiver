@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   backend:
     build:
@@ -15,8 +13,7 @@ services:
     environment:
       - DATABASE_URL=sqlite:////data/pentest.db
       - WORDLISTS_DIR=/wordlists
-    privileged: true  # needed for some pentest tools (nmap raw sockets)
-    network_mode: host  # allows tools to reach target network directly
+    privileged: true
     restart: unless-stopped
 
   frontend:
@@ -33,6 +30,13 @@ services:
       - VITE_WS_URL=ws://localhost:8000
     depends_on:
       - backend
+    restart: unless-stopped
+
+  juice-shop:
+    image: bkimminich/juice-shop
+    container_name: quiver_juiceshop
+    ports:
+      - "3001:3000"
     restart: unless-stopped
 
 volumes:
