@@ -54,6 +54,13 @@ RUN if grep -qvE '^\s*#|^\s*$' /tmp/user-tools.txt; then \
       rm -rf /var/lib/apt/lists/*; \
     fi
 
+# SpiSuite (requires Go 1.24.5 — apt golang is too old, install from official release)
+RUN curl -L https://go.dev/dl/go1.24.5.linux-amd64.tar.gz | tar xz -C /usr/local && \
+    git clone --depth=1 https://github.com/waffl3ss/SpiSuite.git /opt/SpiSuite && \
+    cd /opt/SpiSuite && \
+    CGO_ENABLED=0 /usr/local/go/bin/go build -o /usr/local/bin/spisuite . && \
+    rm -rf /usr/local/go
+
 WORKDIR /app
 
 COPY requirements.txt .

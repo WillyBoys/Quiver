@@ -80,18 +80,9 @@ Wordlists appear automatically in the Wordlists tab with their full path for use
 
 ## Adding custom tools
 
-Open the **Tools** tab → **Add Tool**. Fill in:
+Open the **Tools** tab → **Add Tool** to register any tool already installed in the container.
 
-- **Binary** — the command name (must be installed in the container, or add it to the Dockerfile)
-- **Default flags** — flags always appended
-- **Parameters** — named slots filled in at run time (e.g. `target`, `wordlist`)
-- **Workflow tags** — group tools by engagement type (external / internal / web)
-
-To install a custom binary, add it to `backend/Dockerfile` and rebuild:
-
-```bash
-docker-compose up --build backend
-```
+To install a new binary, see **[Adding_Custom_Tools.md](Adding_Custom_Tools.md)** for step-by-step instructions covering all installation patterns: apt packages, pre-built GitHub binaries, Go tools compiled from source, and Python packages. It also covers common pitfalls and a troubleshooting guide.
 
 ---
 
