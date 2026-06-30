@@ -5,7 +5,7 @@ A self-hosted penetration testing platform. Run tools, stream CLI output in real
 ## Quick Start
 
 ```bash
-git clone https://github.com/you/quiver
+git clone https://github.com/WillyBoys/Quiver.git
 cd quiver
 docker-compose up --build
 ```
