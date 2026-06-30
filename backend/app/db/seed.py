@@ -168,11 +168,12 @@ DEFAULT_TOOLS = [
         "description": "SSH credential brute force",
         "category": "util",
         "binary": "hydra",
-        "default_flags": "-t 4 ssh",
+        "default_flags": "-t 4",
         "parameters": [
-            {"name": "target", "placeholder": "10.10.10.1", "required": True, "description": "Target IP"},
             {"name": "userlist", "flag": "-L", "placeholder": "/wordlists/users.txt", "required": True, "description": "Username list"},
             {"name": "passlist", "flag": "-P", "placeholder": "/wordlists/passwords.txt", "required": True, "description": "Password list"},
+            {"name": "target", "placeholder": "10.10.10.1", "required": True, "description": "Target IP"},
+            {"name": "protocol", "placeholder": "ssh", "required": True, "description": "Service (ssh, ftp, rdp, etc.)"},
         ],
         "workflow_tags": ["internal", "external"],
         "is_builtin": True,
@@ -194,7 +195,7 @@ DEFAULT_TOOLS = [
         "description": "DNS lookup and zone transfer attempt",
         "category": "recon",
         "binary": "dig",
-        "default_flags": "any",
+        "default_flags": "",
         "parameters": [
             {"name": "target", "placeholder": "target.com", "required": True, "description": "Domain"},
         ],
@@ -212,4 +213,9 @@ async def seed_default_tools():
             if not existing:
                 tool = Tool(**tool_data)
                 db.add(tool)
+            else:
+                # Keep builtin tool definitions in sync with seed data
+                existing.default_flags = tool_data["default_flags"]
+                existing.parameters = tool_data["parameters"]
+                existing.description = tool_data["description"]
         await db.commit()

@@ -152,10 +152,15 @@ async def execute_run(websocket: WebSocket, run_id: str):
             await process.wait()
             exit_code = process.returncode
 
+        except WebSocketDisconnect:
+            run.status = "error"
         except Exception as e:
             error_line = f"\n[ERROR] {str(e)}\n"
             full_output.append(error_line)
-            await websocket.send_json({"type": "output", "data": error_line})
+            try:
+                await websocket.send_json({"type": "output", "data": error_line})
+            except Exception:
+                pass
             run.status = "error"
         else:
             run.status = "complete" if exit_code == 0 else "error"
@@ -167,13 +172,16 @@ async def execute_run(websocket: WebSocket, run_id: str):
         run.finished_at = datetime.now(timezone.utc)
         await db.commit()
 
-        await websocket.send_json({
-            "type": "done",
-            "data": f"\n[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] Finished with exit code {exit_code}\n",
-            "exit_code": exit_code,
-            "status": run.status,
-        })
-        await websocket.close()
+        try:
+            await websocket.send_json({
+                "type": "done",
+                "data": f"\n[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] Finished with exit code {exit_code}\n",
+                "exit_code": exit_code,
+                "status": run.status,
+            })
+            await websocket.close()
+        except Exception:
+            pass
 
 
 async def _get_or_404(run_id: str, db: AsyncSession) -> Run:

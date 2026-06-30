@@ -12,6 +12,7 @@ export default function WordlistsPage() {
   useEffect(() => {
     Promise.all([api.wordlists.list(), api.wordlists.dirs()])
       .then(([wl, d]) => { setWordlists(wl); setDirs(d); })
+      .catch(() => { setWordlists([]); setDirs([]); })
       .finally(() => setLoading(false));
   }, []);
 
