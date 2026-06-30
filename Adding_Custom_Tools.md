@@ -44,8 +44,8 @@ docker-compose up --build backend
 | `wfuzz` | Web fuzzer (wordlist-based) |
 | `dnsenum` | DNS enumeration |
 
-[!NOTE]
-`dirb` has already been added as a custom tool to show more of how this would work.
+> [!NOTE]
+> `dirb` has already been added as a custom tool to show more of how this would work.
 
 **Cautions:**
 - The package must exist in Debian bookworm's default repos. If `apt-get` can't find it, the entire build fails.
@@ -105,8 +105,8 @@ RUN curl -L https://go.dev/dl/go1.24.5.linux-amd64.tar.gz | tar xz -C /usr/local
 
 The `rm -rf /usr/local/go` at the end removes the Go toolchain after the build to keep the image lean. The compiled binary stays at `/usr/local/bin/toolname`.
 
-[!NOTE]
-`SpiSuite` has been added as a custom tool using this method to show how to add it and show that it works.
+> [!NOTE]
+> `SpiSuite` has been added as a custom tool using this method to show how to add it and show that it works.
 
 **Cautions:**
 - `go build` downloads dependencies from the internet during the build. If the build machine has no internet access, this will fail.
