@@ -51,7 +51,7 @@ RUN git clone --depth=1 https://github.com/cddmp/enum4linux-ng /opt/enum4linux-n
 COPY user-tools.txt /tmp/user-tools.txt
 RUN if grep -qvE '^\s*#|^\s*$' /tmp/user-tools.txt; then \
       apt-get update && \
-      grep -vE '^\s*#|^\s*$' /tmp/user-tools.txt | xargs apt-get install -y --no-install-recommends && \
+      grep -vE '^\s*#|^\s*$' /tmp/user-tools.txt | sed 's/\s*#.*//' | xargs apt-get install -y --no-install-recommends && \
       rm -rf /var/lib/apt/lists/*; \
     fi
 
