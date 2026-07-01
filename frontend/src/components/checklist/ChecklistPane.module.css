@@ -1,0 +1,252 @@
+.pane {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+/* Progress */
+.progress { padding: 8px 4px 14px; }
+
+.progressLabel {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  margin-bottom: 6px;
+}
+
+.progressBar {
+  height: 3px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.progressFill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 0.4s ease;
+}
+
+/* Sections */
+.section { margin-bottom: 8px; }
+
+.sectionTitle {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  padding: 6px 6px 4px;
+}
+
+/* Phase rows */
+.phaseItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  padding: 6px 8px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.12s;
+  color: var(--text-secondary);
+}
+.phaseItem:hover { background: var(--bg-hover); }
+
+.phaseLabel { font-size: 12px; line-height: 1.3; }
+
+.phaseItem.checked .phaseLabel {
+  color: var(--text-muted);
+  text-decoration: line-through;
+  text-decoration-color: var(--text-muted);
+}
+
+/* Tool rows */
+.toolItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  transition: background 0.12s;
+}
+.toolItem:hover { background: var(--bg-hover); }
+
+.toolName {
+  flex: 1;
+  font-size: 12px;
+  color: var(--text-secondary);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.toolDone .toolName { color: var(--text-muted); }
+
+.runCount {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  background: var(--bg-elevated);
+  padding: 1px 5px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+/* Icons */
+.icon { color: var(--border); flex-shrink: 0; }
+.iconDone { color: var(--accent); }
+.iconClickable { cursor: pointer; }
+.iconClickable:hover { color: var(--accent); }
+.phaseItem.checked .icon { color: var(--accent); }
+
+/* Jump button — visible on row hover */
+.jumpBtn {
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px 5px;
+  display: flex;
+  align-items: center;
+  border-radius: 2px;
+  transition: all 0.12s;
+  flex-shrink: 0;
+  opacity: 0;
+}
+.toolItem:hover .jumpBtn { opacity: 1; }
+.jumpBtn:hover { color: var(--accent); border-color: var(--accent-dim); }
+
+/* Delete button — visible on row hover */
+.deleteBtn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px 3px;
+  display: flex;
+  align-items: center;
+  border-radius: 2px;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.12s, color 0.12s;
+}
+.toolItem:hover .deleteBtn { opacity: 1; }
+.deleteBtn:hover { color: var(--critical); }
+
+.empty {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 6px 8px;
+  line-height: 1.5;
+}
+
+/* Add item button */
+.addBtn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 4px 8px 0;
+  padding: 5px 8px;
+  background: transparent;
+  border: 1px dashed var(--border);
+  border-radius: 4px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-family: var(--font-ui);
+  cursor: pointer;
+  width: calc(100% - 16px);
+  transition: all 0.12s;
+}
+.addBtn:hover { color: var(--accent); border-color: var(--accent-dim); }
+
+/* Add item input area */
+.addWrap {
+  margin: 4px 8px 0;
+}
+
+.addRow {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.addInput {
+  flex: 1;
+  background: var(--bg-base);
+  border: 1px solid var(--accent-dim);
+  border-radius: 3px;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 4px 7px;
+  outline: none;
+  min-width: 0;
+}
+.addInput::placeholder { color: var(--text-muted); }
+
+.addConfirm, .addCancel {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 3px 5px;
+  display: flex;
+  align-items: center;
+  border-radius: 3px;
+  transition: all 0.12s;
+  flex-shrink: 0;
+}
+.addConfirm:hover:not(:disabled) { color: var(--accent); border-color: var(--accent-dim); }
+.addConfirm:disabled { opacity: 0.3; cursor: default; }
+.addCancel:hover { color: var(--critical); border-color: var(--critical); }
+
+/* Tool registry suggestions dropdown */
+.suggestions {
+  margin-top: 3px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.suggestion {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  padding: 6px 10px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border-subtle);
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.suggestion:last-child { border-bottom: none; }
+.suggestion:hover { background: var(--bg-hover); }
+
+.suggCat {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  flex-shrink: 0;
+  width: 34px;
+}
+
+.suggName {
+  font-size: 12px;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

@@ -31,6 +31,11 @@ class SessionUpdate(SessionCreate):
     findings: Optional[list[Finding]] = []
 
 
+class ChecklistUpdate(BaseModel):
+    phase_checks: dict = {}
+    custom_items: list = []
+
+
 @router.get("/")
 async def list_sessions(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Session).order_by(Session.created_at.desc()))
@@ -74,6 +79,14 @@ async def update_session(session_id: str, body: SessionUpdate, db: AsyncSession 
     return _session_dict(session)
 
 
+@router.patch("/{session_id}/checklist")
+async def update_checklist(session_id: str, body: ChecklistUpdate, db: AsyncSession = Depends(get_db)):
+    session = await _get_or_404(session_id, db)
+    session.checklist_state = {"phase_checks": body.phase_checks, "custom_items": body.custom_items}
+    await db.commit()
+    return {"checklist_state": session.checklist_state}
+
+
 @router.delete("/{session_id}", status_code=204)
 async def delete_session(session_id: str, db: AsyncSession = Depends(get_db)):
     session = await _get_or_404(session_id, db)
@@ -99,6 +112,7 @@ def _session_dict(s: Session) -> dict:
         "notes": s.notes,
         "status": s.status,
         "findings": s.findings or [],
+        "checklist_state": s.checklist_state or {},
         "created_at": s.created_at.isoformat(),
         "updated_at": s.updated_at.isoformat(),
     }

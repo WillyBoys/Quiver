@@ -21,6 +21,10 @@ export const api = {
     create: (body) => req("/sessions/", { method: "POST", body: JSON.stringify(body) }),
     update: (id, body) => req(`/sessions/${id}`, { method: "PUT", body: JSON.stringify(body) }),
     delete: (id) => req(`/sessions/${id}`, { method: "DELETE" }),
+    patchChecklist: (id, state) => req(`/sessions/${id}/checklist`, {
+      method: "PATCH",
+      body: JSON.stringify({ phase_checks: state.phaseChecks, custom_items: state.customItems }),
+    }),
   },
   tools: {
     list: (category) => req(`/tools/${category ? `?category=${category}` : ""}`),

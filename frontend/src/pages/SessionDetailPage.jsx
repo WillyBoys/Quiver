@@ -3,6 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, Play, Plus, Trash2, Flag, X, FolderOpen, Search } from "lucide-react";
 import { api, createRunSocket } from "../utils/api.js";
 import TerminalPane from "../components/terminal/TerminalPane.jsx";
+import ChecklistPane from "../components/checklist/ChecklistPane.jsx";
 import styles from "./SessionDetailPage.module.css";
 
 const SEVERITY_OPTS = ["critical", "high", "medium", "low", "info"];
@@ -34,12 +35,18 @@ export default function SessionDetailPage() {
   const [wordlists, setWordlists] = useState(null);           // null = not loaded yet
   const [wordlistFilter, setWordlistFilter] = useState("");
 
+  const [sidebarView, setSidebarView] = useState("tools");   // "tools" | "checklist"
+  const [phaseChecks, setPhaseChecks] = useState({});
+  const [customItems, setCustomItems] = useState([]);
+
   const wsRef = useRef(null);
 
   useEffect(() => {
     api.sessions.get(sessionId).then((s) => {
       setSession(s);
       setNotesValue(s.notes || "");
+      setPhaseChecks(s.checklist_state?.phase_checks || {});
+      setCustomItems(s.checklist_state?.custom_items || []);
     });
     api.tools.list().then(setTools);
     api.runs.listForSession(sessionId).then(setRuns);
@@ -116,6 +123,43 @@ export default function SessionDetailPage() {
     }, 800);
   }
 
+  async function saveChecklist(newPhaseChecks, newCustomItems) {
+    await api.sessions.patchChecklist(sessionId, {
+      phaseChecks: newPhaseChecks,
+      customItems: newCustomItems,
+    });
+  }
+
+  async function handlePhaseToggle(key) {
+    const updated = { ...phaseChecks, [key]: !phaseChecks[key] };
+    setPhaseChecks(updated);
+    await saveChecklist(updated, customItems);
+  }
+
+  async function handleAddCustomItem({ label, tool_id }) {
+    const item = { id: crypto.randomUUID(), label, tool_id: tool_id || null, checked: false };
+    const updated = [...customItems, item];
+    setCustomItems(updated);
+    await saveChecklist(phaseChecks, updated);
+  }
+
+  async function handleToggleCustomItem(id) {
+    const updated = customItems.map((i) => i.id === id ? { ...i, checked: !i.checked } : i);
+    setCustomItems(updated);
+    await saveChecklist(phaseChecks, updated);
+  }
+
+  async function handleDeleteCustomItem(id) {
+    const updated = customItems.filter((i) => i.id !== id);
+    setCustomItems(updated);
+    await saveChecklist(phaseChecks, updated);
+  }
+
+  function handleJumpToTool(tool) {
+    setSidebarView("tools");
+    setSelectedCat(tool.category);
+  }
+
   function isWordlistParam(p) {
     const name = p.name.toLowerCase();
     const flag = (p.flag || "").toLowerCase();
@@ -164,8 +208,33 @@ export default function SessionDetailPage() {
       </div>
 
       <div className={styles.workspace}>
-        {/* Left: tool picker */}
+        {/* Left: tool picker / checklist */}
         <aside className={styles.toolPicker}>
+          {/* View toggle */}
+          <div className={styles.sidebarToggle}>
+            <button
+              className={`${styles.toggleBtn} ${sidebarView === "tools" ? styles.toggleBtnActive : ""}`}
+              onClick={() => setSidebarView("tools")}>Tools</button>
+            <button
+              className={`${styles.toggleBtn} ${sidebarView === "checklist" ? styles.toggleBtnActive : ""}`}
+              onClick={() => setSidebarView("checklist")}>Checklist</button>
+          </div>
+
+          {sidebarView === "checklist" ? (
+            <ChecklistPane
+              session={session}
+              tools={enabledTools}
+              runs={runs}
+              phaseChecks={phaseChecks}
+              onPhaseToggle={handlePhaseToggle}
+              customItems={customItems}
+              onAddCustomItem={handleAddCustomItem}
+              onToggleCustomItem={handleToggleCustomItem}
+              onDeleteCustomItem={handleDeleteCustomItem}
+              onJumpToTool={handleJumpToTool}
+            />
+          ) : (
+            <>
           <div className={styles.catTabs}>
             <button className={`${styles.catTab} ${selectedCat === "all" ? styles.catTabActive : ""}`}
               onClick={() => setSelectedCat("all")}>All</button>
@@ -235,6 +304,8 @@ export default function SessionDetailPage() {
               );
             })}
           </div>
+            </>
+          )}
         </aside>
 
         {/* Center: terminal output */}

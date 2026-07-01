@@ -1,5 +1,6 @@
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy import text
 import os
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:////data/pentest.db")
@@ -19,6 +20,11 @@ async def init_db():
     from app.models import tool, session, run  # noqa: import all models
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Migrate: add checklist_state to existing sessions tables that pre-date this column
+        try:
+            await conn.execute(text("ALTER TABLE sessions ADD COLUMN checklist_state JSON DEFAULT '{}'"))
+        except Exception:
+            pass  # column already exists
 
 
 async def get_db() -> AsyncSession:
