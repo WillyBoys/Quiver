@@ -140,3 +140,9 @@ Session data, tool runs, and findings are stored in a SQLite database mounted at
 ## Security note
 
 Quiver is designed to run on a dedicated pentest VM or isolated local machine, **not** exposed to the internet. The backend executes commands with the privileges of the Docker container. Use responsibly and only against systems you are authorized to test.
+
+---
+
+## AI disclosure
+
+This project was built in collaboration with [Claude](https://claude.ai) (Anthropic's AI assistant). All code, architecture decisions, and documentation were developed through an iterative human–AI workflow.
