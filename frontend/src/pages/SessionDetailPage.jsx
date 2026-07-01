@@ -7,8 +7,8 @@ import ChecklistPane from "../components/checklist/ChecklistPane.jsx";
 import styles from "./SessionDetailPage.module.css";
 
 const SEVERITY_OPTS = ["critical", "high", "medium", "low", "info"];
-const CAT_ORDER = ["recon", "web", "enum", "vuln", "util"];
-const CAT_LABELS = { recon: "Recon", web: "Web", enum: "Enum", vuln: "Vuln", util: "Util" };
+const CAT_ORDER = ["recon", "web", "enum", "vuln", "cloud", "secrets", "util"];
+const CAT_LABELS = { recon: "Recon", web: "Web", enum: "Enum", vuln: "Vuln", cloud: "Cloud", secrets: "Secrets", util: "Util" };
 
 export default function SessionDetailPage() {
   const { sessionId } = useParams();

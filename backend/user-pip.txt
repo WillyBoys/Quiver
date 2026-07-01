@@ -1,0 +1,17 @@
+# Quiver — User-added pip packages
+#
+# Add pip package names or git+ URLs here (one per line) and rebuild:
+#   docker-compose up --build backend
+#
+# Examples:
+#   requests
+#   git+https://github.com/some/tool
+#
+# Note: netexec requires a large dependency tree and may take several
+# minutes to build. Python 3.13 support is still maturing.
+
+# Uncomment to install netexec (nxc) — large dependency tree, may take 3-5 min to build:
+# git+https://github.com/Pennyw0rth/NetExec
+
+# Uncomment to install Subdominator — requires Python 3.13+ (base image is 3.12; upgrade FROM first):
+# subdominator

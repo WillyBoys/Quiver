@@ -3,8 +3,8 @@ import { Plus, Pencil, Trash2, ToggleLeft, ToggleRight, Search, CheckCircle, XCi
 import { api } from "../utils/api.js";
 import styles from "./ToolsPage.module.css";
 
-const CATEGORIES = ["recon", "web", "enum", "vuln", "util"];
-const CAT_LABELS = { recon: "Recon", web: "Web", enum: "Enumeration", vuln: "Vuln Scan", util: "Utilities" };
+const CATEGORIES = ["recon", "web", "enum", "vuln", "cloud", "secrets", "util"];
+const CAT_LABELS = { recon: "Recon", web: "Web", enum: "Enumeration", vuln: "Vuln Scan", cloud: "Cloud", secrets: "Secrets", util: "Utilities" };
 
 const EMPTY_FORM = {
   name: "", description: "", category: "recon", binary: "", default_flags: "",

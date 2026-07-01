@@ -15,7 +15,7 @@ const PHASES = [
 ];
 
 const TYPE_LABEL  = { external: "External", internal: "Internal", web: "Web" };
-const CAT_COLORS  = { recon: "#58a6ff", web: "#bc8cff", enum: "#ffa657", vuln: "#ff7b72", util: "#8b949e" };
+const CAT_COLORS  = { recon: "#58a6ff", web: "#bc8cff", enum: "#ffa657", vuln: "#ff7b72", util: "#8b949e", cloud: "#56d364", secrets: "#f0883e" };
 
 export default function ChecklistPane({
   session, tools, runs,
