@@ -5,7 +5,7 @@ There are two stages to adding a custom tool:
 1. **Install the binary** inside the Docker container
 2. **Register the tool** in the Quiver UI
 
-How you handle step 1 depends on where the tool comes from. There are three installation patterns covered below.
+How you handle step 1 depends on where the tool comes from. There are five installation patterns covered below.
 
 ---
 
@@ -118,31 +118,82 @@ The `rm -rf /usr/local/go` at the end removes the Go toolchain after the build t
 
 ---
 
-### Pattern D — Python tool via pip
+### Pattern D — Python package via user-pip.txt (simplest for pip tools)
 
-Use this when the tool is a Python package. The container already has Python 3.12.
+Use this when the tool is a Python package on PyPI or installable from GitHub via `git+`. The container already has Python 3.13.
 
-```dockerfile
-RUN pip install --no-cache-dir --break-system-packages toolname==1.0.0
+Edit `backend/user-pip.txt` and add one package per line:
+
+```
+# Lines starting with # are ignored
+sublist3r
+git+https://github.com/author/toolname.git
+bloodhound==1.7.0
 ```
 
-Or for a GitHub-only tool:
+Rebuild the backend container:
 
-```dockerfile
-RUN pip install --no-cache-dir --break-system-packages git+https://github.com/author/toolname.git
+```bash
+docker-compose up --build backend
 ```
 
-**Example — bloodhound-python** (AD data collection, the CLI-equivalent of BloodHound's ingestor):
+**When to use user-pip.txt vs. Dockerfile:**
+- **user-pip.txt** — clean, no Dockerfile editing. Best for self-contained PyPI packages or simple git+ installs.
+- **Dockerfile `RUN pip install`** — necessary when the pip install must be combined with other steps (apt deps first, wrapper scripts, etc.), or when installation order relative to other tools matters.
 
-```dockerfile
-RUN pip install --no-cache-dir --break-system-packages bloodhound
+**Example — bloodhound-python** (AD data collection):
+
+```
+# backend/user-pip.txt
+bloodhound
 ```
 
-This installs the `bloodhound` Python package, which provides the `bloodhound-python` command for collecting AD data from Linux. Note this is the ingestor only — you still need a BloodHound CE instance separately to visualize the data.
+This installs the `bloodhound` Python package providing the `bloodhound-python` command for collecting AD data from Linux. Note this is the ingestor only — you still need a BloodHound CE instance separately to visualize the data.
 
 **Cautions:**
-- Always pin to a version number (`toolname==1.0.0`) when possible. Unpinned installs can break future rebuilds if the package releases a breaking change.
-- `--break-system-packages` is required because the container uses a system Python. This is safe here since we own the container.
+- Large git+ installs (e.g. NetExec with its full dependency tree) can significantly increase build time. Expect 3–5 minutes for complex tools.
+- Always pin PyPI packages to a version number (`toolname==1.0.0`) when possible to avoid future breaking changes.
+- Some tools require system libraries to be installed first via apt. If a pip install fails with `missing header` errors, add the `-dev` package for the library to user-tools.txt first, then add the pip package to user-pip.txt.
+
+---
+
+### Pattern E — Ruby gem
+
+Use this when the tool is distributed as a Ruby gem. The container has Ruby installed.
+
+For tools published to RubyGems:
+
+```dockerfile
+# In backend/Dockerfile, after the existing tool installs
+RUN gem install toolname
+```
+
+For tools with native C extensions (like nokogiri), you must install system libraries first and build against them to avoid a bundled source compilation that requires extra tools like `xzcat`:
+
+```dockerfile
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        pkg-config libxml2-dev libxslt1-dev zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/* \
+    && gem install nokogiri -- --use-system-libraries \
+    && gem install wpscan
+```
+
+For tools **not** published to RubyGems (like CeWL), clone and build from source:
+
+```dockerfile
+RUN git clone --depth=1 https://github.com/author/toolname /opt/toolname && \
+    cd /opt/toolname && \
+    gem install bundler && \
+    bundle config build.nokogiri --use-system-libraries && \
+    bundle install && \
+    ln -sf /opt/toolname/toolname.rb /usr/local/bin/toolname && \
+    chmod +x /opt/toolname/toolname.rb
+```
+
+**Cautions:**
+- Ruby gems that compile native extensions (C code) require `make`, `gcc`, `libc6-dev`, and `libffi-dev`. These are installed in the base image already.
+- Gems that use nokogiri (XML parsing) will fail to build in a slim Docker image unless you use `--use-system-libraries`. See Troubleshooting below.
+- After editing the Dockerfile, rebuild: `docker-compose up --build backend`
 
 ---
 
@@ -195,9 +246,14 @@ Is it a Go project?
   YES → Dockerfile Go build pattern (Pattern C)
   NO  ↓
 
-Is it a Python package?
-  YES → Dockerfile pip pattern (Pattern D)
-  NO  → Requires custom research (Ruby gem, compiled C, etc.)
+Is it a Python package on PyPI or a git+ URL?
+  YES → user-pip.txt (Pattern D)   ← try this first
+     OR Dockerfile pip install     ← if it needs apt deps first
+  NO  ↓
+
+Is it a Ruby gem?
+  YES → Dockerfile gem install (Pattern E)
+  NO  → Requires custom research (compiled C, Perl CPAN, etc.)
 ```
 
 ---
@@ -218,3 +274,34 @@ The binary name in the UI doesn't match what was installed. Run `docker exec qui
 
 **Build fails with `exit code: 1` but no clear error**
 Scroll up in the build output — Docker logs the actual error before the final failure line. The last line is always generic; the real cause is a few lines above it.
+
+**`make: command not found` during gem native extension compile**
+The slim base image includes Ruby but not the full build toolchain. Add `make` and `libc6-dev` to the apt block before your gem install step:
+```dockerfile
+RUN apt-get update && apt-get install -y --no-install-recommends make libc6-dev && rm -rf /var/lib/apt/lists/*
+```
+Note: Quiver's base image already includes these — this applies if you're starting fresh or see this in another context.
+
+**`limits.h: No such file or directory` during gem native extension compile**
+GCC's internal `limits.h` uses `#include_next` to pull in the system `limits.h`, which lives in `libc6-dev`. Add `libc6-dev` to your apt install block.
+
+**`Please install pkg-config` or `xml2-config not found` during nokogiri gem install**
+nokogiri needs `pkg-config` to locate `libxml2`. Add `pkg-config libxml2-dev libxslt1-dev zlib1g-dev` to apt, then pass `-- --use-system-libraries` to `gem install nokogiri`. Example:
+```dockerfile
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        pkg-config libxml2-dev libxslt1-dev zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/* \
+    && gem install nokogiri -- --use-system-libraries
+```
+
+**`xzcat: command not found` during nokogiri gem install**
+nokogiri by default tries to compile its bundled `libxml2-2.x.x.tar.xz` from source, which requires `xzcat`. The fix is to use system libxml2 instead — always pass `-- --use-system-libraries` to `gem install nokogiri`.
+
+**`Could not find a valid gem '<toolname>' in any repository`**
+The tool isn't published on RubyGems. Use the git clone + `bundle install` approach from Pattern E instead.
+
+**`pydantic-core` fails to install on Python 3.13 with "PyO3 maximum supported version"**
+Old pydantic-core versions (≤ 2.18.x) used PyO3 0.21.1, which hard-caps at Python 3.12. Use pydantic ≥ 2.9.0 which ships prebuilt wheels for Python 3.13. Quiver's `requirements.txt` already reflects this.
+
+**SQLAlchemy crashes on startup with `TypeError: Can't replace canonical symbol for '__firstlineno__'`**
+Python 3.13 adds `__firstlineno__` as a built-in class attribute that conflicts with SQLAlchemy's FastIntFlag. SQLAlchemy ≥ 2.0.36 is required. Quiver's `requirements.txt` already pins this.
