@@ -163,8 +163,10 @@ html, body, #root {
 }
 
 /* Category colors */
-.cat-recon  { color: #4fc3f7; }
-.cat-web    { color: #ce93d8; }
-.cat-enum   { color: #ffb74d; }
-.cat-vuln   { color: #ef9a9a; }
-.cat-util   { color: #80cbc4; }
+.cat-recon    { color: #4fc3f7; }
+.cat-web      { color: #ce93d8; }
+.cat-enum     { color: #ffb74d; }
+.cat-vuln     { color: #ef9a9a; }
+.cat-cloud    { color: #56d364; }
+.cat-secrets  { color: #f0883e; }
+.cat-util     { color: #80cbc4; }
