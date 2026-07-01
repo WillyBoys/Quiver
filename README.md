@@ -12,18 +12,20 @@ docker-compose up --build
 
 Then open [http://localhost:3000](http://localhost:3000).
 
-All tools and dependencies are bundled in the image. 16 tools are pre-configured and ready to use on first boot.
+All tools and dependencies are bundled in the image. 32 tools are pre-configured and ready to use on first boot.
 
 ---
 
 ## What's included
 
 **Bundled tools:**
-- **Recon:** nmap, whois, dig
-- **Web:** gobuster, ffuf, nikto, whatweb
-- **Enumeration:** enum4linux-ng, smbclient, snmpwalk
+- **Recon:** nmap (quick/full/udp), whois, dig, dnsrecon, BBOT (subdomain enum), Subdominator
+- **Web:** gobuster (dir/vhost), ffuf, feroxbuster, nikto, whatweb, wpscan, sslscan, wafw00f
+- **Enumeration:** enum4linux-ng, smbclient, snmpwalk, netexec (SMB + LDAP), kerbrute, impacket-secretsdump, impacket-GetNPUsers
 - **Vuln scanning:** nuclei, sqlmap
-- **Utilities:** hydra, john, netcat, curl
+- **Cloud:** cloud_enum
+- **Secrets:** trufflehog
+- **Utilities:** hydra, searchsploit, cewl, john, netcat
 
 **Platform features:**
 - Session management — one session per engagement, tracks target, scope, and notes
@@ -34,6 +36,7 @@ All tools and dependencies are bundled in the image. 16 tools are pre-configured
 - Extra flags — append one-off flags to any tool at run time without editing its definition
 - Session notes — auto-saving notes editor per engagement
 - Findings tracker — log critical/high/medium/low/info findings per session
+- Engagement checklist — per-session phase checklist + manual tool tracking with run auto-detection
 - Wordlist browser — auto-discovers wordlists from mounted volumes
 - Run history — every command, every output, timestamped
 
@@ -112,18 +115,20 @@ To install a new binary, see **[Adding_Custom_Tools.md](Adding_Custom_Tools.md)*
 quiver/
 ├── docker-compose.yml        # backend + frontend + juice-shop
 ├── backend/                  # FastAPI + SQLite (aiosqlite)
-│   ├── Dockerfile            # python:3.12-slim-bookworm
+│   ├── Dockerfile            # python:3.13-slim-bookworm
 │   ├── requirements.txt
+│   ├── user-tools.txt        # add apt packages here; rebuild to apply
+│   ├── user-pip.txt          # add pip packages / git+ installs here; rebuild to apply
 │   └── app/
 │       ├── main.py
 │       ├── api/routes/       # tools, sessions, runs, wordlists
 │       ├── models/           # SQLAlchemy models
-│       └── db/               # database init + seed
+│       └── db/               # database init + seed (32 default tools)
 └── frontend/                 # React 18 + Vite
     ├── vite.config.js        # proxies /api (HTTP + WebSocket) to backend:8000
     └── src/
         ├── pages/            # Sessions, SessionDetail, Tools, Wordlists
-        ├── components/       # TerminalPane, Layout
+        ├── components/       # TerminalPane, Layout, ChecklistPane
         └── utils/api.js      # API + WebSocket client
 ```
 
