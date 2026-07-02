@@ -18,6 +18,7 @@ export default function SessionDetailPage() {
   const [tools, setTools] = useState([]);
   const [runs, setRuns] = useState([]);
   const [activeRunId, setActiveRunId] = useState(null);
+  const [openTabs, setOpenTabs] = useState([]);
   const [liveOutput, setLiveOutput] = useState({});
   const [streaming, setStreaming] = useState({});
   const [runParams, setRunParams] = useState({});       // toolId -> {paramName: value}
@@ -39,8 +40,6 @@ export default function SessionDetailPage() {
   const [sidebarView, setSidebarView] = useState("tools");   // "tools" | "checklist"
   const [phaseChecks, setPhaseChecks] = useState({});
   const [customItems, setCustomItems] = useState([]);
-
-  const wsRef = useRef(null);
 
   useEffect(() => {
     api.sessions.get(sessionId).then((s) => {
@@ -69,10 +68,11 @@ export default function SessionDetailPage() {
     });
     setRuns((r) => [run, ...r]);
     setActiveRunId(run.id);
+    setOpenTabs((t) => [...t, run.id]);
     setLiveOutput((o) => ({ ...o, [run.id]: "" }));
     setStreaming((s) => ({ ...s, [run.id]: true }));
 
-    const ws = createRunSocket(run.id, {
+    createRunSocket(run.id, {
       onOutput: (line) => setLiveOutput((o) => ({ ...o, [run.id]: (o[run.id] || "") + line })),
       onDone: (msg) => {
         setStreaming((s) => ({ ...s, [run.id]: false }));
@@ -85,12 +85,27 @@ export default function SessionDetailPage() {
         setLiveOutput((o) => ({ ...o, [run.id]: (o[run.id] || "") + `\n[ERROR] ${err}` }));
       },
     });
-    wsRef.current = ws;
   }
 
   async function killActiveRun() {
     if (!activeRunId) return;
     await api.runs.kill(activeRunId).catch(() => {});
+  }
+
+  function closeTab(runId) {
+    setOpenTabs((prev) => {
+      const next = prev.filter((id) => id !== runId);
+      setActiveRunId((curr) => {
+        if (curr !== runId) return curr;
+        return next.length > 0 ? next[next.length - 1] : null;
+      });
+      return next;
+    });
+  }
+
+  function openTab(runId) {
+    setOpenTabs((prev) => prev.includes(runId) ? prev : [...prev, runId]);
+    setActiveRunId(runId);
   }
 
   async function deleteRun(runId) {
@@ -200,6 +215,7 @@ export default function SessionDetailPage() {
   const activeRun = runs.find((r) => r.id === activeRunId);
   const activeOutput = liveOutput[activeRunId] || activeRun?.output || "";
   const isActiveStreaming = streaming[activeRunId] || false;
+  const runningToolIds = new Set(runs.filter((r) => streaming[r.id]).map((r) => r.tool_id));
 
   if (!session) return <div className={styles.loading}>Loading session...</div>;
 
@@ -263,7 +279,7 @@ export default function SessionDetailPage() {
               const params = runParams[tool.id] || {};
               const flags = extraFlags[tool.id] || "";
               return (
-                <div key={tool.id} className={`${styles.toolCard} ${activeRun?.tool_id === tool.id && isActiveStreaming ? styles.toolRunning : ""}`}>
+                <div key={tool.id} className={`${styles.toolCard} ${runningToolIds.has(tool.id) ? styles.toolRunning : ""}`}>
                   <div className={styles.toolHeader}>
                     <span className={`${styles.toolCat} cat-${tool.category}`}>{tool.category}</span>
                     <span className={styles.toolName}>{tool.name}</span>
@@ -311,8 +327,7 @@ export default function SessionDetailPage() {
                   </div>
 
                   <button className="btn btn-primary" style={{ width: "100%", marginTop: 8, justifyContent: "center" }}
-                    onClick={() => runTool(tool)}
-                    disabled={isActiveStreaming}>
+                    onClick={() => runTool(tool)}>
                     <Play size={12} /> Run
                   </button>
                 </div>
@@ -325,27 +340,52 @@ export default function SessionDetailPage() {
 
         {/* Center: terminal output */}
         <div className={styles.terminalColumn}>
-          {activeRun ? (
+          {openTabs.length > 0 ? (
             <>
-              <div className={styles.terminalHeader}>
-                <span className={styles.terminalLabel}>{activeRun.tool_name}</span>
-                <span className={styles.terminalTime}>
-                  {activeRun.started_at ? new Date(activeRun.started_at).toLocaleTimeString() : ""}
-                </span>
+              {/* Tab bar */}
+              <div className={styles.terminalTabs}>
+                {openTabs.map((tabId) => {
+                  const tabRun = runs.find((r) => r.id === tabId);
+                  if (!tabRun) return null;
+                  const tabStreaming = streaming[tabId] || false;
+                  const dotStatus = tabStreaming ? "running" : tabRun.status;
+                  return (
+                    <button
+                      key={tabId}
+                      className={`${styles.terminalTab} ${tabId === activeRunId ? styles.terminalTabActive : ""}`}
+                      onClick={() => setActiveRunId(tabId)}
+                    >
+                      <span className={`${styles.tabDot} ${styles[`dot_${dotStatus}`]}`} />
+                      <span className={styles.tabName}>{tabRun.tool_name}</span>
+                      <span
+                        className={styles.tabClose}
+                        role="button"
+                        onClick={(e) => { e.stopPropagation(); closeTab(tabId); }}
+                      >
+                        <X size={11} />
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
-              <TerminalPane
-                command={activeRun.command}
-                output={activeOutput}
-                status={isActiveStreaming ? "running" : activeRun.status}
-                isStreaming={isActiveStreaming}
-                onKill={isActiveStreaming ? killActiveRun : null}
-              />
+              {/* Terminal body */}
+              <div className={styles.terminalBody}>
+                <TerminalPane
+                  command={activeRun?.command}
+                  output={activeOutput}
+                  status={isActiveStreaming ? "running" : (activeRun?.status || "pending")}
+                  isStreaming={isActiveStreaming}
+                  onKill={isActiveStreaming ? killActiveRun : null}
+                />
+              </div>
             </>
           ) : (
-            <div className={styles.terminalEmpty}>
-              <span className="mono" style={{ color: "var(--accent)", fontSize: 24 }}>{">"}_</span>
-              <p className="text-muted" style={{ marginTop: 12 }}>Select a tool and hit Run.</p>
-              <p className="text-muted" style={{ fontSize: 12, marginTop: 4 }}>Output streams here in real time.</p>
+            <div className={styles.terminalBody}>
+              <div className={styles.terminalEmpty}>
+                <span className="mono" style={{ color: "var(--accent)", fontSize: 24 }}>{">"}_</span>
+                <p className="text-muted" style={{ marginTop: 12 }}>Select a tool and hit Run.</p>
+                <p className="text-muted" style={{ fontSize: 12, marginTop: 4 }}>Output streams here in real time.</p>
+              </div>
             </div>
           )}
         </div>
@@ -370,21 +410,25 @@ export default function SessionDetailPage() {
             <h3 className={styles.panelTitle}>Run History</h3>
             <div className={styles.runList}>
               {runs.length === 0 && <p className={styles.empty}>No runs yet.</p>}
-              {runs.map((run) => (
-                <div key={run.id}
-                  className={`${styles.runItem} ${run.id === activeRunId ? styles.runActive : ""}`}
-                  onClick={() => setActiveRunId(run.id)}>
-                  <div className={styles.runName}>{run.tool_name}</div>
-                  <div className={styles.runMeta}>
-                    <span className={`${styles.runStatus} ${styles[`status_${run.id === activeRunId && isActiveStreaming ? "running" : run.status}`]}`}>
-                      {run.id === activeRunId && isActiveStreaming ? "running" : run.status}
-                    </span>
-                    <button className={styles.delBtn} onClick={(e) => { e.stopPropagation(); deleteRun(run.id); }}>
-                      <Trash2 size={11} />
-                    </button>
+              {runs.map((run) => {
+                const isRunStreaming = streaming[run.id] || false;
+                const displayStatus = isRunStreaming ? "running" : run.status;
+                return (
+                  <div key={run.id}
+                    className={`${styles.runItem} ${run.id === activeRunId ? styles.runActive : ""}`}
+                    onClick={() => openTab(run.id)}>
+                    <div className={styles.runName}>{run.tool_name}</div>
+                    <div className={styles.runMeta}>
+                      <span className={`${styles.runStatus} ${styles[`status_${displayStatus}`]}`}>
+                        {displayStatus}
+                      </span>
+                      <button className={styles.delBtn} onClick={(e) => { e.stopPropagation(); deleteRun(run.id); }}>
+                        <Trash2 size={11} />
+                      </button>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
 

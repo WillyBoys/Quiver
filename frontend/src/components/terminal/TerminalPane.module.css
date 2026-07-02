@@ -174,7 +174,7 @@
   white-space: pre-wrap;
   overflow-wrap: break-word;
   min-height: 120px;
-  max-height: 500px;
+  max-height: calc(100vh - 220px);
   overflow-y: auto;
 }
 
