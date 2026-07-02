@@ -57,6 +57,13 @@ export const api = {
     list: () => req("/wordlists/"),
     dirs: () => req("/wordlists/dirs"),
   },
+  suites: {
+    list: () => req("/suites/"),
+    get: (id) => req(`/suites/${id}`),
+    create: (body) => req("/suites/", { method: "POST", body: JSON.stringify(body) }),
+    update: (id, body) => req(`/suites/${id}`, { method: "PUT", body: JSON.stringify(body) }),
+    delete: (id) => req(`/suites/${id}`, { method: "DELETE" }),
+  },
 };
 
 // WebSocket helper for streaming run output

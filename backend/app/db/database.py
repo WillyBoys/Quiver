@@ -17,7 +17,7 @@ class Base(DeclarativeBase):
 
 
 async def init_db():
-    from app.models import tool, session, run  # noqa: import all models
+    from app.models import tool, session, run, suite  # noqa: import all models
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         # Migrate: add checklist_state to existing sessions tables that pre-date this column

@@ -5,6 +5,7 @@ import SessionDetailPage from "./pages/SessionDetailPage.jsx";
 import ToolsPage from "./pages/ToolsPage.jsx";
 import WordlistsPage from "./pages/WordlistsPage.jsx";
 import RemotePage from "./pages/RemotePage.jsx";
+import SuitesPage from "./pages/SuitesPage.jsx";
 
 export default function App() {
   return (
@@ -14,6 +15,7 @@ export default function App() {
         <Route path="/sessions" element={<SessionsPage />} />
         <Route path="/sessions/:sessionId" element={<SessionDetailPage />} />
         <Route path="/tools" element={<ToolsPage />} />
+        <Route path="/suites" element={<SuitesPage />} />
         <Route path="/wordlists" element={<WordlistsPage />} />
         <Route path="/remote" element={<RemotePage />} />
       </Routes>
