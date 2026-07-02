@@ -101,6 +101,52 @@ Wordlists appear automatically in the **Wordlists** tab and in the in-session pi
 
 ---
 
+## Remote access
+
+Quiver can be forwarded to a remote machine over SSH — useful for internal engagements
+where you're working on a machine inside the target environment.
+
+### Quick setup
+
+**1. On your pentest laptop**, make the tunnel script executable and run it:
+
+```bash
+chmod +x tunnel.sh
+./tunnel.sh user@remote-machine
+```
+
+This forwards Quiver's frontend (port 3000) and API (port 8000) to the remote machine
+over your existing SSH connection. No firewall changes needed.
+
+**2. On the remote machine**, choose how you want to access Quiver:
+
+| Option | How |
+|---|---|
+| Browser (if available) | Open `http://localhost:3000` |
+| No browser (terminal only) | Install deps + run `remote-cli.py` (see below) |
+
+**Terminal CLI — no browser required:**
+
+Copy `remote-cli.py` from the project root to the remote machine, then:
+
+```bash
+pip install requests websockets
+python3 remote-cli.py
+```
+
+The CLI connects to Quiver through the forwarded API port. It presents numbered menus
+to pick a session and tool, prompts for parameters, and streams live output directly
+to the terminal — no browser needed.
+
+Use a different port: `QUIVER_URL=http://localhost:8000 python3 remote-cli.py`
+
+### In-app instructions
+
+The **Remote** tab in the sidebar walks through the full setup with an interactive command
+generator — type the remote host and it builds the exact SSH command for you.
+
+---
+
 ## Adding custom tools
 
 Open the **Tools** tab → **Add Tool** to register any tool already installed in the container.
