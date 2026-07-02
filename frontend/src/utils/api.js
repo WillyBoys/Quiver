@@ -25,6 +25,18 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ phase_checks: state.phaseChecks, custom_items: state.customItems }),
     }),
+    exportReport: async (id, sessionName) => {
+      const res = await fetch(`${BASE}/sessions/${id}/report.md`);
+      if (!res.ok) throw new Error("Export failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const slug = (sessionName || "report").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+      a.download = `quiver-report-${slug}.md`;
+      a.click();
+      URL.revokeObjectURL(url);
+    },
   },
   tools: {
     list: (category) => req(`/tools/${category ? `?category=${category}` : ""}`),

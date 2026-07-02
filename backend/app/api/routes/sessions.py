@@ -1,11 +1,14 @@
+import re
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.db.database import get_db
 from app.models.session import Session
+from app.models.run import Run
 from pydantic import BaseModel
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 router = APIRouter()
 
@@ -92,6 +95,121 @@ async def delete_session(session_id: str, db: AsyncSession = Depends(get_db)):
     session = await _get_or_404(session_id, db)
     await db.delete(session)
     await db.commit()
+
+
+@router.get("/{session_id}/report.md")
+async def export_report(session_id: str, db: AsyncSession = Depends(get_db)):
+    session = await _get_or_404(session_id, db)
+    result = await db.execute(
+        select(Run).where(Run.session_id == session_id).order_by(Run.created_at)
+    )
+    runs = result.scalars().all()
+    md = _build_report(session, runs)
+    filename = _safe_filename(session.name)
+    return Response(
+        content=md,
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+# ── Report helpers ────────────────────────────────────────────────────────────
+
+_SEVERITY_ORDER = ["critical", "high", "medium", "low", "info"]
+_ANSI_RE = re.compile(r'\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+
+
+def _strip_ansi(text: str) -> str:
+    return _ANSI_RE.sub('', text)
+
+
+def _safe_filename(name: str) -> str:
+    slug = re.sub(r'[^\w\s-]', '', name.lower())
+    slug = re.sub(r'[\s_]+', '-', slug).strip('-')
+    return f"quiver-report-{slug}.md"
+
+
+def _build_report(session, runs) -> str:
+    now = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
+    created = session.created_at.strftime('%Y-%m-%d')
+
+    lines = [
+        f"# Pentest Report — {session.name}",
+        "",
+        "| | |",
+        "|---|---|",
+        f"| **Target** | `{session.target}` |",
+        f"| **Scope** | {session.scope or '—'} |",
+        f"| **Type** | {session.engagement_type.title()} |",
+        f"| **Status** | {session.status.title()} |",
+        f"| **Created** | {created} |",
+        f"| **Generated** | {now} |",
+        "",
+        "---",
+        "",
+    ]
+
+    # Findings
+    lines += ["## Findings", ""]
+    findings = sorted(
+        session.findings or [],
+        key=lambda f: _SEVERITY_ORDER.index(f.get("severity", "info"))
+        if f.get("severity") in _SEVERITY_ORDER else 99,
+    )
+
+    if not findings:
+        lines += ["*No findings logged.*", ""]
+    else:
+        for sev in _SEVERITY_ORDER:
+            sev_group = [f for f in findings if f.get("severity") == sev]
+            if not sev_group:
+                continue
+            lines += [f"### {sev.upper()} ({len(sev_group)})", ""]
+            for f in sev_group:
+                lines += [f"#### {f.get('title', 'Untitled')}", ""]
+                if f.get("notes"):
+                    lines += [f["notes"].strip(), ""]
+                lines += ["---", ""]
+
+    # Engagement notes
+    if session.notes and session.notes.strip():
+        lines += ["## Notes", "", session.notes.strip(), "", "---", ""]
+
+    # Tool runs
+    lines += ["## Tool Output", ""]
+    completed = [r for r in runs if r.status in ("complete", "error")]
+
+    if not completed:
+        lines += ["*No tool runs recorded.*", ""]
+    else:
+        for run in completed:
+            ts = run.finished_at or run.created_at
+            ts_str = ts.strftime('%Y-%m-%d %H:%M UTC') if ts else "—"
+            status_str = f"exit {run.exit_code}" if run.exit_code is not None else run.status
+
+            lines += [
+                f"### {run.tool_name}",
+                "",
+                f"**Time:** {ts_str}  ",
+                f"**Status:** {status_str}  ",
+                "",
+                "**Command:**",
+                "",
+                "```",
+                run.command,
+                "```",
+                "",
+                "**Output:**",
+                "",
+                "```",
+                _strip_ansi(run.output or "*(no output)*").rstrip(),
+                "```",
+                "",
+                "---",
+                "",
+            ]
+
+    return "\n".join(lines)
 
 
 async def _get_or_404(session_id: str, db: AsyncSession) -> Session:

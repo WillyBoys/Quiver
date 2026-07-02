@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Play, Plus, Trash2, Flag, X, FolderOpen, Search } from "lucide-react";
+import { ArrowLeft, Play, Plus, Trash2, Flag, X, FolderOpen, Search, Download } from "lucide-react";
 import { api, createRunSocket } from "../utils/api.js";
 import TerminalPane from "../components/terminal/TerminalPane.jsx";
 import ChecklistPane from "../components/checklist/ChecklistPane.jsx";
@@ -35,6 +35,7 @@ export default function SessionDetailPage() {
   const [wordlists, setWordlists] = useState(null);           // null = not loaded yet
   const [wordlistFilter, setWordlistFilter] = useState("");
 
+  const [isExporting, setIsExporting] = useState(false);
   const [sidebarView, setSidebarView] = useState("tools");   // "tools" | "checklist"
   const [phaseChecks, setPhaseChecks] = useState({});
   const [customItems, setCustomItems] = useState([]);
@@ -155,6 +156,17 @@ export default function SessionDetailPage() {
     await saveChecklist(phaseChecks, updated);
   }
 
+  async function handleExport() {
+    setIsExporting(true);
+    try {
+      await api.sessions.exportReport(sessionId, session.name);
+    } catch (err) {
+      console.error("Export failed:", err);
+    } finally {
+      setIsExporting(false);
+    }
+  }
+
   function handleJumpToTool(tool) {
     setSidebarView("tools");
     setSelectedCat(tool.category);
@@ -202,6 +214,9 @@ export default function SessionDetailPage() {
           <h1 className={styles.sessionName}>{session.name}</h1>
           <code className={styles.target}>{session.target}</code>
         </div>
+        <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={handleExport} disabled={isExporting}>
+          <Download size={13} /> {isExporting ? "Exporting…" : "Export Report"}
+        </button>
         <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => setShowFinding(true)}>
           <Flag size={13} /> Log Finding
         </button>
