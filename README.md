@@ -28,16 +28,20 @@ All tools and dependencies are bundled in the image. 32 tools are pre-configured
 - **Utilities:** hydra, searchsploit, cewl, john, netcat
 
 **Platform features:**
-- Session management — one session per engagement, tracks target, scope, and notes
+- Session management — one session per engagement, tracks target, scope, notes, and status
+- Multiple targets — add any number of targets to a session; click a target chip to auto-fill host/URL/domain params across all tools
 - Tool registry — all built-in tools pre-configured with stats bar, search/filter, workflow tags; add your own
 - Live terminal output — real-time streaming CLI output with ANSI color rendering, screenshot-ready
+- Concurrent terminal tabs — each run gets its own tab; tabs persist until closed; click history to reopen
 - Terminal filter — search tool output with match count and keyboard navigation (Enter / Shift+Enter)
 - Kill button — terminate any long-running tool mid-stream
 - Extra flags — append one-off flags to any tool at run time without editing its definition
 - Session notes — auto-saving notes editor per engagement
-- Findings tracker — log critical/high/medium/low/info findings per session
+- Findings tracker — log critical/high/medium/low/info findings; attach one or more tool runs as evidence per finding
 - Engagement checklist — per-session phase checklist + manual tool tracking with run auto-detection
-- Wordlist browser — auto-discovers wordlists from mounted volumes
+- Run suites — build named sequences of tools that execute automatically in order; blank params filled at launch time
+- Report export — one-click Markdown export of the full engagement: session info, findings by severity, and all tool output with ANSI stripped
+- Wordlist browser — auto-discovers wordlists from mounted volumes; Browse button on wordlist params
 - Run history — every command, every output, timestamped
 
 ---
@@ -173,7 +177,7 @@ quiver/
 └── frontend/                 # React 18 + Vite
     ├── vite.config.js        # proxies /api (HTTP + WebSocket) to backend:8000
     └── src/
-        ├── pages/            # Sessions, SessionDetail, Tools, Wordlists
+        ├── pages/            # Sessions, SessionDetail, Tools, Wordlists, Suites, Remote
         ├── components/       # TerminalPane, Layout, ChecklistPane
         └── utils/api.js      # API + WebSocket client
 ```
