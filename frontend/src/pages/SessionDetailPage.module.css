@@ -93,8 +93,11 @@
 }
 
 .terminalBody {
+  flex: 1;
   padding: 16px;
-  overflow-y: auto;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .terminalEmpty {

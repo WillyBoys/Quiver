@@ -569,7 +569,7 @@ export default function SessionDetailPage() {
                   <div className={styles.paramField}>
                     <label className={styles.paramLabel}>Extra flags</label>
                     <input className="input input-mono" style={{ fontSize: 11 }}
-                      placeholder="--verbose -oN output.txt"
+                      placeholder="-v --timeout 30"
                       value={flags}
                       onChange={(e) => setExtraFlags((ef) => ({ ...ef, [tool.id]: e.target.value }))} />
                   </div>

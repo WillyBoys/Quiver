@@ -77,6 +77,9 @@
 .sidebarFooter {
   padding: 12px 16px;
   border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
 .version {
@@ -84,6 +87,14 @@
   font-size: 11px;
   color: var(--text-muted);
 }
+
+.githubLink {
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  transition: color 0.15s;
+}
+.githubLink:hover { color: var(--text-primary); }
 
 .main {
   flex: 1;

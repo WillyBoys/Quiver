@@ -277,7 +277,7 @@ export default function SuitesPage() {
                         <label className={styles.stepParamLabel} style={{ marginTop: params.length > 0 ? 6 : 0 }}>
                           Extra flags
                           <input className="input input-mono" style={{ fontSize: 11 }}
-                            placeholder="--verbose -oN output.txt"
+                            placeholder="-v --timeout 30"
                             value={step.extra_flags || ""}
                             onChange={e => updateStepFlags(i, e.target.value)} />
                         </label>

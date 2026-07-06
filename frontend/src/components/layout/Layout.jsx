@@ -1,5 +1,5 @@
 import { NavLink } from "react-router-dom";
-import { Terminal, Shield, BookOpen, Radio, ListOrdered } from "lucide-react";
+import { Terminal, Shield, BookOpen, Radio, ListOrdered, Github } from "lucide-react";
 import styles from "./Layout.module.css";
 
 const NAV = [
@@ -34,6 +34,15 @@ export default function Layout({ children }) {
         </nav>
         <div className={styles.sidebarFooter}>
           <span className={styles.version}>v1.0.0</span>
+          <a
+            className={styles.githubLink}
+            href="https://github.com/WillyBoys/Quiver"
+            target="_blank"
+            rel="noreferrer"
+            title="Quiver on GitHub"
+          >
+            <Github size={13} />
+          </a>
         </div>
       </aside>
       <main className={styles.main}>{children}</main>
