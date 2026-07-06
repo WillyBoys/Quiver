@@ -19,7 +19,8 @@ class Finding(BaseModel):
     title: str
     severity: str  # critical / high / medium / low / info
     notes: str = ""
-    tool_run_id: Optional[str] = None
+    tool_run_id: Optional[str] = None          # legacy — kept for backwards compat
+    evidence_run_ids: Optional[list] = None    # [{run_id, ...}] multi-evidence
 
 
 class SessionCreate(BaseModel):

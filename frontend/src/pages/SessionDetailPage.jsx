@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Play, Plus, Trash2, Flag, X, FolderOpen, Search, Download, ListOrdered } from "lucide-react";
+import { ArrowLeft, Play, Plus, Trash2, Flag, X, FolderOpen, Search, Download, ListOrdered, Link2 } from "lucide-react";
 import { api, createRunSocket } from "../utils/api.js";
 import TerminalPane from "../components/terminal/TerminalPane.jsx";
 import ChecklistPane from "../components/checklist/ChecklistPane.jsx";
@@ -25,7 +25,8 @@ export default function SessionDetailPage() {
   const [extraFlags, setExtraFlags] = useState({});     // toolId -> string
   const [selectedCat, setSelectedCat] = useState("all");
   const [showFinding, setShowFinding] = useState(false);
-  const [newFinding, setNewFinding] = useState({ title: "", severity: "high", notes: "" });
+  const [newFinding, setNewFinding] = useState({ title: "", severity: "high", notes: "", evidence_run_ids: [] });
+  const [linkingFindingId, setLinkingFindingId] = useState(null);
 
   // Notes editor state
   const [notesValue, setNotesValue] = useState("");
@@ -139,11 +140,33 @@ export default function SessionDetailPage() {
     const saved = await api.sessions.update(sessionId, updated);
     setSession(saved);
     setShowFinding(false);
-    setNewFinding({ title: "", severity: "high", notes: "" });
+    setNewFinding({ title: "", severity: "high", notes: "", evidence_run_ids: [] });
   }
 
   async function removeFinding(id) {
     const updated = { ...session, findings: session.findings.filter((f) => f.id !== id) };
+    const saved = await api.sessions.update(sessionId, updated);
+    setSession(saved);
+  }
+
+  function getEvidenceIds(finding) {
+    if (finding.evidence_run_ids != null) return finding.evidence_run_ids;
+    if (finding.tool_run_id) return [finding.tool_run_id];
+    return [];
+  }
+
+  async function toggleRunEvidence(findingId, runId) {
+    const updated = {
+      ...session,
+      findings: session.findings.map((f) => {
+        if (f.id !== findingId) return f;
+        const existing = getEvidenceIds(f);
+        const next = existing.includes(runId)
+          ? existing.filter((id) => id !== runId)
+          : [...existing, runId];
+        return { ...f, evidence_run_ids: next, tool_run_id: null };
+      }),
+    };
     const saved = await api.sessions.update(sessionId, updated);
     setSession(saved);
   }
@@ -375,6 +398,12 @@ export default function SessionDetailPage() {
   const activeOutput = liveOutput[activeRunId] || activeRun?.output || "";
   const isActiveStreaming = streaming[activeRunId] || false;
   const runningToolIds = new Set(runs.filter((r) => streaming[r.id]).map((r) => r.tool_id));
+  const completedRuns = runs.filter((r) => r.status === "complete" || r.status === "error");
+
+  function fmtRunTime(isoStr) {
+    if (!isoStr) return "";
+    return new Date(isoStr).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  }
 
   if (!session) return <div className={styles.loading}>Loading session...</div>;
 
@@ -645,18 +674,49 @@ export default function SessionDetailPage() {
           <div className={styles.panelSection}>
             <h3 className={styles.panelTitle}>Findings ({session.findings?.length || 0})</h3>
             <div className={styles.findingList}>
-              {(session.findings || []).map((f) => (
-                <div key={f.id} className={styles.findingItem}>
-                  <div className={styles.findingTop}>
-                    <span className={`badge badge-${f.severity}`}>{f.severity}</span>
-                    <button className={styles.delBtn} onClick={() => removeFinding(f.id)}>
-                      <X size={11} />
-                    </button>
+              {(session.findings || []).map((f) => {
+                const evidenceIds = getEvidenceIds(f);
+                const evidenceRuns = evidenceIds.map((id) => runs.find((r) => r.id === id)).filter(Boolean);
+                return (
+                  <div key={f.id} className={styles.findingItem}>
+                    <div className={styles.findingTop}>
+                      <span className={`badge badge-${f.severity}`}>{f.severity}</span>
+                      <button className={styles.delBtn} onClick={() => removeFinding(f.id)}>
+                        <X size={11} />
+                      </button>
+                    </div>
+                    <div className={styles.findingTitle}>{f.title}</div>
+                    {f.notes && <p className={styles.findingNotes}>{f.notes}</p>}
+                    <div className={styles.evidenceRow}>
+                      {evidenceRuns.map((run) => (
+                        <div key={run.id} className={styles.evidenceChip}>
+                          <button
+                            className={styles.evidenceChipBtn}
+                            onClick={() => openTab(run.id)}
+                            title="Jump to run output"
+                          >
+                            <Link2 size={9} />
+                            <span>{run.tool_name}</span>
+                          </button>
+                          <button
+                            className={styles.evidenceUnlinkBtn}
+                            onClick={() => toggleRunEvidence(f.id, run.id)}
+                            title="Remove evidence link"
+                          >
+                            <X size={9} />
+                          </button>
+                        </div>
+                      ))}
+                      <button
+                        className={styles.linkEvidenceBtn}
+                        onClick={() => setLinkingFindingId(f.id)}
+                      >
+                        <Link2 size={9} /> {evidenceRuns.length > 0 ? "Add more" : "Link evidence"}
+                      </button>
+                    </div>
                   </div>
-                  <div className={styles.findingTitle}>{f.title}</div>
-                  {f.notes && <p className={styles.findingNotes}>{f.notes}</p>}
-                </div>
-              ))}
+                );
+              })}
               {(!session.findings || session.findings.length === 0) && (
                 <p className={styles.empty}>No findings logged.</p>
               )}
@@ -789,6 +849,48 @@ export default function SessionDetailPage() {
         </div>
       )}
 
+      {/* Evidence run picker modal */}
+      {linkingFindingId && (() => {
+        const activeFinding = (session.findings || []).find((f) => f.id === linkingFindingId);
+        const selectedIds = activeFinding ? getEvidenceIds(activeFinding) : [];
+        return (
+          <div className={styles.modal}>
+            <div className={styles.modalBox}>
+              <h2 className={styles.modalTitle}>Link Evidence Runs</h2>
+              <div className={styles.form}>
+                {completedRuns.length === 0 ? (
+                  <p style={{ color: "var(--text-muted)", fontSize: 13 }}>
+                    No completed runs yet. Run a tool first.
+                  </p>
+                ) : (
+                  <div className={styles.runPickerList}>
+                    {completedRuns.map((run) => {
+                      const selected = selectedIds.includes(run.id);
+                      return (
+                        <button
+                          key={run.id}
+                          className={`${styles.runPickerItem} ${selected ? styles.runPickerItemSelected : ""}`}
+                          onClick={() => toggleRunEvidence(linkingFindingId, run.id)}
+                        >
+                          <span className={styles.runPickerCheck}>{selected ? "✓" : ""}</span>
+                          <span className={styles.runPickerName}>{run.tool_name}</span>
+                          <span className={`${styles.runPickerMeta} ${styles[`status_${run.status}`]}`}>
+                            {run.status} · {fmtRunTime(run.created_at)}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+                <div className={styles.formActions}>
+                  <button className="btn btn-ghost" onClick={() => setLinkingFindingId(null)}>Done</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Finding modal */}
       {showFinding && (
         <div className={styles.modal}>
@@ -811,8 +913,39 @@ export default function SessionDetailPage() {
                   placeholder="Evidence, remediation notes, affected systems..."
                   onChange={(e) => setNewFinding({ ...newFinding, notes: e.target.value })} />
               </label>
+              {completedRuns.length > 0 && (
+                <div>
+                  <span className={styles.label} style={{ marginBottom: 6, display: "block" }}>
+                    Evidence runs (optional)
+                  </span>
+                  <div className={styles.evidenceCheckList}>
+                    {completedRuns.map((r) => {
+                      const checked = (newFinding.evidence_run_ids || []).includes(r.id);
+                      return (
+                        <label key={r.id} className={styles.evidenceCheckItem}>
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => {
+                              const ids = newFinding.evidence_run_ids || [];
+                              setNewFinding({
+                                ...newFinding,
+                                evidence_run_ids: checked
+                                  ? ids.filter((id) => id !== r.id)
+                                  : [...ids, r.id],
+                              });
+                            }}
+                          />
+                          <span className={styles.evidenceCheckName}>{r.tool_name}</span>
+                          <span className={styles.evidenceCheckTime}>{fmtRunTime(r.created_at)}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
               <div className={styles.formActions}>
-                <button className="btn btn-ghost" onClick={() => setShowFinding(false)}>Cancel</button>
+                <button className="btn btn-ghost" onClick={() => { setShowFinding(false); setNewFinding({ title: "", severity: "high", notes: "", evidence_run_ids: [] }); }}>Cancel</button>
                 <button className="btn btn-primary" onClick={addFinding} disabled={!newFinding.title}>Log Finding</button>
               </div>
             </div>

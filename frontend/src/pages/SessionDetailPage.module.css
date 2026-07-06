@@ -330,6 +330,163 @@
 }
 .formActions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 6px; }
 
+/* ── Evidence linking ─────────────────────────────────────── */
+
+.evidenceRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  margin-top: 6px;
+}
+
+.evidenceChip {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  overflow: hidden;
+  max-width: 100%;
+}
+
+.evidenceChipBtn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(57, 211, 83, 0.08);
+  border: none;
+  color: var(--accent);
+  font-size: 10px;
+  font-family: var(--font-mono);
+  padding: 3px 7px;
+  cursor: pointer;
+  transition: background 0.12s;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.evidenceChipBtn:hover { background: rgba(57, 211, 83, 0.18); }
+
+.evidenceUnlinkBtn {
+  display: flex;
+  align-items: center;
+  background: transparent;
+  border: none;
+  border-left: 1px solid rgba(57, 211, 83, 0.3);
+  color: var(--accent);
+  padding: 3px 5px;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: opacity 0.12s;
+  flex-shrink: 0;
+}
+.evidenceUnlinkBtn:hover { opacity: 1; }
+
+.linkEvidenceBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  background: transparent;
+  border: 1px dashed var(--border);
+  border-radius: 3px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-family: var(--font-ui);
+  padding: 2px 7px;
+  cursor: pointer;
+  transition: border-color 0.12s, color 0.12s;
+}
+.linkEvidenceBtn:hover { border-color: var(--accent); color: var(--accent); }
+
+.runPickerList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.runPickerItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  padding: 9px 12px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+  font-family: var(--font-ui);
+}
+.runPickerItem:hover { border-color: var(--accent); background: rgba(57, 211, 83, 0.05); }
+
+.runPickerItemSelected {
+  border-color: var(--accent);
+  background: rgba(57, 211, 83, 0.08);
+}
+
+.runPickerCheck {
+  width: 14px;
+  font-size: 11px;
+  color: var(--accent);
+  flex-shrink: 0;
+  font-weight: 700;
+}
+
+.runPickerName {
+  font-size: 13px;
+  color: var(--text-primary);
+  font-weight: 500;
+  font-family: var(--font-mono);
+  flex: 1;
+}
+
+.runPickerMeta {
+  font-size: 11px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+/* Evidence run checkboxes in Log Finding modal */
+
+.evidenceCheckList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 160px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 0;
+}
+
+.evidenceCheckItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+  transition: background 0.1s;
+  font-family: var(--font-ui);
+}
+.evidenceCheckItem:hover { background: var(--bg-hover); }
+
+.evidenceCheckName {
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+  flex: 1;
+}
+
+.evidenceCheckTime {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
 /* ── Target bar ────────────────────────────────────────────── */
 
 .targetBar {
