@@ -25,6 +25,10 @@ async def init_db():
             await conn.execute(text("ALTER TABLE sessions ADD COLUMN checklist_state JSON DEFAULT '{}'"))
         except Exception:
             pass  # column already exists
+        try:
+            await conn.execute(text("ALTER TABLE sessions ADD COLUMN targets JSON DEFAULT '[]'"))
+        except Exception:
+            pass  # column already exists
 
 
 async def get_db() -> AsyncSession:

@@ -25,6 +25,10 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ phase_checks: state.phaseChecks, custom_items: state.customItems }),
     }),
+    patchTargets: (id, targets) => req(`/sessions/${id}/targets`, {
+      method: "PATCH",
+      body: JSON.stringify({ targets }),
+    }),
     exportReport: async (id, sessionName) => {
       const res = await fetch(`${BASE}/sessions/${id}/report.md`);
       if (!res.ok) throw new Error("Export failed");

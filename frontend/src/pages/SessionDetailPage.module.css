@@ -329,3 +329,141 @@
   text-transform: uppercase; letter-spacing: 0.05em;
 }
 .formActions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 6px; }
+
+/* ── Target bar ────────────────────────────────────────────── */
+
+.targetBar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 7px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-surface);
+  flex-shrink: 0;
+  min-height: 38px;
+}
+
+.targetBarLabel {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-muted);
+  margin-right: 2px;
+  flex-shrink: 0;
+}
+
+.targetChip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px 3px 7px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.targetChip:hover {
+  border-color: var(--text-muted);
+  color: var(--text-primary);
+}
+.targetChip:hover .targetRemoveBtn { opacity: 1; }
+
+.targetChipActive {
+  border-color: var(--accent);
+  background: rgba(57, 211, 83, 0.08);
+  color: var(--accent);
+}
+.targetChipActive .targetDot { background: var(--accent); }
+
+.targetDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex-shrink: 0;
+  transition: background 0.12s;
+}
+
+.targetValue {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.targetRemoveBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  padding: 0;
+  margin-left: 2px;
+  opacity: 0;
+  transition: opacity 0.12s, color 0.12s;
+}
+.targetRemoveBtn:hover { color: var(--text-primary); }
+
+.addTargetBtn {
+  background: transparent;
+  border: 1px dashed var(--border);
+  border-radius: 4px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-family: var(--font-ui);
+  padding: 3px 10px;
+  cursor: pointer;
+  transition: border-color 0.12s, color 0.12s;
+}
+.addTargetBtn:hover { border-color: var(--text-muted); color: var(--text-secondary); }
+
+.addTargetInputWrap {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.addTargetInput {
+  background: var(--bg-elevated);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 3px 8px;
+  outline: none;
+  width: 200px;
+}
+.addTargetInput::placeholder { color: var(--text-muted); }
+
+.addTargetConfirm,
+.addTargetCancel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  cursor: pointer;
+  padding: 3px 6px;
+  font-size: 12px;
+  transition: border-color 0.12s, color 0.12s;
+  line-height: 1;
+}
+.addTargetConfirm {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.addTargetConfirm:hover { background: rgba(57, 211, 83, 0.12); }
+.addTargetCancel {
+  color: var(--text-muted);
+}
+.addTargetCancel:hover { color: var(--text-primary); border-color: var(--text-muted); }

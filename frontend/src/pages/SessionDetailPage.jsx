@@ -36,6 +36,11 @@ export default function SessionDetailPage() {
   const [wordlists, setWordlists] = useState(null);           // null = not loaded yet
   const [wordlistFilter, setWordlistFilter] = useState("");
 
+  const [targets, setTargets] = useState([]);
+  const [activeTarget, setActiveTarget] = useState(null);
+  const [addingTarget, setAddingTarget] = useState(false);
+  const [newTargetValue, setNewTargetValue] = useState("");
+
   const [isExporting, setIsExporting] = useState(false);
   const [suitePickerOpen, setSuitePickerOpen] = useState(false);
   const [suites, setSuites] = useState(null);           // null = not loaded yet
@@ -52,6 +57,15 @@ export default function SessionDetailPage() {
       setNotesValue(s.notes || "");
       setPhaseChecks(s.checklist_state?.phase_checks || {});
       setCustomItems(s.checklist_state?.custom_items || []);
+
+      // Backwards compat: seed targets list from legacy single target field
+      let initTargets = s.targets || [];
+      if (initTargets.length === 0 && s.target) {
+        initTargets = [{ id: crypto.randomUUID(), value: s.target }];
+        api.sessions.patchTargets(s.id, initTargets).catch(() => {});
+      }
+      setTargets(initTargets);
+      setActiveTarget(initTargets[0] || null);
     });
     api.tools.list().then(setTools);
     api.runs.listForSession(sessionId).then(setRuns);
@@ -187,6 +201,60 @@ export default function SessionDetailPage() {
     }
   }
 
+  function isTargetParam(p) {
+    const name = (p.name || "").toLowerCase();
+    const flag = (p.flag || "").toLowerCase();
+    return (
+      name === "target" || name === "host" || name === "url" || name === "domain" ||
+      flag === "-u" || flag === "--url" ||
+      flag === "-h" || flag === "--host" ||
+      flag === "-t" || flag === "--target" ||
+      flag === "-d" || flag === "--domain"
+    );
+  }
+
+  function fillTargetParams(target) {
+    setRunParams(prev => {
+      const updated = { ...prev };
+      tools.filter(t => t.enabled).forEach(tool => {
+        (tool.parameters || []).forEach(p => {
+          if (isTargetParam(p)) {
+            updated[tool.id] = { ...(updated[tool.id] || {}), [p.name]: target.value };
+          }
+        });
+      });
+      return updated;
+    });
+  }
+
+  function handleTargetSelect(target) {
+    setActiveTarget(target);
+    fillTargetParams(target);
+  }
+
+  async function handleAddTarget() {
+    const val = newTargetValue.trim();
+    if (!val) return;
+    const t = { id: crypto.randomUUID(), value: val };
+    const updated = [...targets, t];
+    setTargets(updated);
+    setNewTargetValue("");
+    setAddingTarget(false);
+    await api.sessions.patchTargets(sessionId, updated).catch(() => {});
+    handleTargetSelect(t);
+  }
+
+  async function handleRemoveTarget(targetId) {
+    const updated = targets.filter(t => t.id !== targetId);
+    setTargets(updated);
+    if (activeTarget?.id === targetId) {
+      const next = updated[0] || null;
+      if (next) handleTargetSelect(next);
+      else setActiveTarget(null);
+    }
+    await api.sessions.patchTargets(sessionId, updated).catch(() => {});
+  }
+
   async function openSuitePicker() {
     setSuitePickerOpen(true);
     setSelectedSuite(null);
@@ -199,10 +267,19 @@ export default function SessionDetailPage() {
 
   function selectSuite(suite) {
     setSelectedSuite(suite);
-    // Pre-populate params with any values saved in the suite steps
     const initial = {};
     suite.steps.forEach((step, i) => {
-      initial[i] = { ...step.param_values };
+      const merged = { ...step.param_values };
+      // Pre-fill blank target params with the active target
+      if (activeTarget) {
+        const toolDef = tools.find(t => t.id === step.tool_id);
+        (toolDef?.parameters || []).forEach(p => {
+          if (isTargetParam(p) && !merged[p.name]) {
+            merged[p.name] = activeTarget.value;
+          }
+        });
+      }
+      initial[i] = merged;
     });
     setSuiteParams(initial);
   }
@@ -322,6 +399,53 @@ export default function SessionDetailPage() {
         <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => setShowFinding(true)}>
           <Flag size={13} /> Log Finding
         </button>
+      </div>
+
+      {/* Target bar */}
+      <div className={styles.targetBar}>
+        <span className={styles.targetBarLabel}>Targets</span>
+        {targets.map(t => (
+          <div
+            key={t.id}
+            className={`${styles.targetChip} ${activeTarget?.id === t.id ? styles.targetChipActive : ""}`}
+            onClick={() => handleTargetSelect(t)}
+          >
+            <span className={styles.targetDot} />
+            <span className={styles.targetValue}>{t.value}</span>
+            <button
+              className={styles.targetRemoveBtn}
+              onClick={e => { e.stopPropagation(); handleRemoveTarget(t.id); }}
+              title="Remove target"
+            >
+              <X size={10} />
+            </button>
+          </div>
+        ))}
+        {addingTarget ? (
+          <div className={styles.addTargetInputWrap}>
+            <input
+              className={styles.addTargetInput}
+              placeholder="10.10.14.5 or target.com"
+              value={newTargetValue}
+              onChange={e => setNewTargetValue(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === "Enter") handleAddTarget();
+                if (e.key === "Escape") { setAddingTarget(false); setNewTargetValue(""); }
+              }}
+              autoFocus
+            />
+            <button className={styles.addTargetConfirm} onClick={handleAddTarget}>✓</button>
+            <button className={styles.addTargetCancel}
+              onClick={() => { setAddingTarget(false); setNewTargetValue(""); }}>
+              <X size={11} />
+            </button>
+          </div>
+        ) : (
+          <button className={styles.addTargetBtn}
+            onClick={() => setAddingTarget(true)}>
+            + Add
+          </button>
+        )}
       </div>
 
       <div className={styles.workspace}>

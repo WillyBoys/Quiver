@@ -1,4 +1,5 @@
 import re
+import uuid
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,16 +28,22 @@ class SessionCreate(BaseModel):
     scope: Optional[str] = ""
     engagement_type: str = "external"  # external / internal / web
     notes: Optional[str] = ""
+    targets: Optional[list] = None  # [{id, value}]; initialized from target if omitted
 
 
 class SessionUpdate(SessionCreate):
     status: Optional[str] = "active"
     findings: Optional[list[Finding]] = []
+    targets: Optional[list] = None
 
 
 class ChecklistUpdate(BaseModel):
     phase_checks: dict = {}
     custom_items: list = []
+
+
+class TargetsUpdate(BaseModel):
+    targets: list
 
 
 @router.get("/")
@@ -54,12 +61,16 @@ async def get_session(session_id: str, db: AsyncSession = Depends(get_db)):
 
 @router.post("/", status_code=201)
 async def create_session(body: SessionCreate, db: AsyncSession = Depends(get_db)):
+    targets = body.targets
+    if targets is None:
+        targets = [{"id": str(uuid.uuid4()), "value": body.target}] if body.target else []
     session = Session(
         name=body.name,
         target=body.target,
         scope=body.scope,
         engagement_type=body.engagement_type,
         notes=body.notes,
+        targets=targets,
     )
     db.add(session)
     await db.commit()
@@ -78,8 +89,18 @@ async def update_session(session_id: str, body: SessionUpdate, db: AsyncSession 
     session.status = body.status
     if body.findings is not None:
         session.findings = [f.model_dump() for f in body.findings]
+    if body.targets is not None:
+        session.targets = body.targets
     await db.commit()
     return _session_dict(session)
+
+
+@router.patch("/{session_id}/targets")
+async def update_targets(session_id: str, body: TargetsUpdate, db: AsyncSession = Depends(get_db)):
+    session = await _get_or_404(session_id, db)
+    session.targets = body.targets
+    await db.commit()
+    return {"targets": session.targets}
 
 
 @router.patch("/{session_id}/checklist")
@@ -231,6 +252,7 @@ def _session_dict(s: Session) -> dict:
         "status": s.status,
         "findings": s.findings or [],
         "checklist_state": s.checklist_state or {},
+        "targets": s.targets or [],
         "created_at": s.created_at.isoformat(),
         "updated_at": s.updated_at.isoformat(),
     }
