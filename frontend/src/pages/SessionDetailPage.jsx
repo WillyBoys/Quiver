@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, Play, Plus, Trash2, Flag, X, FolderOpen, Search, Download, ListOrdered, Link2 } from "lucide-react";
 import { api, createRunSocket } from "../utils/api.js";
@@ -72,10 +72,11 @@ export default function SessionDetailPage() {
     api.runs.listForSession(sessionId).then(setRuns);
   }, [sessionId]);
 
-  const enabledTools = tools.filter((t) => t.enabled);
-  const filteredTools = selectedCat === "all"
-    ? enabledTools
-    : enabledTools.filter((t) => t.category === selectedCat);
+  const enabledTools = useMemo(() => tools.filter((t) => t.enabled), [tools]);
+  const filteredTools = useMemo(
+    () => selectedCat === "all" ? enabledTools : enabledTools.filter((t) => t.category === selectedCat),
+    [enabledTools, selectedCat]
+  );
 
   async function runTool(tool) {
     const params = runParams[tool.id] || {};
@@ -394,11 +395,19 @@ export default function SessionDetailPage() {
     setWordlistPicker(null);
   }
 
-  const activeRun = runs.find((r) => r.id === activeRunId);
+  const runsById = useMemo(() => Object.fromEntries(runs.map((r) => [r.id, r])), [runs]);
+  const runningToolIds = useMemo(
+    () => new Set(runs.filter((r) => streaming[r.id]).map((r) => r.tool_id)),
+    [runs, streaming]
+  );
+  const completedRuns = useMemo(
+    () => runs.filter((r) => r.status === "complete" || r.status === "error"),
+    [runs]
+  );
+
+  const activeRun = runsById[activeRunId] || null;
   const activeOutput = liveOutput[activeRunId] || activeRun?.output || "";
   const isActiveStreaming = streaming[activeRunId] || false;
-  const runningToolIds = new Set(runs.filter((r) => streaming[r.id]).map((r) => r.tool_id));
-  const completedRuns = runs.filter((r) => r.status === "complete" || r.status === "error");
 
   function fmtRunTime(isoStr) {
     if (!isoStr) return "";
@@ -676,7 +685,7 @@ export default function SessionDetailPage() {
             <div className={styles.findingList}>
               {(session.findings || []).map((f) => {
                 const evidenceIds = getEvidenceIds(f);
-                const evidenceRuns = evidenceIds.map((id) => runs.find((r) => r.id === id)).filter(Boolean);
+                const evidenceRuns = evidenceIds.map((id) => runsById[id]).filter(Boolean);
                 return (
                   <div key={f.id} className={styles.findingItem}>
                     <div className={styles.findingTop}>
@@ -851,7 +860,7 @@ export default function SessionDetailPage() {
 
       {/* Evidence run picker modal */}
       {linkingFindingId && (() => {
-        const activeFinding = (session.findings || []).find((f) => f.id === linkingFindingId);
+        const activeFinding = session.findings?.find((f) => f.id === linkingFindingId);
         const selectedIds = activeFinding ? getEvidenceIds(activeFinding) : [];
         return (
           <div className={styles.modal}>

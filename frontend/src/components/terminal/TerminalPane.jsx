@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
 import { Copy, Check, Square, Search, X, ChevronUp, ChevronDown } from "lucide-react";
 import styles from "./TerminalPane.module.css";
 
@@ -119,14 +119,17 @@ export default function TerminalPane({ command, output, status, isStreaming, onK
   }
 
   // CR-corrected base; derive plain (for filter/copy) and colorized (for display) from it
-  const crProcessed = output ? applyCarriageReturns(output) : "";
-  const plainOutput  = crProcessed ? stripAnsi(crProcessed) : "";
-  const colorHtml    = crProcessed ? ansiToHtml(crProcessed) : "";
+  const { plainOutput, colorHtml } = useMemo(() => {
+    if (!output) return { plainOutput: "", colorHtml: "" };
+    const cr = applyCarriageReturns(output);
+    return { plainOutput: stripAnsi(cr), colorHtml: ansiToHtml(cr) };
+  }, [output]);
 
-  const lines = plainOutput ? plainOutput.split("\n") : [];
-  const filteredLines = filter
-    ? lines.filter((l) => l.toLowerCase().includes(filter.toLowerCase()))
-    : lines;
+  const lines = useMemo(() => plainOutput ? plainOutput.split("\n") : [], [plainOutput]);
+  const filteredLines = useMemo(
+    () => filter ? lines.filter((l) => l.toLowerCase().includes(filter.toLowerCase())) : lines,
+    [lines, filter]
+  );
 
   function highlightMatch(line, isCurrent) {
     const idx = line.toLowerCase().indexOf(filter.toLowerCase());

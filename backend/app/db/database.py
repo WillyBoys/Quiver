@@ -1,6 +1,7 @@
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
 import os
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:////data/pentest.db")
@@ -23,11 +24,11 @@ async def init_db():
         # Migrate: add checklist_state to existing sessions tables that pre-date this column
         try:
             await conn.execute(text("ALTER TABLE sessions ADD COLUMN checklist_state JSON DEFAULT '{}'"))
-        except Exception:
+        except OperationalError:
             pass  # column already exists
         try:
             await conn.execute(text("ALTER TABLE sessions ADD COLUMN targets JSON DEFAULT '[]'"))
-        except Exception:
+        except OperationalError:
             pass  # column already exists
 
 

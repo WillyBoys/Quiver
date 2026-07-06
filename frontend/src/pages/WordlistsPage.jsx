@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { BookOpen, FolderOpen, AlertCircle } from "lucide-react";
+import { FolderOpen } from "lucide-react";
 import { api } from "../utils/api.js";
 import styles from "./WordlistsPage.module.css";
 
@@ -22,7 +22,6 @@ export default function WordlistsPage() {
   );
 
   const activeDir = dirs.filter((d) => d.exists);
-  const missingDir = dirs.filter((d) => !d.exists);
 
   return (
     <div className={styles.page}>
@@ -33,19 +32,16 @@ export default function WordlistsPage() {
         </div>
       </div>
 
-      {/* Directory status */}
-      <div className={styles.dirStatus}>
-        {activeDir.map((d) => (
-          <div key={d.path} className={`${styles.dirBadge} ${styles.dirOk}`}>
-            <FolderOpen size={12} /> <code>{d.path}</code>
-          </div>
-        ))}
-        {missingDir.map((d) => (
-          <div key={d.path} className={`${styles.dirBadge} ${styles.dirMissing}`}>
-            <AlertCircle size={12} /> <code>{d.path}</code> <span>(not found)</span>
-          </div>
-        ))}
-      </div>
+      {/* Directory status — only show paths that actually exist */}
+      {activeDir.length > 0 && (
+        <div className={styles.dirStatus}>
+          {activeDir.map((d) => (
+            <div key={d.path} className={`${styles.dirBadge} ${styles.dirOk}`}>
+              <FolderOpen size={12} /> <code>{d.path}</code>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Mount instructions callout */}
       {wordlists.length === 0 && !loading && (
