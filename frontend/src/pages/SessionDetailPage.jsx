@@ -71,7 +71,28 @@ export default function SessionDetailPage() {
       if (s.engagement_type) setWorkflowFilter(s.engagement_type);
     });
     api.tools.list().then(setTools);
-    api.runs.listForSession(sessionId).then(setRuns);
+    api.runs.listForSession(sessionId).then((fetchedRuns) => {
+      setRuns(fetchedRuns);
+
+      // Reconnect to any runs that were still in progress when we left
+      const runningRuns = fetchedRuns.filter((r) => r.status === "running");
+      for (const run of runningRuns) {
+        setLiveOutput((o) => ({ ...o, [run.id]: "" }));
+        setStreaming((s) => ({ ...s, [run.id]: true }));
+        setOpenTabs((t) => (t.includes(run.id) ? t : [...t, run.id]));
+        createRunSocket(run.id, {
+          onOutput: (line) => setLiveOutput((o) => ({ ...o, [run.id]: (o[run.id] || "") + line })),
+          onDone: (msg) => {
+            setStreaming((s) => ({ ...s, [run.id]: false }));
+            setRuns((prev) => prev.map((r) => r.id === run.id ? { ...r, status: msg.status } : r));
+          },
+          onError: (err) => {
+            setStreaming((s) => ({ ...s, [run.id]: false }));
+            setLiveOutput((o) => ({ ...o, [run.id]: (o[run.id] || "") + `\n[ERROR] ${err}` }));
+          },
+        });
+      }
+    });
   }, [sessionId]);
 
   const enabledTools = useMemo(() => tools.filter((t) => t.enabled), [tools]);

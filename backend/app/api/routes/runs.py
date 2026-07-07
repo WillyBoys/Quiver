@@ -13,8 +13,12 @@ import signal
 
 router = APIRouter()
 
-# Maps run_id -> running asyncio Process so the kill endpoint can reach it.
+# run_id → asyncio Process (for kill endpoint)
 _running_processes: dict = {}
+# run_id → accumulated output lines (survives WebSocket disconnects)
+_run_buffers: dict[str, list[str]] = {}
+# run_id → Event set when the background task has finished its DB write
+_run_done_events: dict[str, asyncio.Event] = {}
 
 
 class RunCreate(BaseModel):
@@ -46,6 +50,63 @@ def build_command(tool: Tool, param_values: dict, extra_flags: str = "") -> str:
     return " ".join(parts)
 
 
+async def _execute_tool(run_id: str, command: str) -> None:
+    """Background task: runs the subprocess and accumulates output.
+
+    Survives WebSocket disconnects — the caller just stops reading from the
+    buffer, but this task keeps the process alive and writing.
+    """
+    _run_buffers[run_id] = []
+    _run_done_events[run_id] = asyncio.Event()
+    buf = _run_buffers[run_id]
+
+    exit_code = -1
+    run_status = "error"
+
+    try:
+        process = await asyncio.create_subprocess_shell(
+            command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            limit=1024 * 1024,
+            start_new_session=True,  # own process group so killpg reaches all children
+        )
+        _running_processes[run_id] = process
+
+        async for line_bytes in process.stdout:
+            line = line_bytes.decode("utf-8", errors="replace")
+            buf.append(line)
+
+        await process.wait()
+        exit_code = process.returncode
+        run_status = "complete" if exit_code == 0 else "error"
+
+    except Exception as e:
+        buf.append(f"\n[ERROR] {str(e)}\n")
+    finally:
+        _running_processes.pop(run_id, None)
+
+    # Persist final output and status
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(Run).where(Run.id == run_id))
+        run = result.scalar_one_or_none()
+        if run:
+            run.output = "".join(buf)
+            run.status = run_status
+            run.exit_code = exit_code
+            run.finished_at = datetime.now(timezone.utc)
+            await db.commit()
+
+    # Signal any waiting WebSocket handlers that the DB write is done
+    _run_done_events[run_id].set()
+
+    # Keep buffer alive briefly so a reconnect that arrives just after
+    # completion can still get a replay without hitting the DB
+    await asyncio.sleep(60)
+    _run_buffers.pop(run_id, None)
+    _run_done_events.pop(run_id, None)
+
+
 @router.get("/session/{session_id}")
 async def list_runs(session_id: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
@@ -72,7 +133,7 @@ async def create_run(body: RunCreate, db: AsyncSession = Depends(get_db)):
 
     run = Run(
         session_id=body.session_id,
-        tool_id=body.tool_id,
+        tool_id=tool.id,
         tool_name=tool.name,
         command=command,
         param_values=body.param_values,
@@ -118,70 +179,120 @@ async def execute_run(websocket: WebSocket, run_id: str):
             await websocket.close()
             return
 
-        if run.status == "running":
-            await websocket.send_json({"type": "error", "data": "Run already in progress"})
-            await websocket.close()
-            return
-
-        run.status = "running"
-        run.started_at = datetime.now(timezone.utc)
-        run.output = ""
-        await db.commit()
-
-        await websocket.send_json({"type": "command", "data": run.command})
-        await websocket.send_json({"type": "start", "data": f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] Executing: {run.command}\n"})
-
-        full_output = []
-        exit_code = -1
-
-        try:
-            process = await asyncio.create_subprocess_shell(
-                run.command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-                limit=1024 * 1024,
-                start_new_session=True,  # own process group so killpg reaches all children
-            )
-            _running_processes[run_id] = process
-
-            async for line_bytes in process.stdout:
-                line = line_bytes.decode("utf-8", errors="replace")
-                full_output.append(line)
-                await websocket.send_json({"type": "output", "data": line})
-
-            await process.wait()
-            exit_code = process.returncode
-
-        except WebSocketDisconnect:
-            run.status = "error"
-        except Exception as e:
-            error_line = f"\n[ERROR] {str(e)}\n"
-            full_output.append(error_line)
-            try:
-                await websocket.send_json({"type": "output", "data": error_line})
-            except Exception:
-                pass
-            run.status = "error"
-        else:
-            run.status = "complete" if exit_code == 0 else "error"
-        finally:
-            _running_processes.pop(run_id, None)
-
-        run.output = "".join(full_output)
-        run.exit_code = exit_code
-        run.finished_at = datetime.now(timezone.utc)
-        await db.commit()
-
-        try:
+        # Already finished — replay stored output from DB and exit
+        if run.status in ("complete", "error"):
+            await websocket.send_json({"type": "command", "data": run.command})
+            if run.output:
+                await websocket.send_json({"type": "output", "data": run.output})
             await websocket.send_json({
                 "type": "done",
-                "data": f"\n[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] Finished with exit code {exit_code}\n",
-                "exit_code": exit_code,
+                "data": f"\n[Replay] Finished with exit code {run.exit_code}\n",
+                "exit_code": run.exit_code,
                 "status": run.status,
             })
             await websocket.close()
-        except Exception:
+            return
+
+        # Pending — mark running, start the background task
+        if run.status == "pending":
+            run.status = "running"
+            run.started_at = datetime.now(timezone.utc)
+            run.output = ""
+            await db.commit()
+            asyncio.create_task(_execute_tool(run_id, run.command))
+            await websocket.send_json({"type": "command", "data": run.command})
+            await websocket.send_json({
+                "type": "start",
+                "data": f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] Executing: {run.command}\n",
+            })
+
+        # Running (fresh start or reconnect) — stream from the shared buffer.
+        # For a reconnect the buffer may already have output; replay it first.
+        elif run.status == "running":
+            await websocket.send_json({"type": "command", "data": run.command})
+            buf = _run_buffers.get(run_id)
+            if buf is None:
+                # Buffer is gone (task finished and cleaned up after 60 s).
+                # Re-read output from DB.
+                await db.refresh(run)
+                if run.output:
+                    await websocket.send_json({"type": "output", "data": run.output})
+                await websocket.send_json({
+                    "type": "done",
+                    "data": f"\n[Replay] Finished with exit code {run.exit_code}\n",
+                    "exit_code": run.exit_code,
+                    "status": run.status,
+                })
+                await websocket.close()
+                return
+
+    # ── Streaming loop ──────────────────────────────────────────────────────
+    # Replay whatever is already in the buffer, then tail new lines.
+    cursor = 0
+    buf = _run_buffers.get(run_id, [])
+    if buf:
+        replay = "".join(buf)
+        try:
+            await websocket.send_json({"type": "output", "data": replay})
+        except WebSocketDisconnect:
+            return
+        cursor = len(buf)
+
+    try:
+        while True:
+            buf = _run_buffers.get(run_id)
+
+            if buf is None:
+                # Task completed and cleaned up the buffer
+                break
+
+            if len(buf) > cursor:
+                chunk = "".join(buf[cursor:])
+                await websocket.send_json({"type": "output", "data": chunk})
+                cursor = len(buf)
+
+            if run_id not in _running_processes:
+                # Process exited — drain any final lines then stop
+                await asyncio.sleep(0.1)
+                buf = _run_buffers.get(run_id, [])
+                if len(buf) > cursor:
+                    chunk = "".join(buf[cursor:])
+                    await websocket.send_json({"type": "output", "data": chunk})
+                break
+
+            await asyncio.sleep(0.05)
+
+    except WebSocketDisconnect:
+        # Client navigated away — background task keeps running
+        return
+
+    # Wait for the background task to finish its DB write, then send done
+    event = _run_done_events.get(run_id)
+    if event:
+        try:
+            await asyncio.wait_for(event.wait(), timeout=5.0)
+        except asyncio.TimeoutError:
             pass
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(Run).where(Run.id == run_id))
+        final_run = result.scalar_one_or_none()
+
+    if final_run:
+        try:
+            await websocket.send_json({
+                "type": "done",
+                "data": f"\n[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] Finished with exit code {final_run.exit_code}\n",
+                "exit_code": final_run.exit_code,
+                "status": final_run.status,
+            })
+        except WebSocketDisconnect:
+            pass
+
+    try:
+        await websocket.close()
+    except Exception:
+        pass
 
 
 async def _get_or_404(run_id: str, db: AsyncSession) -> Run:
