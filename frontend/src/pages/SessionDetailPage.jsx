@@ -963,6 +963,7 @@ export default function SessionDetailPage() {
                         <label key={r.id} className={styles.evidenceCheckItem}>
                           <input
                             type="checkbox"
+                            className={styles.evidenceCheckbox}
                             checked={checked}
                             onChange={() => {
                               const ids = newFinding.evidence_run_ids || [];
