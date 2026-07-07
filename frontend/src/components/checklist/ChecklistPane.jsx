@@ -2,17 +2,35 @@ import { useState } from "react";
 import { CheckCircle2, Circle, ArrowRight, Plus, X } from "lucide-react";
 import styles from "./ChecklistPane.module.css";
 
-const PHASES = [
-  { key: "host_discovery", label: "Host & Port Discovery" },
-  { key: "service_enum",   label: "Service Enumeration" },
-  { key: "web_discovery",  label: "Web Application Discovery" },
-  { key: "dir_enum",       label: "Directory & File Enumeration" },
-  { key: "vuln_scan",      label: "Vulnerability Scanning" },
-  { key: "auth_testing",   label: "Authentication Testing" },
-  { key: "internal_enum",  label: "Internal / AD Enumeration" },
-  { key: "cloud_enum",     label: "Cloud Enumeration" },
-  { key: "reporting",      label: "Reporting & Documentation" },
-];
+const PHASES_BY_TYPE = {
+  external: [
+    { key: "ext_host_discovery", label: "Host & Port Discovery" },
+    { key: "ext_service_enum",   label: "Service Enumeration" },
+    { key: "ext_web_discovery",  label: "Web Application Discovery" },
+    { key: "ext_vuln_scan",      label: "Vulnerability Scanning" },
+    { key: "ext_exploitation",   label: "Exploitation & Validation" },
+    { key: "ext_post_exploit",   label: "Post-Exploitation" },
+    { key: "ext_reporting",      label: "Reporting & Documentation" },
+  ],
+  internal: [
+    { key: "int_host_discovery", label: "Host & Port Discovery" },
+    { key: "int_ad_enum",        label: "AD / Domain Enumeration" },
+    { key: "int_cred_access",    label: "Credential Access" },
+    { key: "int_lateral_move",   label: "Lateral Movement" },
+    { key: "int_priv_esc",       label: "Privilege Escalation" },
+    { key: "int_data_exfil",     label: "Data Exfiltration" },
+    { key: "int_reporting",      label: "Reporting & Documentation" },
+  ],
+  web: [
+    { key: "web_recon",          label: "Recon & Discovery" },
+    { key: "web_auth",           label: "Authentication Testing" },
+    { key: "web_input",          label: "Input Validation" },
+    { key: "web_session",        label: "Session Management" },
+    { key: "web_biz_logic",      label: "Business Logic Testing" },
+    { key: "web_api",            label: "API Testing" },
+    { key: "web_reporting",      label: "Reporting & Documentation" },
+  ],
+};
 
 const TYPE_LABEL  = { external: "External", internal: "Internal", web: "Web" };
 const CAT_COLORS  = { recon: "#58a6ff", web: "#bc8cff", enum: "#ffa657", vuln: "#ff7b72", util: "#8b949e", cloud: "#56d364", secrets: "#f0883e" };
@@ -27,6 +45,7 @@ export default function ChecklistPane({
   const [newLabel, setNewLabel]     = useState("");
 
   const engType    = session.engagement_type;
+  const phases     = PHASES_BY_TYPE[engType] || PHASES_BY_TYPE.external;
   const ranToolIds = new Set(runs.filter((r) => r.status !== "pending").map((r) => r.tool_id));
 
   // Suggestions: filter tool registry by what the user is typing
@@ -38,11 +57,11 @@ export default function ChecklistPane({
     : [];
 
   // Progress
-  const phasesDone  = PHASES.filter((p) => phaseChecks[p.key]).length;
+  const phasesDone  = phases.filter((p) => phaseChecks[p.key]).length;
   const customDone  = customItems.filter((i) =>
     i.tool_id ? ranToolIds.has(i.tool_id) : i.checked
   ).length;
-  const total = PHASES.length + customItems.length;
+  const total = phases.length + customItems.length;
   const done  = phasesDone + customDone;
   const pct   = total > 0 ? Math.round((done / total) * 100) : 0;
 
@@ -78,10 +97,10 @@ export default function ChecklistPane({
         </div>
       </div>
 
-      {/* Overall phases */}
+      {/* Engagement-specific phases */}
       <div className={styles.section}>
-        <div className={styles.sectionTitle}>Overall Phases</div>
-        {PHASES.map((phase) => {
+        <div className={styles.sectionTitle}>{TYPE_LABEL[engType] || engType} Phases</div>
+        {phases.map((phase) => {
           const checked = !!phaseChecks[phase.key];
           return (
             <button

@@ -7,7 +7,7 @@ import ChecklistPane from "../components/checklist/ChecklistPane.jsx";
 import styles from "./SessionDetailPage.module.css";
 
 const SEVERITY_OPTS = ["critical", "high", "medium", "low", "info"];
-const CAT_ORDER = ["recon", "web", "enum", "vuln", "cloud", "secrets", "util"];
+const CAT_ORDER = ["cloud", "enum", "recon", "secrets", "util", "vuln", "web"];
 const CAT_LABELS = { recon: "Recon", web: "Web", enum: "Enum", vuln: "Vuln", cloud: "Cloud", secrets: "Secrets", util: "Util" };
 
 export default function SessionDetailPage() {
@@ -49,6 +49,7 @@ export default function SessionDetailPage() {
   const [suiteParams, setSuiteParams] = useState({});   // stepIdx -> {paramName: value}
   const [runningSuite, setRunningSuite] = useState(false);
   const [sidebarView, setSidebarView] = useState("tools");   // "tools" | "checklist"
+  const [workflowFilter, setWorkflowFilter] = useState("all"); // "all" | "external" | "internal" | "web"
   const [phaseChecks, setPhaseChecks] = useState({});
   const [customItems, setCustomItems] = useState([]);
 
@@ -67,16 +68,20 @@ export default function SessionDetailPage() {
       }
       setTargets(initTargets);
       setActiveTarget(initTargets[0] || null);
+      if (s.engagement_type) setWorkflowFilter(s.engagement_type);
     });
     api.tools.list().then(setTools);
     api.runs.listForSession(sessionId).then(setRuns);
   }, [sessionId]);
 
   const enabledTools = useMemo(() => tools.filter((t) => t.enabled), [tools]);
-  const filteredTools = useMemo(
-    () => selectedCat === "all" ? enabledTools : enabledTools.filter((t) => t.category === selectedCat),
-    [enabledTools, selectedCat]
-  );
+  const filteredTools = useMemo(() => {
+    let list = selectedCat === "all" ? enabledTools : enabledTools.filter((t) => t.category === selectedCat);
+    if (workflowFilter !== "all") {
+      list = list.filter((t) => (t.workflow_tags || []).includes(workflowFilter));
+    }
+    return list;
+  }, [enabledTools, selectedCat, workflowFilter]);
 
   async function runTool(tool) {
     const params = runParams[tool.id] || {};
@@ -514,15 +519,39 @@ export default function SessionDetailPage() {
             />
           ) : (
             <>
-          <div className={styles.catTabs}>
-            <button className={`${styles.catTab} ${selectedCat === "all" ? styles.catTabActive : ""}`}
-              onClick={() => setSelectedCat("all")}>All</button>
-            {CAT_ORDER.map((c) => (
-              <button key={c} className={`${styles.catTab} ${selectedCat === c ? styles.catTabActive : ""}`}
-                onClick={() => setSelectedCat(c)}>{CAT_LABELS[c]}</button>
-            ))}
+          {/* Filter row */}
+          <div className={styles.filterRow}>
+            <select
+              className={`${styles.filterSelect} ${workflowFilter !== "all" ? styles.filterSelectActive : ""}`}
+              value={workflowFilter}
+              onChange={e => setWorkflowFilter(e.target.value)}
+            >
+              <option value="all">All Engagements</option>
+              <option value="external">External</option>
+              <option value="internal">Internal</option>
+              <option value="web">Web</option>
+            </select>
+            <select
+              className={`${styles.filterSelect} ${selectedCat !== "all" ? styles.filterSelectActive : ""}`}
+              value={selectedCat}
+              onChange={e => setSelectedCat(e.target.value)}
+            >
+              <option value="all">All Categories</option>
+              {CAT_ORDER.map(c => (
+                <option key={c} value={c}>{CAT_LABELS[c]}</option>
+              ))}
+            </select>
           </div>
           <div className={styles.toolList}>
+            {filteredTools.length === 0 && (
+              <div className={styles.toolFilterEmpty}>
+                <p>No {selectedCat === "all" ? "" : `${CAT_LABELS[selectedCat]} `}tools tagged for {workflowFilter} engagements.</p>
+                <button className={styles.toolFilterReset}
+                  onClick={() => { setWorkflowFilter("all"); setSelectedCat("all"); }}>
+                  Show all tools
+                </button>
+              </div>
+            )}
             {filteredTools.map((tool) => {
               const params = runParams[tool.id] || {};
               const flags = extraFlags[tool.id] || "";
