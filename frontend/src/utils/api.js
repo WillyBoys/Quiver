@@ -58,8 +58,10 @@ export const api = {
     delete: (id) => req(`/runs/${id}`, { method: "DELETE" }),
   },
   wordlists: {
-    list: () => req("/wordlists/"),
-    dirs: () => req("/wordlists/dirs"),
+    list:   () => req("/wordlists/"),
+    dirs:   () => req("/wordlists/dirs"),
+    create: (name, content) => req("/wordlists/", { method: "POST", body: JSON.stringify({ name, content }) }),
+    delete: (path) => req(`/wordlists/?path=${encodeURIComponent(path)}`, { method: "DELETE" }),
   },
   suites: {
     list: () => req("/suites/"),

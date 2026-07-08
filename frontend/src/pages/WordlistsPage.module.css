@@ -25,17 +25,34 @@
 
 .table { display: flex; flex-direction: column; }
 .tableHeader {
-  display: grid; grid-template-columns: 2fr 2fr 1fr 3fr;
+  display: grid; grid-template-columns: 2fr 2fr 1fr 3fr 28px;
   padding: 8px 12px; font-size: 11px; font-weight: 600;
   color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em;
   border-bottom: 1px solid var(--border);
 }
 .tableRow {
-  display: grid; grid-template-columns: 2fr 2fr 1fr 3fr;
+  display: grid; grid-template-columns: 2fr 2fr 1fr 3fr 28px;
   padding: 9px 12px; border-bottom: 1px solid var(--border-subtle);
   transition: background 0.15s; align-items: center;
 }
 .tableRow:hover { background: var(--bg-surface); }
+
+.rowActions { display: flex; justify-content: flex-end; }
+.deleteBtn {
+  display: flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: 3px;
+  background: transparent; border: none; cursor: pointer;
+  color: var(--text-muted); opacity: 0; transition: opacity 0.15s, color 0.15s;
+}
+.tableRow:hover .deleteBtn { opacity: 1; }
+.deleteBtn:hover { color: var(--critical); }
+
+.customBadge {
+  margin-left: 7px; font-size: 9px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.06em; color: var(--accent); background: var(--accent-glow);
+  border: 1px solid var(--accent-dim); border-radius: 3px; padding: 1px 5px;
+  vertical-align: middle;
+}
 
 .fileName { font-size: 13px; font-weight: 500; }
 .fileDir { font-size: 12px; color: var(--text-secondary); }
@@ -43,4 +60,42 @@
 .filePath {
   font-family: var(--font-mono); font-size: 11px; color: var(--text-muted);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* ── Header ────────────────────────────────────────────────── */
+.header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 20px; }
+
+/* ── Modal ─────────────────────────────────────────────────── */
+.modal {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+  display: flex; align-items: center; justify-content: center; z-index: 200;
+}
+.modalBox {
+  background: var(--bg-surface); border: 1px solid var(--border);
+  border-radius: 8px; width: 540px; max-width: 95vw;
+  display: flex; flex-direction: column;
+}
+.modalHeader {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 20px; border-bottom: 1px solid var(--border);
+}
+.modalTitle { font-size: 15px; font-weight: 600; }
+.iconBtn {
+  background: transparent; border: none; cursor: pointer;
+  color: var(--text-muted); display: flex; align-items: center;
+  padding: 4px; border-radius: 4px; transition: color 0.15s;
+}
+.iconBtn:hover { color: var(--text-primary); }
+.modalBody { display: flex; flex-direction: column; gap: 16px; padding: 20px; }
+.modalActions { display: flex; justify-content: flex-end; gap: 8px; }
+
+.fieldLabel {
+  display: flex; flex-direction: column; gap: 6px;
+  font-size: 12px; font-weight: 600; color: var(--text-secondary);
+}
+.fieldHint { font-size: 11px; font-weight: 400; color: var(--text-muted); margin-top: -2px; }
+
+.contentArea {
+  font-family: var(--font-mono); font-size: 12px;
+  min-height: 200px; resize: vertical;
 }
