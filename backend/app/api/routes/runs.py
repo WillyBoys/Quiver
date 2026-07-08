@@ -56,8 +56,10 @@ async def _execute_tool(run_id: str, command: str) -> None:
     Survives WebSocket disconnects — the caller just stops reading from the
     buffer, but this task keeps the process alive and writing.
     """
-    _run_buffers[run_id] = []
-    _run_done_events[run_id] = asyncio.Event()
+    # Buffer and event may already exist (initialized by the WS handler before
+    # this task was scheduled). Use setdefault so we don't clobber them.
+    _run_buffers.setdefault(run_id, [])
+    _run_done_events.setdefault(run_id, asyncio.Event())
     buf = _run_buffers[run_id]
 
     exit_code = -1
@@ -193,12 +195,16 @@ async def execute_run(websocket: WebSocket, run_id: str):
             await websocket.close()
             return
 
-        # Pending — mark running, start the background task
+        # Pending — mark running, start the background task.
+        # Initialize buffer and done event HERE (before create_task) so the
+        # streaming loop below never sees buf=None for a brand-new run.
         if run.status == "pending":
             run.status = "running"
             run.started_at = datetime.now(timezone.utc)
             run.output = ""
             await db.commit()
+            _run_buffers[run_id] = []
+            _run_done_events[run_id] = asyncio.Event()
             asyncio.create_task(_execute_tool(run_id, run.command))
             await websocket.send_json({"type": "command", "data": run.command})
             await websocket.send_json({
@@ -243,7 +249,7 @@ async def execute_run(websocket: WebSocket, run_id: str):
             buf = _run_buffers.get(run_id)
 
             if buf is None:
-                # Task completed and cleaned up the buffer
+                # Buffer cleaned up after 60s grace period — task long finished
                 break
 
             if len(buf) > cursor:
@@ -251,9 +257,11 @@ async def execute_run(websocket: WebSocket, run_id: str):
                 await websocket.send_json({"type": "output", "data": chunk})
                 cursor = len(buf)
 
-            if run_id not in _running_processes:
-                # Process exited — drain any final lines then stop
-                await asyncio.sleep(0.1)
+            # Done event fires only after subprocess exits AND DB write completes.
+            # Safe to use as the exit signal — can never fire before the process starts.
+            event = _run_done_events.get(run_id)
+            if event and event.is_set():
+                # Drain any lines that arrived between the last poll and the event
                 buf = _run_buffers.get(run_id, [])
                 if len(buf) > cursor:
                     chunk = "".join(buf[cursor:])
@@ -266,19 +274,11 @@ async def execute_run(websocket: WebSocket, run_id: str):
         # Client navigated away — background task keeps running
         return
 
-    # Wait for the background task to finish its DB write, then send done
-    event = _run_done_events.get(run_id)
-    if event:
-        try:
-            await asyncio.wait_for(event.wait(), timeout=5.0)
-        except asyncio.TimeoutError:
-            pass
-
     async with AsyncSessionLocal() as db:
         result = await db.execute(select(Run).where(Run.id == run_id))
         final_run = result.scalar_one_or_none()
 
-    if final_run:
+    if final_run and final_run.status != "running":
         try:
             await websocket.send_json({
                 "type": "done",

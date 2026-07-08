@@ -1,6 +1,7 @@
 FROM python:3.13-slim-bookworm
 
-# Install system dependencies and pentest tools
+# Single apt layer — includes both runtime deps and Ruby/nokogiri build deps.
+# Build-only packages are purged after all gem compilation is done (see below).
 RUN apt-get update && apt-get install -y --no-install-recommends \
     # Core utilities
     curl wget git netcat-openbsd dnsutils whois unzip \
@@ -13,10 +14,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     samba-common-bin \
     snmp \
     sslscan \
-    # Ruby (needed for whatweb, wpscan, cewl)
+    # Ruby runtime (kept) + build deps (purged after gem compilation)
     ruby ruby-dev \
-    # Build dependencies + Perl (needed for nikto, wpscan native gems)
     gcc make libc6-dev libffi-dev libssl-dev \
+    pkg-config libxml2-dev libxslt1-dev zlib1g-dev \
+    # Perl (needed for nikto)
     perl libnet-ssleay-perl libjson-perl libxml-writer-perl \
     && rm -rf /var/lib/apt/lists/*
 
@@ -86,11 +88,8 @@ RUN curl -L "https://github.com/ropnop/kerbrute/releases/latest/download/kerbrut
 RUN curl -sSfL https://raw.githubusercontent.com/trufflesecurity/trufflehog/main/scripts/install.sh \
     | sh -s -- -b /usr/local/bin
 
-# wpscan — pre-build nokogiri with system libxml2 to skip bundled source compilation
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        pkg-config libxml2-dev libxslt1-dev zlib1g-dev \
-    && rm -rf /var/lib/apt/lists/* \
-    && gem install nokogiri -- --use-system-libraries \
+# wpscan — nokogiri build deps are already installed above; compile against system libxml2
+RUN gem install nokogiri -- --use-system-libraries \
     && gem install wpscan
 
 # cewl — not on RubyGems; install via git clone
@@ -102,6 +101,20 @@ RUN git clone --depth=1 https://github.com/digininja/CeWL /opt/cewl && \
     ln -sf /opt/cewl/cewl.rb /usr/local/bin/cewl && \
     chmod +x /opt/cewl/cewl.rb
 
+# Purge build-only packages now that all gem native extensions are compiled.
+# NOTE: intentionally NOT using --auto-remove / apt-get autoremove here.
+# autoremove would remove libxml2/libxslt1.1/zlib1g (the runtime .so files) because
+# apt sees them as auto-installed deps of the -dev packages — but nokogiri links
+# against them at runtime and apt has no way to know that.
+RUN apt-get purge -y \
+        ruby-dev \
+        gcc make libc6-dev libffi-dev libssl-dev \
+        pkg-config libxml2-dev libxslt1-dev zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/* \
+    && rm -rf /var/lib/gems/*/cache/ \
+    && rm -rf /root/.bundle/cache \
+    && rm -rf /root/.gem/cache
+
 # pip-based tools
 RUN pip install --no-cache-dir --break-system-packages \
     wafw00f \
@@ -109,7 +122,6 @@ RUN pip install --no-cache-dir --break-system-packages \
     impacket \
     bbot \
     subdominator
-
 
 # searchsploit / exploit-db
 RUN git clone --depth=1 https://gitlab.com/exploit-database/exploitdb /opt/exploitdb && \
