@@ -12,7 +12,7 @@ docker-compose up --build
 
 Then open [http://localhost:3000](http://localhost:3000).
 
-All tools and dependencies are bundled in the image. 32 tools are pre-configured and ready to use on first boot.
+All tools and dependencies are bundled in the image. 33 tools are pre-configured and ready to use on first boot.
 
 ---
 
@@ -25,7 +25,7 @@ All tools and dependencies are bundled in the image. 32 tools are pre-configured
 - **Vuln scanning:** nuclei, sqlmap
 - **Cloud:** cloud_enum
 - **Secrets:** trufflehog
-- **Utilities:** hydra, searchsploit, cewl, john, netcat
+- **Utilities:** hydra, searchsploit, cewl, john, netcat, nslookup
 
 **Platform features:**
 - Session management — one session per engagement, tracks target, scope, notes, and status
@@ -35,13 +35,15 @@ All tools and dependencies are bundled in the image. 32 tools are pre-configured
 - Concurrent terminal tabs — each run gets its own tab; tabs persist until closed; click history to reopen
 - Terminal filter — search tool output with match count and keyboard navigation (Enter / Shift+Enter)
 - Kill button — terminate any long-running tool mid-stream
+- Stage + Run — tool cards have a Stage button (pre-fills the shell tab for review/edit) and a quick ▶ run button (executes immediately)
+- Shell tab — press `+` in the terminal tab bar to open a free-form command input; type any command and stream its output like any other run
 - Extra flags — append one-off flags to any tool at run time without editing its definition
 - Session notes — auto-saving notes editor per engagement
 - Findings tracker — log critical/high/medium/low/info findings; attach one or more tool runs as evidence per finding
-- Engagement checklist — per-session phase checklist + manual tool tracking with run auto-detection
+- Engagement checklist — per-session phase checklist tailored to engagement type (External, Internal, or Web); each type has its own set of phases plus manual tool tracking with run auto-detection
 - Run suites — build named sequences of tools that execute automatically in order; blank params filled at launch time
 - Report export — one-click Markdown export of the full engagement: session info, findings by severity, and all tool output with ANSI stripped
-- Wordlist browser — auto-discovers wordlists from mounted volumes; Browse button on wordlist params
+- Wordlist browser — auto-discovers wordlists from mounted volumes; Browse button on wordlist params; create custom wordlists directly in the UI (stored in `/data/custom_wordlists/`)
 - Run history — every command, every output, timestamped
 
 ---
