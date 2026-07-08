@@ -77,6 +77,20 @@ DEFAULT_TOOLS = [
         "is_builtin": True,
     },
     {
+        "name": "nslookup",
+        "description": "Quick DNS record lookup — A, MX, NS, TXT, CNAME, or reverse-lookup an IP against any resolver",
+        "category": "recon",
+        "binary": "nslookup",
+        "default_flags": "",
+        "parameters": [
+            {"name": "type",   "flag": "-type",   "placeholder": "MX, NS, TXT, CNAME, ANY", "required": False, "description": "Record type (default: A)"},
+            {"name": "target", "flag": "",         "placeholder": "target.com or 192.168.1.1", "required": True,  "description": "Domain or IP to look up"},
+            {"name": "server", "flag": "",         "placeholder": "8.8.8.8",                  "required": False, "description": "DNS server to query (default: system resolver)"},
+        ],
+        "workflow_tags": ["external", "internal", "web"],
+        "is_builtin": True,
+    },
+    {
         "name": "BBOT - Subdomain Enum",
         "description": "Recursive attack surface mapping — subdomains, emails, web tech discovery, and more",
         "category": "recon",

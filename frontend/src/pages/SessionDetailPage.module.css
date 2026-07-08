@@ -133,6 +133,8 @@
 .toolName { font-size: 12px; font-weight: 600; color: var(--text-primary); }
 .toolCmd { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); display: block; margin-bottom: 8px; }
 
+.toolActions { display: flex; gap: 6px; margin-top: 8px; }
+
 .paramField { margin-bottom: 6px; }
 .paramLabel { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 3px; }
 
@@ -698,3 +700,84 @@
   color: var(--text-muted);
 }
 .addTargetCancel:hover { color: var(--text-primary); border-color: var(--text-muted); }
+
+/* ── Shell tab (in terminal column) ───────────────────────── */
+
+.newTabBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 10px;
+  margin-left: 2px;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: 3px;
+  align-self: stretch;
+  transition: color 0.12s, background 0.12s;
+  flex-shrink: 0;
+}
+.newTabBtn:hover { color: var(--accent); background: var(--accent-glow); }
+
+.shellTabPane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  text-align: center;
+}
+
+.shellInputRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  width: 100%;
+  max-width: 560px;
+  transition: border-color 0.15s;
+}
+.shellInputRow:focus-within { border-color: var(--accent); }
+
+.shellPrompt {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  color: var(--accent);
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.shellInput {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--text-primary);
+  caret-color: var(--accent);
+  min-width: 0;
+}
+.shellInput::placeholder { color: var(--text-muted); }
+
+.shellRunBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  background: var(--accent-glow);
+  border: 1px solid var(--accent-dim);
+  border-radius: 4px;
+  color: var(--accent);
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+.shellRunBtn:hover:not(:disabled) { background: rgba(57, 211, 83, 0.2); border-color: var(--accent); }
+.shellRunBtn:disabled { opacity: 0.35; cursor: default; }

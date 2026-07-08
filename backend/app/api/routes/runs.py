@@ -23,7 +23,8 @@ _run_done_events: dict[str, asyncio.Event] = {}
 
 class RunCreate(BaseModel):
     session_id: str
-    tool_id: str
+    tool_id: Optional[str] = None
+    command: Optional[str] = None   # free-form shell run (no tool lookup)
     param_values: dict = {}
     extra_flags: Optional[str] = ""
 
@@ -126,17 +127,27 @@ async def get_run(run_id: str, db: AsyncSession = Depends(get_db)):
 
 @router.post("/", status_code=201)
 async def create_run(body: RunCreate, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Tool).where(Tool.id == body.tool_id))
-    tool = result.scalar_one_or_none()
-    if not tool:
-        raise HTTPException(status_code=404, detail="Tool not found")
-
-    command = build_command(tool, body.param_values, body.extra_flags or "")
+    if body.tool_id:
+        result = await db.execute(select(Tool).where(Tool.id == body.tool_id))
+        tool = result.scalar_one_or_none()
+        if not tool:
+            raise HTTPException(status_code=404, detail="Tool not found")
+        command = build_command(tool, body.param_values, body.extra_flags or "")
+        tool_id = tool.id
+        tool_name = tool.name
+    elif body.command:
+        command = body.command.strip()
+        if not command:
+            raise HTTPException(status_code=400, detail="command is required")
+        tool_id = "shell"
+        tool_name = command.split()[0]  # first token for tab label
+    else:
+        raise HTTPException(status_code=400, detail="Either tool_id or command is required")
 
     run = Run(
         session_id=body.session_id,
-        tool_id=tool.id,
-        tool_name=tool.name,
+        tool_id=tool_id,
+        tool_name=tool_name,
         command=command,
         param_values=body.param_values,
         status="pending",

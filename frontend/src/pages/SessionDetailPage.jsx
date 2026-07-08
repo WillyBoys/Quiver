@@ -7,6 +7,7 @@ import ChecklistPane from "../components/checklist/ChecklistPane.jsx";
 import styles from "./SessionDetailPage.module.css";
 
 const SEVERITY_OPTS = ["critical", "high", "medium", "low", "info"];
+const SHELL_TAB = "__shell__";
 const CAT_ORDER = ["cloud", "enum", "recon", "secrets", "util", "vuln", "web"];
 const CAT_LABELS = { recon: "Recon", web: "Web", enum: "Enum", vuln: "Vuln", cloud: "Cloud", secrets: "Secrets", util: "Util" };
 
@@ -49,6 +50,7 @@ export default function SessionDetailPage() {
   const [suiteParams, setSuiteParams] = useState({});   // stepIdx -> {paramName: value}
   const [runningSuite, setRunningSuite] = useState(false);
   const [sidebarView, setSidebarView] = useState("tools");   // "tools" | "checklist"
+  const [shellCmd, setShellCmd] = useState("");
   const [workflowFilter, setWorkflowFilter] = useState("all"); // "all" | "external" | "internal" | "web"
   const [phaseChecks, setPhaseChecks] = useState({});
   const [customItems, setCustomItems] = useState([]);
@@ -126,6 +128,45 @@ export default function SessionDetailPage() {
         setRuns((prev) => prev.map((r) =>
           r.id === run.id ? { ...r, status: msg.status, output: liveOutput[run.id] } : r
         ));
+      },
+      onError: (err) => {
+        setStreaming((s) => ({ ...s, [run.id]: false }));
+        setLiveOutput((o) => ({ ...o, [run.id]: (o[run.id] || "") + `\n[ERROR] ${err}` }));
+      },
+    });
+  }
+
+  function stageTool(tool) {
+    const params = runParams[tool.id] || {};
+    const flags = extraFlags[tool.id] || "";
+    const parts = [tool.binary];
+    if (tool.default_flags) parts.push(tool.default_flags);
+    (tool.parameters || []).forEach((p) => {
+      const val = params[p.name] || "";
+      if (val) parts.push(p.flag ? `${p.flag} ${val}` : val);
+    });
+    if (flags) parts.push(flags);
+    setShellCmd(parts.join(" "));
+    if (!openTabs.includes(SHELL_TAB)) setOpenTabs((t) => [...t, SHELL_TAB]);
+    setActiveRunId(SHELL_TAB);
+  }
+
+  async function runShellCommand() {
+    const cmd = shellCmd.trim();
+    if (!cmd) return;
+    setShellCmd("");
+    const run = await api.runs.create({ session_id: sessionId, command: cmd });
+    setRuns((r) => [run, ...r]);
+    // Swap the shell input tab out for the real run tab
+    setOpenTabs((t) => t.includes(SHELL_TAB) ? t.map((id) => id === SHELL_TAB ? run.id : id) : [...t, run.id]);
+    setActiveRunId(run.id);
+    setLiveOutput((o) => ({ ...o, [run.id]: "" }));
+    setStreaming((s) => ({ ...s, [run.id]: true }));
+    createRunSocket(run.id, {
+      onOutput: (line) => setLiveOutput((o) => ({ ...o, [run.id]: (o[run.id] || "") + line })),
+      onDone: (msg) => {
+        setStreaming((s) => ({ ...s, [run.id]: false }));
+        setRuns((prev) => prev.map((r) => r.id === run.id ? { ...r, status: msg.status } : r));
       },
       onError: (err) => {
         setStreaming((s) => ({ ...s, [run.id]: false }));
@@ -624,10 +665,18 @@ export default function SessionDetailPage() {
                       onChange={(e) => setExtraFlags((ef) => ({ ...ef, [tool.id]: e.target.value }))} />
                   </div>
 
-                  <button className="btn btn-primary" style={{ width: "100%", marginTop: 8, justifyContent: "center" }}
-                    onClick={() => runTool(tool)}>
-                    <Play size={12} /> Run
-                  </button>
+                  <div className={styles.toolActions}>
+                    <button className="btn btn-primary" style={{ flex: 1, justifyContent: "center" }}
+                      onClick={() => stageTool(tool)}
+                      title="Fill command in shell tab for review/edit">
+                      Stage
+                    </button>
+                    <button className="btn btn-ghost" style={{ padding: "0 10px", justifyContent: "center", border: "1px solid var(--accent-dim)", color: "var(--accent)" }}
+                      onClick={() => runTool(tool)}
+                      title="Run immediately">
+                      <Play size={12} />
+                    </button>
+                  </div>
                 </div>
               );
             })}
@@ -638,54 +687,106 @@ export default function SessionDetailPage() {
 
         {/* Center: terminal output */}
         <div className={styles.terminalColumn}>
-          {openTabs.length > 0 ? (
-            <>
-              {/* Tab bar */}
-              <div className={styles.terminalTabs}>
-                {openTabs.map((tabId) => {
-                  const tabRun = runs.find((r) => r.id === tabId);
-                  if (!tabRun) return null;
-                  const tabStreaming = streaming[tabId] || false;
-                  const dotStatus = tabStreaming ? "running" : tabRun.status;
-                  return (
-                    <button
-                      key={tabId}
-                      className={`${styles.terminalTab} ${tabId === activeRunId ? styles.terminalTabActive : ""}`}
-                      onClick={() => setActiveRunId(tabId)}
+          {/* Tab bar — always visible so + is always reachable */}
+          <div className={styles.terminalTabs}>
+            {openTabs.map((tabId) => {
+              if (tabId === SHELL_TAB) {
+                return (
+                  <button
+                    key={SHELL_TAB}
+                    className={`${styles.terminalTab} ${activeRunId === SHELL_TAB ? styles.terminalTabActive : ""}`}
+                    onClick={() => setActiveRunId(SHELL_TAB)}
+                  >
+                    <span className={styles.tabName} style={{ fontFamily: "var(--font-mono)", color: "var(--accent)" }}>$_</span>
+                    <span
+                      className={styles.tabClose}
+                      role="button"
+                      onClick={(e) => { e.stopPropagation(); closeTab(SHELL_TAB); }}
                     >
-                      <span className={`${styles.tabDot} ${styles[`dot_${dotStatus}`]}`} />
-                      <span className={styles.tabName}>{tabRun.tool_name}</span>
-                      <span
-                        className={styles.tabClose}
-                        role="button"
-                        onClick={(e) => { e.stopPropagation(); closeTab(tabId); }}
-                      >
-                        <X size={11} />
-                      </span>
-                    </button>
-                  );
-                })}
+                      <X size={11} />
+                    </span>
+                  </button>
+                );
+              }
+              const tabRun = runs.find((r) => r.id === tabId);
+              if (!tabRun) return null;
+              const tabStreaming = streaming[tabId] || false;
+              const dotStatus = tabStreaming ? "running" : tabRun.status;
+              return (
+                <button
+                  key={tabId}
+                  className={`${styles.terminalTab} ${tabId === activeRunId ? styles.terminalTabActive : ""}`}
+                  onClick={() => setActiveRunId(tabId)}
+                >
+                  <span className={`${styles.tabDot} ${styles[`dot_${dotStatus}`]}`} />
+                  <span className={styles.tabName}>{tabRun.tool_name}</span>
+                  <span
+                    className={styles.tabClose}
+                    role="button"
+                    onClick={(e) => { e.stopPropagation(); closeTab(tabId); }}
+                  >
+                    <X size={11} />
+                  </span>
+                </button>
+              );
+            })}
+            <button
+              className={styles.newTabBtn}
+              title="New command"
+              onClick={() => {
+                if (!openTabs.includes(SHELL_TAB)) setOpenTabs((t) => [...t, SHELL_TAB]);
+                setActiveRunId(SHELL_TAB);
+              }}
+            >
+              <Plus size={13} />
+            </button>
+          </div>
+          {/* Terminal body */}
+          <div className={styles.terminalBody}>
+            {activeRunId === SHELL_TAB ? (
+              <div className={styles.shellTabPane}>
+                <span className="mono" style={{ color: "var(--accent)", fontSize: 24 }}>{">"}_</span>
+                <div className={styles.shellInputRow}>
+                  <span className={styles.shellPrompt}>$</span>
+                  <input
+                    className={styles.shellInput}
+                    placeholder="nmap -sV 10.0.0.1"
+                    value={shellCmd}
+                    onChange={(e) => setShellCmd(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter" && shellCmd.trim()) runShellCommand(); }}
+                    spellCheck={false}
+                    autoComplete="off"
+                    autoFocus
+                  />
+                  <button
+                    className={styles.shellRunBtn}
+                    disabled={!shellCmd.trim()}
+                    onClick={runShellCommand}
+                    title="Run (Enter)"
+                  >
+                    <Play size={11} />
+                  </button>
+                </div>
+                <p className="text-muted" style={{ fontSize: 12 }}>Enter any command — output streams here.</p>
               </div>
-              {/* Terminal body */}
-              <div className={styles.terminalBody}>
-                <TerminalPane
-                  command={activeRun?.command}
-                  output={activeOutput}
-                  status={isActiveStreaming ? "running" : (activeRun?.status || "pending")}
-                  isStreaming={isActiveStreaming}
-                  onKill={isActiveStreaming ? killActiveRun : null}
-                />
-              </div>
-            </>
-          ) : (
-            <div className={styles.terminalBody}>
+            ) : activeRun ? (
+              <TerminalPane
+                command={activeRun?.command}
+                output={activeOutput}
+                status={isActiveStreaming ? "running" : (activeRun?.status || "pending")}
+                isStreaming={isActiveStreaming}
+                onKill={isActiveStreaming ? killActiveRun : null}
+              />
+            ) : (
               <div className={styles.terminalEmpty}>
                 <span className="mono" style={{ color: "var(--accent)", fontSize: 24 }}>{">"}_</span>
                 <p className="text-muted" style={{ marginTop: 12 }}>Select a tool and hit Run.</p>
-                <p className="text-muted" style={{ fontSize: 12, marginTop: 4 }}>Output streams here in real time.</p>
+                <p className="text-muted" style={{ fontSize: 12, marginTop: 4 }}>
+                  Press <strong style={{ color: "var(--accent)", fontFamily: "var(--font-mono)" }}>+</strong> above for a free command.
+                </p>
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
 
         {/* Right: notes + run history + findings */}
