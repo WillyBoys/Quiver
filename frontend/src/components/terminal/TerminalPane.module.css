@@ -4,6 +4,10 @@
   border-radius: 6px;
   overflow: hidden;
   font-family: var(--font-mono);
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
 }
 
 .commandBar {
@@ -13,6 +17,7 @@
   padding: 10px 14px;
   background: #0d1117;
   border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
 }
 
 .prompt {
@@ -78,6 +83,9 @@
 .outputArea {
   display: flex;
   flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .outputHeader {
@@ -86,6 +94,7 @@
   gap: 8px;
   padding: 8px 14px;
   border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
 }
 
 /* Filter */
@@ -173,9 +182,9 @@
   color: #c9d1d9;
   white-space: pre-wrap;
   overflow-wrap: break-word;
-  min-height: 120px;
-  max-height: calc(100vh - 220px);
+  flex: 1;
   overflow-y: auto;
+  min-height: 0;
 }
 
 @keyframes blink {
