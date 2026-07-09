@@ -57,6 +57,7 @@ export default function SessionDetailPage() {
   const [workflowFilter, setWorkflowFilter] = useState("all"); // "all" | "external" | "internal" | "web"
   const [phaseChecks, setPhaseChecks] = useState({});
   const [customItems, setCustomItems] = useState([]);
+  const [confirmDialog, setConfirmDialog] = useState(null); // { message, onConfirm }
 
   useEffect(() => {
     api.sessions.get(sessionId).then((s) => {
@@ -205,6 +206,10 @@ export default function SessionDetailPage() {
   function openTab(runId) {
     setOpenTabs((prev) => prev.includes(runId) ? prev : [...prev, runId]);
     setActiveRunId(runId);
+  }
+
+  function withConfirm(message, fn) {
+    setConfirmDialog({ message, onConfirm: fn });
   }
 
   async function deleteRun(runId) {
@@ -496,6 +501,19 @@ export default function SessionDetailPage() {
 
   return (
     <div className={styles.page}>
+      {/* Confirm dialog */}
+      {confirmDialog && (
+        <div className={styles.modal} onClick={() => setConfirmDialog(null)}>
+          <div className={styles.confirmBox} onClick={(e) => e.stopPropagation()}>
+            <p className={styles.confirmMsg}>{confirmDialog.message}</p>
+            <div className={styles.formActions}>
+              <button className="btn btn-ghost" onClick={() => setConfirmDialog(null)}>Cancel</button>
+              <button className="btn btn-danger" onClick={() => { confirmDialog.onConfirm(); setConfirmDialog(null); }}>Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Top bar */}
       <div className={styles.topBar}>
         <button className="btn btn-ghost" style={{ padding: "4px 10px" }} onClick={() => navigate("/sessions")}>
@@ -855,7 +873,7 @@ export default function SessionDetailPage() {
                       <span className={`${styles.runStatus} ${styles[`status_${displayStatus}`]}`}>
                         {displayStatus}
                       </span>
-                      <button className={styles.delBtn} onClick={(e) => { e.stopPropagation(); deleteRun(run.id); }}>
+                      <button className={styles.delBtn} onClick={(e) => { e.stopPropagation(); withConfirm(`Delete run "${run.tool_name}"?`, () => deleteRun(run.id)); }}>
                         <Trash2 size={11} />
                       </button>
                     </div>
@@ -875,7 +893,7 @@ export default function SessionDetailPage() {
                   <div key={f.id} className={styles.findingItem}>
                     <div className={styles.findingTop}>
                       <span className={`badge badge-${f.severity}`}>{f.severity}</span>
-                      <button className={styles.delBtn} onClick={() => removeFinding(f.id)}>
+                      <button className={styles.delBtn} onClick={() => withConfirm(`Delete finding "${f.title}"?`, () => removeFinding(f.id))}>
                         <X size={11} />
                       </button>
                     </div>
