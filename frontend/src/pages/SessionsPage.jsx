@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus, Terminal, Trash2, ExternalLink } from "lucide-react";
+import { Plus, Terminal, Trash2, ExternalLink, Search } from "lucide-react";
 import { api } from "../utils/api.js";
 import styles from "./SessionsPage.module.css";
 
@@ -15,7 +15,16 @@ export default function SessionsPage() {
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({ name: "", target: "", engagement_type: "external", scope: "", notes: "" });
   const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
   const navigate = useNavigate();
+
+  const filtered = useMemo(() => {
+    if (!search.trim()) return sessions;
+    const q = search.toLowerCase();
+    return sessions.filter(
+      (s) => s.name.toLowerCase().includes(q) || (s.target || "").toLowerCase().includes(q)
+    );
+  }, [sessions, search]);
 
   useEffect(() => {
     api.sessions.list().then(setSessions).finally(() => setLoading(false));
@@ -83,6 +92,18 @@ export default function SessionsPage() {
         </div>
       )}
 
+      {!loading && sessions.length > 0 && (
+        <div className={styles.searchRow}>
+          <Search size={14} className={styles.searchIcon} />
+          <input
+            className={styles.searchInput}
+            placeholder="Search by name or target…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+      )}
+
       {loading ? (
         <div className={styles.empty}><span className="mono text-muted">Loading sessions...</span></div>
       ) : sessions.length === 0 ? (
@@ -92,7 +113,10 @@ export default function SessionsPage() {
         </div>
       ) : (
         <div className={styles.list}>
-          {sessions.map((s) => (
+          {filtered.length === 0 && (
+            <p className={styles.noResults}>No sessions match &ldquo;{search}&rdquo;</p>
+          )}
+          {filtered.map((s) => (
             <div key={s.id} className={styles.sessionCard} onClick={() => navigate(`/sessions/${s.id}`)}>
               <div className={styles.sessionMain}>
                 <div className={styles.sessionName}>{s.name}</div>

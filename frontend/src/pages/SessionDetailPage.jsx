@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Play, Plus, Trash2, Flag, X, FolderOpen, Search, Download, ListOrdered, Link2 } from "lucide-react";
+import { ArrowLeft, Play, Plus, Trash2, Flag, X, FolderOpen, Search, Download, ListOrdered, Link2, SlidersHorizontal } from "lucide-react";
 import { api, createRunSocket } from "../utils/api.js";
 import TerminalPane from "../components/terminal/TerminalPane.jsx";
 import ChecklistPane from "../components/checklist/ChecklistPane.jsx";
@@ -33,6 +33,9 @@ export default function SessionDetailPage() {
   const [notesValue, setNotesValue] = useState("");
   const [notesSaved, setNotesSaved] = useState(true);
   const notesTimerRef = useRef(null);
+
+  const [toolSearch, setToolSearch] = useState("");
+  const [toolSearchOpen, setToolSearchOpen] = useState(false);
 
   const [wordlistPicker, setWordlistPicker] = useState(null); // null | { toolId, paramName }
   const [wordlists, setWordlists] = useState(null);           // null = not loaded yet
@@ -99,12 +102,20 @@ export default function SessionDetailPage() {
 
   const enabledTools = useMemo(() => tools.filter((t) => t.enabled), [tools]);
   const filteredTools = useMemo(() => {
+    if (toolSearch.trim()) {
+      const q = toolSearch.toLowerCase();
+      return enabledTools.filter(
+        (t) => t.name.toLowerCase().includes(q) ||
+               t.binary.toLowerCase().includes(q) ||
+               (t.category || "").toLowerCase().includes(q)
+      );
+    }
     let list = selectedCat === "all" ? enabledTools : enabledTools.filter((t) => t.category === selectedCat);
     if (workflowFilter !== "all") {
       list = list.filter((t) => (t.workflow_tags || []).includes(workflowFilter));
     }
     return list;
-  }, [enabledTools, selectedCat, workflowFilter]);
+  }, [enabledTools, selectedCat, workflowFilter, toolSearch]);
 
   async function runTool(tool) {
     const params = runParams[tool.id] || {};
@@ -583,26 +594,49 @@ export default function SessionDetailPage() {
             <>
           {/* Filter row */}
           <div className={styles.filterRow}>
-            <select
-              className={`${styles.filterSelect} ${workflowFilter !== "all" ? styles.filterSelectActive : ""}`}
-              value={workflowFilter}
-              onChange={e => setWorkflowFilter(e.target.value)}
-            >
-              <option value="all">All Engagements</option>
-              <option value="external">External</option>
-              <option value="internal">Internal</option>
-              <option value="web">Web</option>
-            </select>
-            <select
-              className={`${styles.filterSelect} ${selectedCat !== "all" ? styles.filterSelectActive : ""}`}
-              value={selectedCat}
-              onChange={e => setSelectedCat(e.target.value)}
-            >
-              <option value="all">All Categories</option>
-              {CAT_ORDER.map(c => (
-                <option key={c} value={c}>{CAT_LABELS[c]}</option>
-              ))}
-            </select>
+            {toolSearchOpen ? (
+              <>
+                <Search size={12} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
+                <input
+                  className={styles.toolSearchInput}
+                  placeholder="Search tools…"
+                  value={toolSearch}
+                  onChange={e => setToolSearch(e.target.value)}
+                  autoFocus
+                />
+                <button className={styles.toolSearchClose} title="Close search"
+                  onClick={() => { setToolSearchOpen(false); setToolSearch(""); }}>
+                  <X size={12} />
+                </button>
+              </>
+            ) : (
+              <>
+                <select
+                  className={`${styles.filterSelect} ${workflowFilter !== "all" ? styles.filterSelectActive : ""}`}
+                  value={workflowFilter}
+                  onChange={e => setWorkflowFilter(e.target.value)}
+                >
+                  <option value="all">All Engagements</option>
+                  <option value="external">External</option>
+                  <option value="internal">Internal</option>
+                  <option value="web">Web</option>
+                </select>
+                <select
+                  className={`${styles.filterSelect} ${selectedCat !== "all" ? styles.filterSelectActive : ""}`}
+                  value={selectedCat}
+                  onChange={e => setSelectedCat(e.target.value)}
+                >
+                  <option value="all">All Categories</option>
+                  {CAT_ORDER.map(c => (
+                    <option key={c} value={c}>{CAT_LABELS[c]}</option>
+                  ))}
+                </select>
+                <button className={styles.toolSearchOpen} title="Search tools"
+                  onClick={() => setToolSearchOpen(true)}>
+                  <Search size={12} />
+                </button>
+              </>
+            )}
           </div>
           <div className={styles.toolList}>
             {filteredTools.length === 0 && (
