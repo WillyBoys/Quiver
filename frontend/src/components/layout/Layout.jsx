@@ -1,11 +1,12 @@
 import { NavLink } from "react-router-dom";
-import { Terminal, Shield, BookOpen, Radio, ListOrdered, Github } from "lucide-react";
+import { Terminal, Shield, BookOpen, Radio, ListOrdered, Globe, Github } from "lucide-react";
 import styles from "./Layout.module.css";
 
 const NAV = [
   { to: "/sessions", icon: Terminal,    label: "Sessions" },
   { to: "/tools",    icon: Shield,      label: "Tools" },
   { to: "/suites",   icon: ListOrdered, label: "Suites" },
+  { to: "/osint",    icon: Globe,       label: "OSINT" },
   { to: "/wordlists",icon: BookOpen,    label: "Wordlists" },
   { to: "/remote",   icon: Radio,       label: "Remote" },
 ];

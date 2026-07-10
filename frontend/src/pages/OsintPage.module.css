@@ -1,0 +1,204 @@
+.page {
+  padding: 32px;
+  max-width: 1300px;
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 28px;
+  flex-wrap: wrap;
+}
+
+.title {
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.subtitle {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.searchWrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 7px 12px;
+  min-width: 220px;
+  transition: border-color 0.15s;
+  flex-shrink: 0;
+}
+.searchWrap:focus-within { border-color: var(--accent); }
+
+.searchIcon { color: var(--text-muted); flex-shrink: 0; }
+
+.searchInput {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  color: var(--text-primary);
+}
+.searchInput::placeholder { color: var(--text-muted); }
+
+.noResults {
+  font-size: 13px;
+  color: var(--text-muted);
+  padding: 40px 0;
+  text-align: center;
+}
+
+/* Group filter chips */
+.groupFilters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 22px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 11px;
+  font-size: 11px;
+  font-weight: 500;
+  font-family: var(--font-ui);
+  color: var(--text-secondary);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  cursor: pointer;
+  transition: border-color 0.13s, color 0.13s, background 0.13s;
+  letter-spacing: 0.03em;
+}
+.chip:hover {
+  border-color: var(--accent-dim);
+  color: var(--text-primary);
+}
+.chipActive {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--bg-elevated);
+}
+
+.chipCount {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  background: var(--bg-elevated);
+  border-radius: 8px;
+  padding: 0 4px;
+  line-height: 1.6;
+}
+.chipActive .chipCount {
+  color: var(--accent);
+  background: transparent;
+}
+
+/* Card grid — masonry via CSS columns */
+.grid {
+  columns: 300px 4;
+  column-gap: 14px;
+}
+
+.card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  overflow: hidden;
+  transition: border-color 0.15s;
+  break-inside: avoid;
+  margin-bottom: 14px;
+  display: block;
+}
+.card:hover { border-color: var(--accent-dim); }
+
+.cardHeader {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 14px;
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border);
+}
+
+.cardIcon { color: var(--accent); flex-shrink: 0; }
+
+.cardTitle {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.cardCount {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 5px;
+}
+
+/* Link list */
+.linkList {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.link {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 8px 14px;
+  text-decoration: none;
+  border-bottom: 1px solid var(--border-subtle);
+  transition: background 0.12s;
+}
+.linkList li:last-child .link { border-bottom: none; }
+
+.link:hover { background: var(--bg-elevated); }
+.link:hover .linkName { color: var(--accent); }
+.link:hover .linkArrow { opacity: 1; }
+
+.linkName {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: color 0.12s;
+}
+
+.linkDesc {
+  flex: 1;
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.linkArrow {
+  color: var(--accent);
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.12s;
+}

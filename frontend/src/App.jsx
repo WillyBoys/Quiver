@@ -6,6 +6,7 @@ import ToolsPage from "./pages/ToolsPage.jsx";
 import WordlistsPage from "./pages/WordlistsPage.jsx";
 import RemotePage from "./pages/RemotePage.jsx";
 import SuitesPage from "./pages/SuitesPage.jsx";
+import OsintPage from "./pages/OsintPage.jsx";
 
 export default function App() {
   return (
@@ -18,6 +19,7 @@ export default function App() {
         <Route path="/suites" element={<SuitesPage />} />
         <Route path="/wordlists" element={<WordlistsPage />} />
         <Route path="/remote" element={<RemotePage />} />
+        <Route path="/osint" element={<OsintPage />} />
       </Routes>
     </Layout>
   );
