@@ -1,13 +1,16 @@
 import logging
 import sys
 import time
+import asyncio
 from logging.handlers import RotatingFileHandler
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
+import httpx
+
 from app.db.database import init_db
-from app.api.routes import tools, sessions, wordlists, runs, suites
+from app.api.routes import tools, sessions, wordlists, runs, suites, ai
 from app.db.seed import seed_default_tools
 
 
@@ -42,11 +45,30 @@ _setup_logging()
 logger = logging.getLogger(__name__)
 
 
+async def _warmup_ai() -> None:
+    """Send a tiny inference request so phi3:mini is loaded into RAM before first use."""
+    await asyncio.sleep(5)  # give Ollama a moment after compose start
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            resp = await client.post(
+                "http://ai:11434/api/generate",
+                json={"model": "phi3:mini", "prompt": "hi", "stream": False,
+                      "options": {"num_predict": 1}},
+            )
+        if resp.status_code == 200:
+            logger.info("AI warmup complete — phi3:mini is loaded and ready")
+        else:
+            logger.warning("AI warmup got status %s — model may load on first use", resp.status_code)
+    except Exception as e:
+        logger.warning("AI warmup skipped (%s) — model will load on first analyze", e)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Quiver API starting up")
     await init_db()
     await seed_default_tools()
+    asyncio.create_task(_warmup_ai())
     logger.info("Quiver API ready")
     yield
     logger.info("Quiver API shutting down")
@@ -71,6 +93,7 @@ app.include_router(sessions.router, prefix="/api/sessions", tags=["sessions"])
 app.include_router(wordlists.router, prefix="/api/wordlists", tags=["wordlists"])
 app.include_router(runs.router, prefix="/api/runs", tags=["runs"])
 app.include_router(suites.router, prefix="/api/suites", tags=["suites"])
+app.include_router(ai.router, prefix="/api/ai", tags=["ai"])
 
 
 @app.get("/api/health")

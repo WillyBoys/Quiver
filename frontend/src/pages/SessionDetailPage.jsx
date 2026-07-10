@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Play, Plus, Trash2, Flag, X, FolderOpen, Search, Download, ListOrdered, Link2, SlidersHorizontal } from "lucide-react";
+import { ArrowLeft, Play, Plus, Trash2, Flag, X, FolderOpen, Search, Download, ListOrdered, Link2, SlidersHorizontal, Cpu } from "lucide-react";
 import { api, createRunSocket } from "../utils/api.js";
 import TerminalPane from "../components/terminal/TerminalPane.jsx";
 import ChecklistPane from "../components/checklist/ChecklistPane.jsx";
@@ -58,6 +58,7 @@ export default function SessionDetailPage() {
   const [phaseChecks, setPhaseChecks] = useState({});
   const [customItems, setCustomItems] = useState([]);
   const [confirmDialog, setConfirmDialog] = useState(null); // { message, onConfirm }
+  const [aiAnalysis, setAiAnalysis] = useState({});        // runId -> { status, text, model, error }
 
   useEffect(() => {
     api.sessions.get(sessionId).then((s) => {
@@ -446,6 +447,16 @@ export default function SessionDetailPage() {
     }
 
     setRunningSuite(false);
+  }
+
+  async function handleAnalyze(runId) {
+    setAiAnalysis((prev) => ({ ...prev, [runId]: { status: "loading" } }));
+    try {
+      const data = await api.ai.analyze(runId);
+      setAiAnalysis((prev) => ({ ...prev, [runId]: { status: "done", text: data.analysis, model: data.model } }));
+    } catch (err) {
+      setAiAnalysis((prev) => ({ ...prev, [runId]: { status: "error", error: err.message } }));
+    }
   }
 
   function handleJumpToTool(tool) {
@@ -838,7 +849,58 @@ export default function SessionDetailPage() {
                 </p>
               </div>
             )}
+            {/* Floating AI button — overlaid on terminal bottom-right */}
+            {activeRun && !isActiveStreaming &&
+              (activeRun.status === "complete" || activeRun.status === "error") &&
+              !aiAnalysis[activeRunId] && (
+                <button className={styles.aiFloatBtn} onClick={() => handleAnalyze(activeRunId)}>
+                  <Cpu size={13} />
+                  Analyze with AI
+                  <span className={styles.aiModel}>phi3:mini</span>
+                </button>
+            )}
           </div>
+
+          {/* AI Analysis Panel — shown when active run is finished */}
+          {activeRunId && activeRunId !== SHELL_TAB && activeRun && !isActiveStreaming &&
+            (activeRun.status === "complete" || activeRun.status === "error") && (() => {
+              const ai = aiAnalysis[activeRunId];
+              if (!ai) return null;
+              if (ai.status === "loading") {
+                return (
+                  <div className={styles.aiPanel}>
+                    <div className={styles.aiLoading}>
+                      <span className={styles.aiSpinner} />
+                      Analyzing with phi3:mini&hellip; this may take 30–60s on CPU
+                    </div>
+                  </div>
+                );
+              }
+              if (ai.status === "error") {
+                return (
+                  <div className={styles.aiPanel}>
+                    <div className={styles.aiError}>
+                      <Cpu size={12} />
+                      <span>{ai.error}</span>
+                      <button className={styles.aiRetry} onClick={() => handleAnalyze(activeRunId)}>Retry</button>
+                    </div>
+                  </div>
+                );
+              }
+              return (
+                <div className={styles.aiPanel}>
+                  <div className={styles.aiResultHeader}>
+                    <Cpu size={11} />
+                    <span>AI Analysis</span>
+                    <span className={styles.aiModel}>{ai.model}</span>
+                    <button className={styles.aiReanalyze} onClick={() => handleAnalyze(activeRunId)}>Re-analyze</button>
+                  </div>
+                  <div className={styles.aiResultInner}>
+                    <pre className={styles.aiText}>{ai.text}</pre>
+                  </div>
+                </div>
+              );
+            })()}
         </div>
 
         {/* Right: notes + run history + findings */}

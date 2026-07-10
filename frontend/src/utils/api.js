@@ -70,6 +70,9 @@ export const api = {
     update: (id, body) => req(`/suites/${id}`, { method: "PUT", body: JSON.stringify(body) }),
     delete: (id) => req(`/suites/${id}`, { method: "DELETE" }),
   },
+  ai: {
+    analyze: (runId) => req("/ai/analyze", { method: "POST", body: JSON.stringify({ run_id: runId }) }),
+  },
 };
 
 // WebSocket helper for streaming run output
