@@ -1,15 +1,20 @@
+import logging
+import time as _time
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.db.database import get_db, AsyncSessionLocal
 from app.models.run import Run
 from app.models.tool import Tool
+from app.models.session import Session as EngagementSession
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime, timezone
 import asyncio
 import os
 import signal
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -51,20 +56,29 @@ def build_command(tool: Tool, param_values: dict, extra_flags: str = "") -> str:
     return " ".join(parts)
 
 
-async def _execute_tool(run_id: str, command: str) -> None:
+async def _execute_tool(
+    run_id: str,
+    command: str,
+    session_id: str = "",
+    tool_name: str = "",
+) -> None:
     """Background task: runs the subprocess and accumulates output.
 
     Survives WebSocket disconnects — the caller just stops reading from the
     buffer, but this task keeps the process alive and writing.
     """
-    # Buffer and event may already exist (initialized by the WS handler before
-    # this task was scheduled). Use setdefault so we don't clobber them.
     _run_buffers.setdefault(run_id, [])
     _run_done_events.setdefault(run_id, asyncio.Event())
     buf = _run_buffers[run_id]
 
     exit_code = -1
     run_status = "error"
+    t_start = _time.monotonic()
+
+    logger.info(
+        "RUN START | run_id=%s session_id=%s tool=%s | %s",
+        run_id, session_id, tool_name, command[:300],
+    )
 
     try:
         process = await asyncio.create_subprocess_shell(
@@ -72,7 +86,7 @@ async def _execute_tool(run_id: str, command: str) -> None:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
             limit=1024 * 1024,
-            start_new_session=True,  # own process group so killpg reaches all children
+            start_new_session=True,
         )
         _running_processes[run_id] = process
 
@@ -86,10 +100,16 @@ async def _execute_tool(run_id: str, command: str) -> None:
 
     except Exception as e:
         buf.append(f"\n[ERROR] {str(e)}\n")
+        logger.error("RUN ERROR | run_id=%s | %s", run_id, str(e))
     finally:
         _running_processes.pop(run_id, None)
 
-    # Persist final output and status
+    duration = _time.monotonic() - t_start
+    logger.info(
+        "RUN END   | run_id=%s session_id=%s tool=%s | status=%s exit_code=%s duration=%.1fs",
+        run_id, session_id, tool_name, run_status, exit_code, duration,
+    )
+
     async with AsyncSessionLocal() as db:
         result = await db.execute(select(Run).where(Run.id == run_id))
         run = result.scalar_one_or_none()
@@ -100,7 +120,6 @@ async def _execute_tool(run_id: str, command: str) -> None:
             run.finished_at = datetime.now(timezone.utc)
             await db.commit()
 
-    # Signal any waiting WebSocket handlers that the DB write is done
     _run_done_events[run_id].set()
 
     # Keep buffer alive briefly so a reconnect that arrives just after
@@ -117,6 +136,23 @@ async def list_runs(session_id: str, db: AsyncSession = Depends(get_db)):
     )
     runs = result.scalars().all()
     return [_run_dict(r) for r in runs]
+
+
+@router.get("/all")
+async def list_all_runs(limit: int = 500, db: AsyncSession = Depends(get_db)):
+    """All runs across every session, newest first, with session name included."""
+    stmt = (
+        select(Run, EngagementSession.name.label("session_name"))
+        .outerjoin(EngagementSession, Run.session_id == EngagementSession.id)
+        .order_by(Run.created_at.desc())
+        .limit(limit)
+    )
+    result = await db.execute(stmt)
+    rows = result.all()
+    return [
+        {**_run_dict(run), "session_name": session_name or "Unknown"}
+        for run, session_name in rows
+    ]
 
 
 @router.get("/{run_id}")
@@ -155,6 +191,7 @@ async def create_run(body: RunCreate, db: AsyncSession = Depends(get_db)):
     db.add(run)
     await db.commit()
     await db.refresh(run)
+    logger.info("RUN QUEUED | run_id=%s session_id=%s tool=%s | %s", run.id, run.session_id, run.tool_name, command[:300])
     return _run_dict(run)
 
 
@@ -163,6 +200,7 @@ async def kill_run(run_id: str, db: AsyncSession = Depends(get_db)):
     """Send SIGTERM to a running tool process and its entire process group."""
     process = _running_processes.get(run_id)
     if process is not None:
+        logger.info("RUN KILL  | run_id=%s", run_id)
         try:
             os.killpg(process.pid, signal.SIGTERM)
         except (ProcessLookupError, PermissionError):
@@ -216,7 +254,7 @@ async def execute_run(websocket: WebSocket, run_id: str):
             await db.commit()
             _run_buffers[run_id] = []
             _run_done_events[run_id] = asyncio.Event()
-            asyncio.create_task(_execute_tool(run_id, run.command))
+            asyncio.create_task(_execute_tool(run_id, run.command, run.session_id, run.tool_name))
             await websocket.send_json({"type": "command", "data": run.command})
             await websocket.send_json({
                 "type": "start",
