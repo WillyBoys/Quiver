@@ -1,6 +1,6 @@
 # Quiver
 
-A self-hosted penetration testing platform. Run tools, stream CLI output in real time, track findings, and keep your engagements organized — all in a clean browser UI.
+A self-hosted penetration testing platform. Run tools, stream CLI output in real time, track findings, and keep your engagements organized — all in a clean browser UI. Includes local AI-assisted output analysis powered by Ollama — no cloud APIs, no data leaving your machine.
 
 ## Quick Start
 
@@ -13,6 +13,8 @@ docker-compose up --build
 Then open [http://localhost:3000](http://localhost:3000).
 
 All tools and dependencies are bundled in the image. 33 tools are pre-configured and ready to use on first boot.
+
+> **First-run note:** On startup, Quiver will automatically pull the `phi3:mini` AI model (~2.2 GB). This only happens once — the model is cached in a Docker volume. You can watch the pull with `docker logs -f quiver_ai_init`.
 
 ---
 
@@ -45,6 +47,10 @@ All tools and dependencies are bundled in the image. 33 tools are pre-configured
 - Report export — one-click Markdown export of the full engagement: session info, findings by severity, and all tool output with ANSI stripped
 - Wordlist browser — auto-discovers wordlists from mounted volumes; Browse button on wordlist params; create custom wordlists directly in the UI (stored in `/data/custom_wordlists/`)
 - Run history — every command, every output, timestamped
+- **AI analysis** — "Analyze with AI" button on every completed run; sends output to a local `phi3:mini` model (via Ollama) and returns a structured SUMMARY / FINDINGS / NEXT STEPS breakdown; fully offline, no data leaves the machine
+- **Activity log** — cross-session view of every tool run ever executed; UTC timestamps, search/filter, one-click export to `.txt`; live indicator while runs are in progress
+- **OSINT reference** — 470+ curated OSINT links across 37 categories (infrastructure, identity, threat intel, social media, financial, geolocation, and more); group filter chips and masonry layout for fast browsing
+- **Structured logging** — all tool runs logged to `/data/quiver.log` (rotating, UTC-timestamped) with run ID, session, tool, command, status, duration, and exit code
 
 ---
 
@@ -161,28 +167,60 @@ To install a new binary, see **[Adding_Custom_Tools.md](Adding_Custom_Tools.md)*
 
 ---
 
+## AI Analysis
+
+Every completed tool run has an **Analyze with AI** button that floats in the bottom-right of the terminal. Click it to get a structured breakdown from `phi3:mini`, a 3.8B Microsoft model optimized for technical reasoning:
+
+```
+SUMMARY
+What the output shows overall (2–3 sentences)
+
+FINDINGS
+• Notable open ports, services, versions, misconfigurations, credentials
+
+NEXT STEPS
+• Specific follow-up commands and actions
+```
+
+**The model runs entirely locally** inside the `quiver_ai` Docker container. Nothing is sent to any cloud service. The model is pulled automatically on first `docker compose up` and cached in a persistent volume — subsequent starts are instant.
+
+| Hardware | Expected response time |
+|---|---|
+| Apple Silicon (M-series) | 5–15 seconds |
+| Intel Mac / Linux CPU | 30–90 seconds |
+| GPU (8 GB+ VRAM) | 3–8 seconds |
+
+---
+
 ## Architecture
 
 ```
 quiver/
-├── docker-compose.yml        # backend + frontend + juice-shop
+├── docker-compose.yml        # backend + frontend + juice-shop + ai + ai-init
 ├── backend/                  # FastAPI + SQLite (aiosqlite)
 │   ├── Dockerfile            # python:3.13-slim-bookworm
 │   ├── requirements.txt
 │   ├── user-tools.txt        # add apt packages here; rebuild to apply
 │   ├── user-pip.txt          # add pip packages / git+ installs here; rebuild to apply
 │   └── app/
-│       ├── main.py
-│       ├── api/routes/       # tools, sessions, runs, wordlists
+│       ├── main.py           # startup: DB init, tool seed, AI model warmup
+│       ├── api/routes/       # tools, sessions, runs, wordlists, suites, ai
 │       ├── models/           # SQLAlchemy models
-│       └── db/               # database init + seed (32 default tools)
+│       └── db/               # database init + seed (33 default tools)
 └── frontend/                 # React 18 + Vite
     ├── vite.config.js        # proxies /api (HTTP + WebSocket) to backend:8000
     └── src/
-        ├── pages/            # Sessions, SessionDetail, Tools, Wordlists, Suites, Remote
+        ├── pages/            # Sessions, SessionDetail, Tools, Wordlists, Suites, Remote, Activity, OSINT
         ├── components/       # TerminalPane, Layout, ChecklistPane
         └── utils/api.js      # API + WebSocket client
 ```
+
+**Docker services:**
+- `quiver_backend` — FastAPI API server, tool execution engine
+- `quiver_frontend` — React/Vite UI
+- `quiver_juiceshop` — OWASP Juice Shop (built-in vulnerable target)
+- `quiver_ai` — Ollama LLM runtime (phi3:mini for AI analysis)
+- `quiver_ai_init` — one-shot model pull on first start; exits after completion
 
 Tool runs stream over **WebSockets** — the backend spawns the process and pipes stdout/stderr line-by-line to the browser in real time.
 
@@ -197,6 +235,20 @@ Session data, tool runs, and findings are stored in a SQLite database mounted at
 ## Security note
 
 Quiver is designed to run on a dedicated pentest VM or isolated local machine, **not** exposed to the internet. The backend executes commands with the privileges of the Docker container. Use responsibly and only against systems you are authorized to test.
+
+---
+
+## Logging
+
+All tool executions are logged to `/data/quiver.log` (rotating, max 10 MB per file, 5 backups). Every log line includes a UTC timestamp, log level, run ID, session ID, tool name, command, status, and duration.
+
+Logs are also viewable in the **Activity** tab in the UI — searchable, filterable, and exportable to `.txt`.
+
+---
+
+## License
+
+Quiver is licensed under the [GNU Affero General Public License v3.0 (AGPL-3.0)](LICENSE). You are free to use, modify, and self-host it. If you distribute a modified version or run it as a service, you must release your changes under the same license.
 
 ---
 
