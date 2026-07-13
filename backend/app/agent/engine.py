@@ -4,7 +4,7 @@ import asyncio
 import logging
 import httpx
 from datetime import datetime, timezone
-from sqlalchemy import select
+from sqlalchemy import select, func
 from app.config import OLLAMA_URL, OLLAMA_MODEL
 from app.db.database import AsyncSessionLocal
 from app.models.campaign import Campaign, ApprovalRequest
@@ -173,9 +173,9 @@ async def run_campaign_agent(campaign_id: str) -> str:
             logger.warning("AGENT | campaign=%s scope violation: %s", campaign_id, target)
             return "scope_violation"
 
-        # Look up the tool to build a proper command
+        # Look up the tool — case-insensitive so "Nmap" matches "nmap"
         tool_result = await db.execute(
-            select(Tool).where(Tool.name == tool_name).where(Tool.enabled == True)
+            select(Tool).where(func.lower(Tool.name) == tool_name.lower()).where(Tool.enabled == True)
         )
         tool = tool_result.scalar_one_or_none()
 
@@ -202,6 +202,7 @@ async def run_campaign_agent(campaign_id: str) -> str:
             )
             db.add(approval)
             campaign.last_run_at = datetime.now(timezone.utc)
+            campaign.last_agent_reasoning = reasoning
             await db.commit()
             logger.info("AGENT | campaign=%s queued approval: %s", campaign_id, command)
             return "pending_approval"
@@ -213,12 +214,14 @@ async def run_campaign_agent(campaign_id: str) -> str:
             tool_name=tool_name,
             command=command,
             param_values=parameters,
+            reasoning=reasoning,
             status="running",
             started_at=datetime.now(timezone.utc),
             output="",
         )
         db.add(run)
         campaign.last_run_at = datetime.now(timezone.utc)
+        campaign.last_agent_reasoning = reasoning
         await db.commit()
         await db.refresh(run)
 

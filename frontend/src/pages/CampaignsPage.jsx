@@ -121,6 +121,12 @@ export default function CampaignsPage() {
             </div>
 
             {c.description && <p className={styles.cardDesc}>{c.description}</p>}
+            {c.last_agent_reasoning && (
+              <div className={styles.agentThought}>
+                <span className={styles.agentLabel}>Agent →</span>
+                <span className={styles.agentText}>{c.last_agent_reasoning}</span>
+              </div>
+            )}
 
             <div className={styles.scopeList}>
               {(c.target_scope || []).slice(0, 4).map((s, i) => (

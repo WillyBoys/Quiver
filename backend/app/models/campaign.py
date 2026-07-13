@@ -16,6 +16,7 @@ class Campaign(Base):
     status: Mapped[str] = mapped_column(String, default="active")    # active / paused / completed
     risk_level: Mapped[str] = mapped_column(String, default="notify")  # auto / notify / approve
     session_id: Mapped[str | None] = mapped_column(String, ForeignKey("sessions.id"), nullable=True)
+    last_agent_reasoning: Mapped[str] = mapped_column(Text, default="")  # most recent agent thought
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc),
                                                   onupdate=lambda: datetime.now(timezone.utc))

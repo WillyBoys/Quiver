@@ -256,6 +256,7 @@ def _run_dict(r: Run) -> dict:
         "status": r.status,
         "exit_code": r.exit_code,
         "param_values": r.param_values,
+        "reasoning": r.reasoning or "",
         "started_at": r.started_at.isoformat() if r.started_at else None,
         "finished_at": r.finished_at.isoformat() if r.finished_at else None,
         "created_at": r.created_at.isoformat(),

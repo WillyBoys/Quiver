@@ -143,6 +143,7 @@ def _dict(c: Campaign) -> dict:
         "status": c.status,
         "risk_level": c.risk_level,
         "session_id": c.session_id,
+        "last_agent_reasoning": c.last_agent_reasoning or "",
         "created_at": c.created_at.isoformat(),
         "updated_at": c.updated_at.isoformat(),
         "last_run_at": c.last_run_at.isoformat() if c.last_run_at else None,

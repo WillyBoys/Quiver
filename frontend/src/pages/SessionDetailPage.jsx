@@ -836,6 +836,9 @@ export default function SessionDetailPage() {
                     className={`${styles.runItem} ${run.id === activeRunId ? styles.runActive : ""}`}
                     onClick={() => openTab(run.id)}>
                     <div className={styles.runName}>{run.tool_name}</div>
+                    {run.reasoning && (
+                      <div className={styles.runReasoning}>{run.reasoning}</div>
+                    )}
                     <div className={styles.runMeta}>
                       <span className={`${styles.runStatus} ${styles[`status_${displayStatus}`]}`}>
                         {displayStatus}

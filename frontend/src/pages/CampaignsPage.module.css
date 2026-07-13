@@ -122,6 +122,33 @@
   margin-bottom: 10px;
 }
 
+/* Agent thought */
+.agentThought {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--bg-panel);
+  border-left: 2px solid var(--accent-dim);
+  border-radius: 0 4px 4px 0;
+  margin-bottom: 2px;
+}
+
+.agentLabel {
+  font-size: 10px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.agentText {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-style: italic;
+  line-height: 1.4;
+}
+
 /* Scope tags */
 .scopeList {
   display: flex;
