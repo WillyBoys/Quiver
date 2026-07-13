@@ -458,8 +458,11 @@ export default function SessionDetailPage() {
             <h1 className={styles.sessionName}>{session.name}</h1>
             {campaign && (
               <span className={`${styles.agentStatusTag} ${styles[`agentStatus_${campaign.status}`]}`}>
-                {campaign.status === "active" && <span className={styles.agentStatusDot} />}
-                {campaign.status === "active" ? "Running" : campaign.status === "completed" ? "Done" : "Paused"}
+                {(campaign.status === "active" || campaign.status === "awaiting_approval") && <span className={styles.agentStatusDot} />}
+                {campaign.status === "active" ? "Running"
+                  : campaign.status === "completed" ? "Done"
+                  : campaign.status === "awaiting_approval" ? "Awaiting Approval"
+                  : "Paused"}
               </span>
             )}
           </div>

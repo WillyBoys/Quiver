@@ -289,7 +289,7 @@ async def run_campaign_agent(campaign_id: str) -> str:
         if not campaign:
             logger.error("AGENT | campaign %s not found", campaign_id)
             return "not_found"
-        if campaign.status != "active":
+        if campaign.status not in ("active", "awaiting_approval"):
             logger.info("AGENT | campaign %s is %s — skipping", campaign_id, campaign.status)
             return "skipped"
 
@@ -412,6 +412,17 @@ async def run_campaign_agent(campaign_id: str) -> str:
 
         tool_agent_mode = tool.agent_mode if tool else "auto"
         if _needs_approval(tool_agent_mode, campaign.risk_level):
+            # Don't queue the same command twice
+            existing_approval = (await db.execute(
+                select(ApprovalRequest)
+                .where(ApprovalRequest.campaign_id == campaign_id)
+                .where(ApprovalRequest.command == command)
+                .where(ApprovalRequest.status == "pending")
+            )).scalars().first()
+            if existing_approval:
+                logger.info("AGENT | campaign=%s approval already pending for: %s", campaign_id, command)
+                return "pending_approval"
+
             approval = ApprovalRequest(
                 campaign_id=campaign_id,
                 tool_name=tool_name,
@@ -420,6 +431,7 @@ async def run_campaign_agent(campaign_id: str) -> str:
                 target=target,
             )
             db.add(approval)
+            campaign.status = "awaiting_approval"
             campaign.last_run_at = datetime.now(timezone.utc)
             campaign.last_agent_reasoning = reasoning
             await db.commit()
@@ -530,8 +542,28 @@ async def run_campaign_loop(campaign_id: str) -> None:
         # rate-limiter (~60-90 s on CPU), so no extra sleep is needed.
 
 
+async def _run_approved_then_resume(run_id: str, command: str, session_id: str,
+                                    tool_name: str, campaign_id: str) -> None:
+    """Background task: execute the approved run then resume the campaign loop."""
+    try:
+        await asyncio.wait_for(_run_done_events[run_id].wait(), timeout=600.0)
+    except asyncio.TimeoutError:
+        logger.error("AGENT | approved run %s timed out", run_id)
+
+    # Restore campaign to active and resume the loop
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(Campaign).where(Campaign.id == campaign_id))
+        campaign = result.scalar_one_or_none()
+        if campaign and campaign.status == "awaiting_approval":
+            campaign.status = "active"
+            await db.commit()
+            logger.info("AGENT | campaign=%s resuming loop after approval", campaign_id)
+
+    await run_campaign_loop(campaign_id)
+
+
 async def execute_approval(approval_id: str) -> bool:
-    """Execute a previously approved action. Returns True on success."""
+    """Execute a previously approved action and resume the campaign loop. Returns True on success."""
     async with AsyncSessionLocal() as db:
         result = await db.execute(select(ApprovalRequest).where(ApprovalRequest.id == approval_id))
         approval = result.scalar_one_or_none()
@@ -541,6 +573,20 @@ async def execute_approval(approval_id: str) -> bool:
         camp_result = await db.execute(select(Campaign).where(Campaign.id == approval.campaign_id))
         campaign = camp_result.scalar_one_or_none()
         if not campaign or not campaign.session_id:
+            return False
+
+        # Block if this exact command already completed successfully
+        dup = (await db.execute(
+            select(Run)
+            .where(Run.session_id == campaign.session_id)
+            .where(Run.command == approval.command)
+            .where(Run.status == "complete")
+        )).scalars().first()
+        if dup:
+            approval.status = "dismissed"
+            approval.resolved_at = datetime.now(timezone.utc)
+            await db.commit()
+            logger.warning("AGENT | approval %s blocked — command already completed", approval_id)
             return False
 
         approval.status = "approved"
@@ -562,12 +608,16 @@ async def execute_approval(approval_id: str) -> bool:
 
         run_id = run.id
         session_id = campaign.session_id
+        campaign_id = campaign.id
 
     _run_buffers[run_id] = []
     _run_done_events[run_id] = asyncio.Event()
 
     asyncio.create_task(
         execute_run_background(run_id, approval.command, session_id, approval.tool_name)
+    )
+    asyncio.create_task(
+        _run_approved_then_resume(run_id, approval.command, session_id, approval.tool_name, campaign_id)
     )
     logger.info("AGENT | approval %s approved, executing: %s", approval_id, approval.command)
     return True

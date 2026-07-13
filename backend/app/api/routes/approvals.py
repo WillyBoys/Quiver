@@ -50,6 +50,11 @@ async def reject(approval_id: str, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=400, detail=f"Request is already {approval.status}")
     approval.status = "rejected"
     approval.resolved_at = datetime.now(timezone.utc)
+    # Pause the campaign so it doesn't hang in awaiting_approval indefinitely
+    camp_result = await db.execute(select(Campaign).where(Campaign.id == approval.campaign_id))
+    campaign = camp_result.scalar_one_or_none()
+    if campaign and campaign.status == "awaiting_approval":
+        campaign.status = "paused"
     await db.commit()
     logger.info("APPROVAL REJECT | id=%s", approval_id)
     return {"message": "Rejected"}

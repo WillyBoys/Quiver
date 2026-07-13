@@ -18,8 +18,8 @@ TARGET_PARAM_NAMES = {"target", "host", "url", "domain"}
 # Ordered from most-preferred to least — the model tends to pick near the top.
 # nmap is listed LAST for web targets so the model tries web-specific tools first.
 _WEB_TOOLS = [
-    "whatweb", "wafw00f", "nikto", "gobuster", "ffuf", "feroxbuster",
-    "wpscan", "nuclei", "dirb", "curl", "cewl", "sqlmap", "nmap",
+    "whatweb", "wafw00f", "nikto", "feroxbuster", "dirb", "gobuster", "ffuf",
+    "wpscan", "nuclei", "curl", "cewl", "sqlmap", "nmap",
 ]
 _IP_TOOLS = [
     "nmap", "whois", "nslookup", "enum4linux-ng", "smbclient",

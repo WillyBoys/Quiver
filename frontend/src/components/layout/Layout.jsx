@@ -1,5 +1,7 @@
 import { NavLink } from "react-router-dom";
+import { useEffect, useState } from "react";
 import { Terminal, Shield, BookOpen, Radio, Github, Clock, Target, ShieldAlert } from "lucide-react";
+import { api } from "../../utils/api.js";
 import styles from "./Layout.module.css";
 
 const NAV = [
@@ -13,6 +15,20 @@ const NAV = [
 ];
 
 export default function Layout({ children }) {
+  const [pendingCount, setPendingCount] = useState(0);
+
+  useEffect(() => {
+    async function fetchCount() {
+      try {
+        const data = await api.approvals.pending();
+        setPendingCount(data.count || 0);
+      } catch { /* ignore */ }
+    }
+    fetchCount();
+    const interval = setInterval(fetchCount, 8000);
+    return () => clearInterval(interval);
+  }, []);
+
   return (
     <div className={styles.root}>
       <aside className={styles.sidebar}>
@@ -31,6 +47,9 @@ export default function Layout({ children }) {
             >
               <Icon size={15} />
               <span>{label}</span>
+              {label === "Approvals" && pendingCount > 0 && (
+                <span className={styles.pendingBadge}>{pendingCount}</span>
+              )}
             </NavLink>
           ))}
         </nav>

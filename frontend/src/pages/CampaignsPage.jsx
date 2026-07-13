@@ -19,7 +19,7 @@ const SCHEDULE_PRESETS = [
   { label: "Custom…",          value: "__custom__" },
 ];
 
-const STATUS_COLOR = { active: "var(--accent)", paused: "var(--text-muted)", completed: "var(--warning)" };
+const STATUS_COLOR = { active: "var(--accent)", paused: "var(--text-muted)", completed: "var(--warning)", awaiting_approval: "#fbbf24" };
 
 export default function CampaignsPage() {
   const navigate = useNavigate();
