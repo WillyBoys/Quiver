@@ -66,6 +66,21 @@ export const api = {
   ai: {
     analyze: (runId) => req("/ai/analyze", { method: "POST", body: JSON.stringify({ run_id: runId }) }),
   },
+  campaigns: {
+    list:    ()         => req("/campaigns/"),
+    get:     (id)       => req(`/campaigns/${id}`),
+    create:  (body)     => req("/campaigns/", { method: "POST", body: JSON.stringify(body) }),
+    update:  (id, body) => req(`/campaigns/${id}`, { method: "PUT", body: JSON.stringify(body) }),
+    delete:  (id)       => req(`/campaigns/${id}`, { method: "DELETE" }),
+    run:     (id)       => req(`/campaigns/${id}/run`, { method: "POST" }),
+    session: (id)       => req(`/campaigns/${id}/session`),
+  },
+  approvals: {
+    list:    (status = "pending") => req(`/approvals/?status=${status}`),
+    pending: ()                   => req("/approvals/pending-count"),
+    approve: (id)                 => req(`/approvals/${id}/approve`, { method: "POST" }),
+    reject:  (id)                 => req(`/approvals/${id}/reject`, { method: "POST" }),
+  },
 };
 
 // WebSocket helper for streaming run output

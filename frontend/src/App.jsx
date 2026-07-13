@@ -6,12 +6,16 @@ import ToolsPage from "./pages/ToolsPage.jsx";
 import WordlistsPage from "./pages/WordlistsPage.jsx";
 import RemotePage from "./pages/RemotePage.jsx";
 import ActivityPage from "./pages/ActivityPage.jsx";
+import CampaignsPage from "./pages/CampaignsPage.jsx";
+import ApprovalQueuePage from "./pages/ApprovalQueuePage.jsx";
 
 export default function App() {
   return (
     <Layout>
       <Routes>
-        <Route path="/" element={<Navigate to="/sessions" replace />} />
+        <Route path="/" element={<Navigate to="/campaigns" replace />} />
+        <Route path="/campaigns" element={<CampaignsPage />} />
+        <Route path="/approvals" element={<ApprovalQueuePage />} />
         <Route path="/sessions" element={<SessionsPage />} />
         <Route path="/sessions/:sessionId" element={<SessionDetailPage />} />
         <Route path="/tools" element={<ToolsPage />} />

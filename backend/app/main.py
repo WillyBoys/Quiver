@@ -10,9 +10,10 @@ from contextlib import asynccontextmanager
 import httpx
 
 from app.db.database import init_db
-from app.api.routes import tools, sessions, wordlists, runs, ai
+from app.api.routes import tools, sessions, wordlists, runs, ai, campaigns, approvals
 from app.db.seed import seed_default_tools
 from app.config import OLLAMA_URL, OLLAMA_MODEL
+from app.agent.scheduler import start_scheduler, stop_scheduler
 
 
 def _setup_logging() -> None:
@@ -70,8 +71,10 @@ async def lifespan(app: FastAPI):
     await init_db()
     await seed_default_tools()
     asyncio.create_task(_warmup_ai())
+    await start_scheduler()
     logger.info("Quiver API ready")
     yield
+    stop_scheduler()
     logger.info("Quiver API shutting down")
 
 
@@ -94,6 +97,8 @@ app.include_router(sessions.router, prefix="/api/sessions", tags=["sessions"])
 app.include_router(wordlists.router, prefix="/api/wordlists", tags=["wordlists"])
 app.include_router(runs.router, prefix="/api/runs", tags=["runs"])
 app.include_router(ai.router, prefix="/api/ai", tags=["ai"])
+app.include_router(campaigns.router, prefix="/api/campaigns", tags=["campaigns"])
+app.include_router(approvals.router, prefix="/api/approvals", tags=["approvals"])
 
 
 @app.get("/api/health")
