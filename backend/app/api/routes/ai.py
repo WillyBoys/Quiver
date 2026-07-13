@@ -6,7 +6,7 @@ from sqlalchemy import select
 from pydantic import BaseModel
 from app.db.database import get_db
 from app.models.run import Run
-from app.config import OLLAMA_URL, OLLAMA_OLLAMA_MODEL
+from app.config import OLLAMA_URL, OLLAMA_MODEL
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
