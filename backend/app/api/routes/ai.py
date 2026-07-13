@@ -6,12 +6,11 @@ from sqlalchemy import select
 from pydantic import BaseModel
 from app.db.database import get_db
 from app.models.run import Run
+from app.config import OLLAMA_URL, OLLAMA_OLLAMA_MODEL
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-OLLAMA_URL = "http://ai:11434"
-MODEL = "phi3:mini"
 MAX_OUTPUT_CHARS = 8000
 
 
@@ -57,14 +56,14 @@ async def analyze_run(body: AnalyzeRequest, db: AsyncSession = Depends(get_db)):
 
     prompt = _build_prompt(run.tool_name or "unknown", run.command or "", run.output)
 
-    logger.info("AI ANALYZE | run_id=%s tool=%s model=%s", run.id, run.tool_name, MODEL)
+    logger.info("AI ANALYZE | run_id=%s tool=%s model=%s", run.id, run.tool_name, OLLAMA_MODEL)
 
     try:
         async with httpx.AsyncClient(timeout=360.0) as client:
             resp = await client.post(
                 f"{OLLAMA_URL}/api/generate",
                 json={
-                    "model": MODEL,
+                    "model": OLLAMA_MODEL,
                     "prompt": prompt,
                     "stream": False,
                     "options": {
@@ -81,7 +80,7 @@ async def analyze_run(body: AnalyzeRequest, db: AsyncSession = Depends(get_db)):
         data = resp.json()
         analysis = data.get("response", "").strip()
         logger.info("AI DONE   | run_id=%s chars=%d", run.id, len(analysis))
-        return {"analysis": analysis, "model": MODEL, "run_id": body.run_id}
+        return {"analysis": analysis, "model": OLLAMA_MODEL, "run_id": body.run_id}
 
     except httpx.ConnectError:
         raise HTTPException(

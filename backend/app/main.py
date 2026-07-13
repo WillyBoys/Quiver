@@ -12,6 +12,7 @@ import httpx
 from app.db.database import init_db
 from app.api.routes import tools, sessions, wordlists, runs, ai
 from app.db.seed import seed_default_tools
+from app.config import OLLAMA_URL, OLLAMA_MODEL
 
 
 def _setup_logging() -> None:
@@ -46,17 +47,17 @@ logger = logging.getLogger(__name__)
 
 
 async def _warmup_ai() -> None:
-    """Send a tiny inference request so phi3:mini is loaded into RAM before first use."""
+    """Send a tiny inference request so the configured model is loaded into RAM before first use."""
     await asyncio.sleep(5)  # give Ollama a moment after compose start
     try:
         async with httpx.AsyncClient(timeout=120.0) as client:
             resp = await client.post(
-                "http://ai:11434/api/generate",
-                json={"model": "phi3:mini", "prompt": "hi", "stream": False,
+                f"{OLLAMA_URL}/api/generate",
+                json={"model": OLLAMA_MODEL, "prompt": "hi", "stream": False,
                       "options": {"num_predict": 1}},
             )
         if resp.status_code == 200:
-            logger.info("AI warmup complete — phi3:mini is loaded and ready")
+            logger.info("AI warmup complete — %s is loaded and ready", OLLAMA_MODEL)
         else:
             logger.warning("AI warmup got status %s — model may load on first use", resp.status_code)
     except Exception as e:

@@ -13,6 +13,8 @@ services:
     environment:
       - DATABASE_URL=sqlite:////data/pentest.db
       - WORDLISTS_DIR=/wordlists
+      - OLLAMA_URL=http://ai:11434
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-phi3:mini}
     privileged: true
     restart: unless-stopped
 
@@ -62,7 +64,7 @@ services:
     depends_on:
       ai:
         condition: service_healthy
-    entrypoint: ["ollama", "pull", "phi3:mini"]
+    entrypoint: ["ollama", "pull", "${OLLAMA_MODEL:-phi3:mini}"]
     restart: "no"
 
 volumes:
