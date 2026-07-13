@@ -254,6 +254,7 @@ def _session_dict(s: Session) -> dict:
         "findings": s.findings or [],
         "checklist_state": s.checklist_state or {},
         "targets": s.targets or [],
+        "campaign_id": s.campaign_id or None,
         "created_at": s.created_at.isoformat(),
         "updated_at": s.updated_at.isoformat(),
     }

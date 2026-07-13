@@ -107,6 +107,7 @@ async def run_campaign_agent(campaign_id: str) -> str:
                 target=", ".join(campaign.target_scope or ["(no scope)"]),
                 engagement_type="external",
                 scope=f"Automated campaign: {campaign.name}",
+                campaign_id=campaign_id,
             )
             db.add(session)
             await db.flush()

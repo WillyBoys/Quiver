@@ -278,6 +278,73 @@
   background: var(--bg-surface);
 }
 
+/* Agent sessions: tool picker is hidden so right panel gets more room */
+.workspace[data-agent="true"] .rightPanel {
+  width: 320px; min-width: 320px;
+}
+
+/* Agent activity feed */
+.agentFeed {
+  display: flex; flex-direction: column; overflow-y: auto; flex: 1;
+  padding-bottom: 16px;
+}
+
+.agentBanner {
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 12px;
+  background: var(--accent-glow);
+  border-bottom: 1px solid var(--accent-dim);
+  font-size: 11px; color: var(--accent); font-weight: 600;
+}
+
+.agentBannerLink {
+  margin-left: auto; font-size: 10px; color: var(--text-muted);
+  background: none; border: none; cursor: pointer;
+  text-decoration: underline;
+}
+
+.agentBannerLink:hover { color: var(--text-primary); }
+
+.agentRunCard {
+  margin: 8px 10px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-elevated);
+  cursor: pointer;
+  transition: border-color 0.15s;
+  display: flex; flex-direction: column; gap: 6px;
+}
+
+.agentRunCard:hover { border-color: var(--accent-dim); }
+
+.agentRunCardActive {
+  border-color: var(--accent);
+  background: var(--accent-glow);
+}
+
+.agentRunHeader {
+  display: flex; align-items: center; justify-content: space-between; gap: 6px;
+}
+
+.agentRunTool {
+  font-size: 12px; font-weight: 700; color: var(--text-primary);
+  font-family: var(--font-mono);
+}
+
+.agentRunReasoning {
+  font-size: 11px; color: var(--text-secondary);
+  font-style: italic; line-height: 1.5;
+  margin: 0;
+}
+
+.agentRunCommand {
+  font-family: var(--font-mono); font-size: 10px;
+  color: var(--text-muted); word-break: break-all;
+  background: var(--bg-panel); padding: 4px 6px;
+  border-radius: 3px; display: block;
+}
+
 /* Notes section */
 .notesSection {
   padding: 10px 12px 12px;

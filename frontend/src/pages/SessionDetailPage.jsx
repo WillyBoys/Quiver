@@ -498,9 +498,9 @@ export default function SessionDetailPage() {
         )}
       </div>
 
-      <div className={styles.workspace}>
-        {/* Left: tool picker / checklist */}
-        <aside className={styles.toolPicker}>
+      <div className={styles.workspace} data-agent={!!session.campaign_id}>
+        {/* Left: tool picker / checklist — hidden for agent sessions */}
+        <aside className={styles.toolPicker} style={session.campaign_id ? { display: "none" } : {}}>
           {/* View toggle */}
           <div className={styles.sidebarToggle}>
             <button
@@ -808,8 +808,55 @@ export default function SessionDetailPage() {
             })()}
         </div>
 
-        {/* Right: notes + run history + findings */}
+        {/* Right panel — agent activity feed or normal sidebar */}
         <aside className={styles.rightPanel}>
+          {session.campaign_id ? (
+            /* ── Agent session: activity feed ── */
+            <div className={styles.agentFeed}>
+              <div className={styles.agentBanner}>
+                <Cpu size={12} />
+                <span>AI-managed session</span>
+                <button className={styles.agentBannerLink} onClick={() => navigate("/campaigns")}>
+                  ← Campaigns
+                </button>
+              </div>
+
+              <h3 className={styles.panelTitle} style={{ padding: "0 12px", marginBottom: 8 }}>
+                Agent Activity
+              </h3>
+
+              {runs.length === 0 && (
+                <p className={styles.empty} style={{ padding: "0 12px" }}>
+                  No actions yet — run the campaign to start.
+                </p>
+              )}
+
+              {[...runs].reverse().map((run) => {
+                const isRunStreaming = streaming[run.id] || false;
+                const displayStatus = isRunStreaming ? "running" : run.status;
+                return (
+                  <div
+                    key={run.id}
+                    className={`${styles.agentRunCard} ${run.id === activeRunId ? styles.agentRunCardActive : ""}`}
+                    onClick={() => openTab(run.id)}
+                  >
+                    <div className={styles.agentRunHeader}>
+                      <span className={styles.agentRunTool}>{run.tool_name}</span>
+                      <span className={`${styles.runStatus} ${styles[`status_${displayStatus}`]}`}>
+                        {displayStatus}
+                      </span>
+                    </div>
+                    {run.reasoning && (
+                      <p className={styles.agentRunReasoning}>{run.reasoning}</p>
+                    )}
+                    <code className={styles.agentRunCommand}>{run.command}</code>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            /* ── Manual session: normal sidebar ── */
+            <>
           {/* Session notes */}
           <div className={styles.notesSection}>
             <div className={styles.notesTitleRow}>
@@ -904,6 +951,8 @@ export default function SessionDetailPage() {
               )}
             </div>
           </div>
+            </>
+          )}
         </aside>
       </div>
 
