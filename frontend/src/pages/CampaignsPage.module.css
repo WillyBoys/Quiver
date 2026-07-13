@@ -380,3 +380,15 @@
   gap: 8px;
   padding-top: 4px;
 }
+
+.runSpinner {
+  display: inline-block;
+  width: 9px; height: 9px;
+  border: 1.5px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }

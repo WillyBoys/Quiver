@@ -8,7 +8,28 @@
 }
 
 .sessionInfo { flex: 1; }
+.sessionNameRow { display: flex; align-items: center; gap: 8px; }
 .sessionName { font-size: 15px; font-weight: 600; }
+
+.agentStatusTag {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.05em;
+  text-transform: uppercase; padding: 2px 8px; border-radius: 20px;
+  border: 1px solid currentColor;
+}
+.agentStatus_active  { color: #4ade80; background: rgba(74,222,128,0.10); }
+.agentStatus_paused  { color: #94a3b8; background: rgba(148,163,184,0.10); }
+.agentStatus_completed { color: #60a5fa; background: rgba(96,165,250,0.10); }
+
+.agentStatusDot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: #4ade80;
+  animation: agentPulse 1.4s ease-in-out infinite;
+}
+@keyframes agentPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
 .target { font-family: var(--font-mono); font-size: 12px; color: var(--accent); margin-left: 10px; }
 
 .workspace {
@@ -278,72 +299,172 @@
   background: var(--bg-surface);
 }
 
-/* Agent sessions: tool picker is hidden so right panel gets more room */
-.workspace[data-agent="true"] .rightPanel {
-  width: 320px; min-width: 320px;
+/* ── Agent session: reasoning terminal (left panel) ── */
+.reasoningTerminal {
+  display: flex; flex-direction: column; flex: 1; overflow: hidden;
+  background: var(--bg-panel);
 }
 
-/* Agent activity feed */
-.agentFeed {
-  display: flex; flex-direction: column; overflow-y: auto; flex: 1;
-  padding-bottom: 16px;
+.reasoningHeader {
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 12px;
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border);
+  font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.08em; color: var(--accent);
+  font-family: var(--font-mono); flex-shrink: 0;
 }
 
-.agentBanner {
+.reasoningLive {
+  margin-left: auto; color: #22c55e; font-size: 10px;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+.reasoningFeed {
+  flex: 1; overflow-y: auto; padding: 10px 0;
+  display: flex; flex-direction: column; gap: 0;
+}
+
+.reasoningEmpty {
+  padding: 24px 14px; color: var(--text-muted);
+  font-size: 12px; font-style: italic; text-align: center;
+}
+
+.summaryCard {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  display: flex; flex-direction: column; gap: 8px;
+  background: color-mix(in srgb, var(--accent) 4%, var(--bg-elevated));
+}
+
+.summaryHeader {
+  display: flex; align-items: center; gap: 6px;
+}
+
+.summaryLabel {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.07em;
+  text-transform: uppercase; color: var(--accent);
+}
+
+.summaryText {
+  font-size: 11px; color: var(--text-secondary);
+  line-height: 1.6; margin: 0;
+}
+
+.summaryFindings {
+  display: flex; flex-direction: column; gap: 4px;
+}
+
+.summaryFindingsLabel {
+  font-size: 10px; color: var(--text-muted); margin: 0;
+  font-weight: 600;
+}
+
+.summaryFinding {
+  display: flex; align-items: center; gap: 6px;
+  padding: 3px 0;
+}
+
+.summaryFindingSev {
+  font-size: 9px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.05em; min-width: 48px;
+}
+
+.summaryFindingTitle {
+  font-size: 11px; color: var(--text-primary);
+}
+
+.summaryNoFindings {
+  font-size: 11px; color: var(--text-muted); margin: 0; font-style: italic;
+}
+
+.reasoningBlock {
+  display: flex; flex-direction: column;
+  border-bottom: 1px solid var(--border);
+}
+
+.reasoningBlock:last-child {
+  border-bottom: none;
+}
+
+.reasoningEntry {
+  padding: 10px 14px;
+  display: flex; flex-direction: column; gap: 5px;
+}
+
+.reasoningMeta {
+  display: flex; align-items: center; gap: 8px;
+}
+
+.reasoningStep {
+  font-size: 10px; font-weight: 700;
+  color: var(--accent); font-family: var(--font-mono);
+  text-transform: uppercase; letter-spacing: 0.06em;
+}
+
+.reasoningTool {
+  font-size: 11px; font-weight: 700;
+  color: var(--text-primary); font-family: var(--font-mono);
+}
+
+.reasoningText {
+  font-size: 11px; color: var(--text-secondary);
+  line-height: 1.55; margin: 0;
+}
+
+.reasoningThought {
+  background: color-mix(in srgb, var(--accent) 5%, var(--bg-base));
+  border-left: 2px solid var(--accent-dim);
+  padding: 8px 14px 8px 12px;
+  margin: 0;
+}
+
+.reasoningThought p {
+  font-size: 11px; color: var(--text-secondary);
+  line-height: 1.6; margin: 0;
+}
+
+.reasoningThoughtLabel {
+  font-size: 9px; font-weight: 700; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--accent-dim);
+  display: block; margin-bottom: 4px;
+}
+
+.reasoningRaw {
+  font-family: var(--font-mono); font-size: 9px;
+  color: var(--text-muted); white-space: pre-wrap; word-break: break-all;
+  background: var(--bg-base); padding: 5px 7px;
+  border-radius: 3px; border: 1px dashed var(--border);
+  margin: 2px 0; max-height: 120px; overflow-y: auto;
+  line-height: 1.45;
+}
+
+.reasoningCmd {
+  font-family: var(--font-mono); font-size: 10px;
+  color: var(--text-muted); word-break: break-all;
+  background: var(--bg-elevated); padding: 4px 7px;
+  border-radius: 3px; display: block;
+  border: 1px solid var(--border);
+}
+
+/* ── Campaign banner in right panel ── */
+.campaignBanner {
   display: flex; align-items: center; gap: 6px;
   padding: 8px 12px;
   background: var(--accent-glow);
   border-bottom: 1px solid var(--accent-dim);
   font-size: 11px; color: var(--accent); font-weight: 600;
+  flex-shrink: 0;
 }
 
-.agentBannerLink {
+.campaignBannerLink {
   margin-left: auto; font-size: 10px; color: var(--text-muted);
   background: none; border: none; cursor: pointer;
   text-decoration: underline;
 }
-
-.agentBannerLink:hover { color: var(--text-primary); }
-
-.agentRunCard {
-  margin: 8px 10px 0;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  background: var(--bg-elevated);
-  cursor: pointer;
-  transition: border-color 0.15s;
-  display: flex; flex-direction: column; gap: 6px;
-}
-
-.agentRunCard:hover { border-color: var(--accent-dim); }
-
-.agentRunCardActive {
-  border-color: var(--accent);
-  background: var(--accent-glow);
-}
-
-.agentRunHeader {
-  display: flex; align-items: center; justify-content: space-between; gap: 6px;
-}
-
-.agentRunTool {
-  font-size: 12px; font-weight: 700; color: var(--text-primary);
-  font-family: var(--font-mono);
-}
-
-.agentRunReasoning {
-  font-size: 11px; color: var(--text-secondary);
-  font-style: italic; line-height: 1.5;
-  margin: 0;
-}
-
-.agentRunCommand {
-  font-family: var(--font-mono); font-size: 10px;
-  color: var(--text-muted); word-break: break-all;
-  background: var(--bg-panel); padding: 4px 6px;
-  border-radius: 3px; display: block;
-}
+.campaignBannerLink:hover { color: var(--text-primary); }
 
 /* Notes section */
 .notesSection {

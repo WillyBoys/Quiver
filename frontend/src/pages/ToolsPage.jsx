@@ -8,7 +8,13 @@ const CAT_LABELS = { recon: "Recon", web: "Web", enum: "Enumeration", vuln: "Vul
 
 const EMPTY_FORM = {
   name: "", description: "", category: "recon", binary: "", default_flags: "",
-  parameters: [], workflow_tags: [],
+  parameters: [], workflow_tags: [], agent_mode: "auto",
+};
+
+const AGENT_MODE_LABELS = {
+  auto:    { label: "Auto",    desc: "LLM can run without approval" },
+  approve: { label: "Approve", desc: "LLM must get human sign-off first" },
+  never:   { label: "Never",   desc: "Hidden from LLM — manual use only" },
 };
 
 export default function ToolsPage() {
@@ -71,6 +77,7 @@ export default function ToolsPage() {
       binary: tool.binary, default_flags: tool.default_flags,
       parameters: tool.parameters || [],
       workflow_tags: tool.workflow_tags || [],
+      agent_mode: tool.agent_mode || "auto",
       enabled: tool.enabled,
     });
     setBinaryCheck(null);
@@ -234,6 +241,25 @@ export default function ToolsPage() {
                 </label>
               </div>
 
+              <label className={styles.label}>
+                Agent Access
+                <div className={styles.agentModeRow}>
+                  {Object.entries(AGENT_MODE_LABELS).map(([val, { label, desc }]) => (
+                    <button
+                      key={val}
+                      type="button"
+                      className={styles.agentModeOption}
+                      data-active={form.agent_mode === val}
+                      data-mode={val}
+                      onClick={() => setForm(f => ({ ...f, agent_mode: val }))}
+                    >
+                      <span className={styles.agentModeLabel}>{label}</span>
+                      <span className={styles.agentModeDesc}>{desc}</span>
+                    </button>
+                  ))}
+                </div>
+              </label>
+
               <label className={styles.label}>Workflow Tags (comma separated)
                 <input className="input" value={Array.isArray(form.workflow_tags) ? form.workflow_tags.join(", ") : form.workflow_tags}
                   placeholder="external, web, internal"
@@ -298,6 +324,9 @@ export default function ToolsPage() {
                         <div className={styles.toolNameRow}>
                           <span className={styles.toolName}>{tool.name}</span>
                           {tool.is_builtin && <span className={styles.builtinBadge}>built-in</span>}
+                          <span className={styles.agentModeBadge} data-mode={tool.agent_mode || "auto"}>
+                            {AGENT_MODE_LABELS[tool.agent_mode || "auto"]?.label || tool.agent_mode}
+                          </span>
                           {(tool.workflow_tags || []).map((tag) => (
                             <span key={tag} className={`${styles.tagChip} ${styles[`tag_${tag}`]}`}>{tag}</span>
                           ))}

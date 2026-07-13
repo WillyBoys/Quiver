@@ -1,4 +1,6 @@
+import ipaddress
 import logging
+import re
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.models.run import Run
@@ -10,10 +12,54 @@ logger = logging.getLogger(__name__)
 MAX_OUTPUT_PER_RUN = 600
 MAX_RUNS = 10
 
+TARGET_PARAM_NAMES = {"target", "host", "url", "domain"}
+
+# Which tool binaries are appropriate for each target class.
+# Ordered from most-preferred to least — the model tends to pick near the top.
+# nmap is listed LAST for web targets so the model tries web-specific tools first.
+_WEB_TOOLS = [
+    "whatweb", "wafw00f", "nikto", "gobuster", "ffuf", "feroxbuster",
+    "wpscan", "nuclei", "dirb", "curl", "cewl", "sqlmap", "nmap",
+]
+_IP_TOOLS = [
+    "nmap", "whois", "nslookup", "enum4linux-ng", "smbclient",
+    "snmpwalk", "nxc", "kerbrute", "impacket-secretsdump",
+    "impacket-GetNPUsers", "searchsploit",
+]
+_DOMAIN_TOOLS = [
+    "nmap", "whois", "nslookup", "dnsrecon", "bbot",
+    "subdominator", "cloud_enum", "trufflehog", "searchsploit",
+]
+
+
+def _classify_scope(scope: list[str]) -> str:
+    """Return 'web', 'ip', or 'domain'."""
+    for s in scope:
+        s = s.strip().lower()
+        if s.startswith("http://") or s.startswith("https://"):
+            return "web"
+    for s in scope:
+        try:
+            ipaddress.ip_network(s.strip(), strict=False)
+            return "ip"
+        except ValueError:
+            pass
+    return "domain"
+
+
+def _primary_target(scope: list[str], kind: str) -> str:
+    """Extract a clean target string from the first scope entry."""
+    if not scope:
+        return ""
+    raw = scope[0].strip()
+    if kind == "web":
+        return raw  # keep full URL
+    # Strip scheme and path for IP / domain targets
+    t = re.sub(r"^https?://", "", raw, flags=re.IGNORECASE)
+    return t.split("/")[0]
+
 
 async def build_agent_prompt(campaign: Campaign, db: AsyncSession) -> str:
-    """Assemble the ReAct prompt from live campaign + session state."""
-
     runs = []
     if campaign.session_id:
         result = await db.execute(
@@ -28,21 +74,57 @@ async def build_agent_prompt(campaign: Campaign, db: AsyncSession) -> str:
     result = await db.execute(select(Tool).where(Tool.enabled == True))
     tools = result.scalars().all()
 
-    scope_str = "\n".join(f"  - {s}" for s in (campaign.target_scope or []))
+    scope = campaign.target_scope or []
+    kind = _classify_scope(scope)
+    primary = _primary_target(scope, kind)
+
+    allowed = _WEB_TOOLS if kind == "web" else (_IP_TOOLS if kind == "ip" else _DOMAIN_TOOLS)
+
+    scope_str = "\n".join(f"  - {s}" for s in scope)
+
+    # Deduplicate by binary; only include tools appropriate for this target type.
+    # Preserve the preferred order defined in the list (web tools: nmap is last).
+    # Tools with agent_mode="never" are always excluded from the LLM.
+    seen_binaries: set[str] = set()
+    tool_map: dict[str, Tool] = {}
+    for t in tools:
+        if t.binary in set(allowed) and t.binary not in seen_binaries and (t.agent_mode or "auto") != "never":
+            seen_binaries.add(t.binary)
+            tool_map[t.binary] = t
+
+    # Binaries that completed successfully are removed from the available tool list.
+    # Errored runs stay available so the model can retry them.
+    completed_binaries = {run.tool_name for run in runs if run.status == "complete"}
+
+    # Re-filter ordered_binaries to exclude already-completed tools
+    ordered_binaries = [b for b in allowed if b in tool_map and b not in completed_binaries]
 
     tool_lines = []
-    for t in tools:
-        params = ", ".join(
-            f"{p['name']} ({'required' if p.get('required') else 'optional'})"
-            for p in (t.parameters or [])
+    for binary in ordered_binaries:
+        t = tool_map[binary]
+        target_param = next(
+            (p for p in (t.parameters or []) if p.get("name") in TARGET_PARAM_NAMES),
+            None,
         )
-        tool_lines.append(
-            f"  - {t.name}: {t.description or t.category} "
-            f"| binary: {t.binary} | params: {params or 'none'}"
-        )
+        extra_required = [
+            p for p in (t.parameters or [])
+            if p.get("name") not in TARGET_PARAM_NAMES and p.get("required")
+        ]
+        parts = [f"  - {binary}: {t.description or t.name}"]
+        if target_param:
+            parts.append(f"target={target_param.get('placeholder', primary)!r}")
+        for p in extra_required:
+            parts.append(f"{p['name']}={p.get('placeholder', '...')!r}")
+        tool_lines.append(" | ".join(parts))
+
     tools_str = "\n".join(tool_lines) or "  (no tools configured)"
+    completed_note = (
+        f"  (already completed, not available: {', '.join(sorted(completed_binaries))})"
+        if completed_binaries else ""
+    )
 
     action_lines = []
+    already_run_commands: list[str] = []
     for run in runs:
         out = (run.output or "")[:MAX_OUTPUT_PER_RUN]
         if len(run.output or "") > MAX_OUTPUT_PER_RUN:
@@ -52,38 +134,104 @@ async def build_agent_prompt(campaign: Campaign, db: AsyncSession) -> str:
             f"  Status: {run.status}\n"
             f"  Output: {out or '(no output)'}\n"
         )
-    actions_str = "\n".join(action_lines) or "  (none yet — this is the first action)"
+        if run.command:
+            already_run_commands.append(f"  - {run.command}")
 
-    return f"""You are a professional penetration tester AI conducting a systematic security assessment.
+    actions_str = "\n".join(action_lines) or "  (none yet)"
+    already_run_str = "\n".join(already_run_commands) if already_run_commands else "  (none)"
 
-TARGET SCOPE (only test these targets):
+    return f"""You are a penetration tester AI. Choose the single best NEXT action against the target.
+
+PRIMARY TARGET: {primary}
+SCOPE (only test these):
 {scope_str}
 
-AVAILABLE TOOLS:
+TOOLS AVAILABLE (use binary name as tool_name):
 {tools_str}
+{completed_note}
 
-ACTIONS TAKEN SO FAR (oldest first):
+HISTORY (oldest first — read this to understand what was found):
 {actions_str}
 
-Decide the single best NEXT action. Build logically on previous results:
-if ports are open, enumerate those services; if services are found, check for vulnerabilities.
+COMMANDS ALREADY RUN — DO NOT REPEAT:
+{already_run_str}
 
-Respond with ONLY valid JSON (no text before or after the JSON):
-{{
-  "reasoning": "Brief explanation of why this is the next logical step",
-  "tool_name": "exact tool name from available tools",
-  "target": "specific IP, domain, or URL",
-  "parameters": {{"param_name": "value"}}
-}}
+Reply with a SINGLE LINE of compact JSON — no markdown, no newlines inside the JSON:
+{{"thought":"2-3 sentences: what the previous results show and why you are choosing this tool","reasoning":"one sentence summary","tool_name":"binary","target":"{primary}","parameters":{{}},"extra_flags":""}}
 
-If the assessment is complete or no further productive actions remain, respond:
-{{
-  "reasoning": "Why the assessment is complete",
-  "done": true
-}}
+Or if all useful enumeration is complete:
+{{"reasoning":"why done","done":true}}
 
-Rules:
-- Only target systems within TARGET SCOPE or subdomains/IPs discovered from them
-- Use exact tool names from AVAILABLE TOOLS
-- Be specific — exact IPs or hostnames, not ranges
-- Never repeat an action that was already taken with the same target and parameters"""
+RULES (follow all):
+- tool_name MUST be one of the binaries listed in TOOLS AVAILABLE above
+- target must be {primary!r} (or a specific discovered path/endpoint)
+- DO NOT use any command listed in COMMANDS ALREADY RUN
+- extra_flags: optional string of additional CLI flags to append (e.g. "-p 80,443" or "--timeout 10"); leave empty string if not needed
+- Reply with exactly one line of JSON, no line breaks inside"""
+
+
+def build_retry_prompt(failed_command: str, error_output: str, campaign: Campaign) -> str:
+    """Focused prompt asking the LLM to fix a failed command or skip it."""
+    scope = campaign.target_scope or []
+    primary = _primary_target(scope, _classify_scope(scope))
+
+    return f"""A penetration testing command just failed. Decide if you can fix it.
+
+FAILED COMMAND:
+{failed_command}
+
+ERROR OUTPUT:
+{error_output[:600]}
+
+TARGET: {primary}
+
+If the error reveals a simple fixable mistake (wrong flag, wrong path, missing argument, typo), return:
+{{"retry":true,"thought":"what went wrong and exactly how to fix it","tool_name":"binary","target":"{primary}","parameters":{{}},"extra_flags":"","reasoning":"one sentence"}}
+
+If the tool fundamentally cannot work against this target, or you cannot determine a fix, return:
+{{"retry":false,"reasoning":"why"}}
+
+Reply with exactly one line of compact JSON, no markdown."""
+
+
+async def build_summary_prompt(campaign: Campaign, db: AsyncSession) -> str:
+    """Build the final summary prompt shown once the agent marks done."""
+    runs = []
+    if campaign.session_id:
+        result = await db.execute(
+            select(Run)
+            .where(Run.session_id == campaign.session_id)
+            .where(Run.status.in_(["complete", "error"]))
+            .where(Run.tool_name != "_summary")
+            .order_by(Run.created_at.asc())
+        )
+        runs = result.scalars().all()
+
+    scope = campaign.target_scope or []
+    primary = _primary_target(scope, _classify_scope(scope))
+
+    action_lines = []
+    for run in runs:
+        out = (run.output or "")[:800]
+        if len(run.output or "") > 800:
+            out += "..."
+        action_lines.append(
+            f"[{run.tool_name}] {run.command}\n"
+            f"Status: {run.status}\n"
+            f"Output:\n{out or '(no output)'}\n"
+        )
+    history = "\n---\n".join(action_lines) or "(no actions taken)"
+
+    return f"""You are a penetration tester AI. You have finished scanning {primary}.
+
+SCAN RESULTS:
+{history}
+
+Write a final report based ONLY on the evidence above. Reply with one compact JSON object:
+{{"summary":"2-3 sentences: overall assessment of what was found","findings":[{{"title":"short descriptive title","severity":"critical|high|medium|low|info","notes":"what was found, where, and why it matters"}}]}}
+
+RULES:
+- Only include findings that have clear evidence in the scan output above
+- If nothing notable was found, use an empty array: "findings":[]
+- severity must be exactly one of: critical, high, medium, low, info
+- Reply with a single line of compact JSON, no markdown, no newlines inside strings"""

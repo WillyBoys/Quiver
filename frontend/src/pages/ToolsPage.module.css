@@ -158,3 +158,35 @@
 
 @keyframes spin { to { transform: rotate(360deg); } }
 .spinIcon { animation: spin 1s linear infinite; color: var(--text-muted); }
+
+/* Agent mode selector in edit form */
+.agentModeRow {
+  display: flex; gap: 8px;
+}
+.agentModeOption {
+  flex: 1; display: flex; flex-direction: column; gap: 3px;
+  padding: 8px 10px; border-radius: 6px; cursor: pointer; text-align: left;
+  background: var(--bg-base); border: 1px solid var(--border);
+  transition: border-color 0.15s, background 0.15s;
+}
+.agentModeOption[data-active="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.agentModeOption[data-mode="never"][data-active="true"] { border-color: var(--critical); background: color-mix(in srgb, var(--critical) 10%, transparent); }
+.agentModeOption[data-mode="approve"][data-active="true"] { border-color: var(--warning); background: color-mix(in srgb, var(--warning) 10%, transparent); }
+.agentModeLabel { font-size: 12px; font-weight: 600; color: var(--text-primary); text-transform: none; letter-spacing: 0; }
+.agentModeDesc { font-size: 11px; color: var(--text-muted); text-transform: none; letter-spacing: 0; font-weight: 400; }
+
+/* Agent mode badge on tool list rows */
+.agentModeBadge {
+  font-size: 10px; font-weight: 600; padding: 1px 6px;
+  border-radius: 3px; text-transform: uppercase; letter-spacing: 0.04em;
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.agentModeBadge[data-mode="approve"] {
+  background: color-mix(in srgb, var(--warning) 15%, transparent);
+  color: var(--warning); border-color: color-mix(in srgb, var(--warning) 30%, transparent);
+}
+.agentModeBadge[data-mode="never"] {
+  background: color-mix(in srgb, var(--text-muted) 15%, transparent);
+  color: var(--text-muted); border-color: color-mix(in srgb, var(--text-muted) 30%, transparent);
+}

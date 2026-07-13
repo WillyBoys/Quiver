@@ -26,6 +26,7 @@ class ToolCreate(BaseModel):
     default_flags: Optional[str] = ""
     parameters: list[ToolParam] = []
     workflow_tags: list[str] = []
+    agent_mode: Optional[str] = "auto"
 
 
 class ToolUpdate(ToolCreate):
@@ -65,6 +66,7 @@ async def create_tool(body: ToolCreate, db: AsyncSession = Depends(get_db)):
         default_flags=body.default_flags,
         parameters=[p.model_dump() for p in body.parameters],
         workflow_tags=body.workflow_tags,
+        agent_mode=body.agent_mode or "auto",
         is_builtin=False,
     )
     db.add(tool)
@@ -83,6 +85,7 @@ async def update_tool(tool_id: str, body: ToolUpdate, db: AsyncSession = Depends
     tool.default_flags = body.default_flags
     tool.parameters = [p.model_dump() for p in body.parameters]
     tool.workflow_tags = body.workflow_tags
+    tool.agent_mode = body.agent_mode or "auto"
     tool.enabled = body.enabled
     await db.commit()
     return _tool_dict(tool)
@@ -117,4 +120,5 @@ def _tool_dict(t: Tool) -> dict:
         "workflow_tags": t.workflow_tags,
         "is_builtin": t.is_builtin,
         "enabled": t.enabled,
+        "agent_mode": t.agent_mode or "auto",
     }

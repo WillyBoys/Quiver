@@ -46,6 +46,7 @@ export default function SessionDetailPage() {
   const [addingTarget, setAddingTarget] = useState(false);
   const [newTargetValue, setNewTargetValue] = useState("");
 
+  const [campaign, setCampaign] = useState(null);
   const [isExporting, setIsExporting] = useState(false);
   const [sidebarView, setSidebarView] = useState("tools");   // "tools" | "checklist"
   const [shellCmd, setShellCmd] = useState("");
@@ -96,6 +97,19 @@ export default function SessionDetailPage() {
       }
     });
   }, [sessionId]);
+
+  // Poll for new agent-created runs + campaign status, and auto-scroll the reasoning feed
+  useEffect(() => {
+    if (!session?.campaign_id) return;
+    const campaignId = session.campaign_id;
+    api.campaigns.get(campaignId).then(setCampaign);
+    const interval = setInterval(() => {
+      api.runs.listForSession(sessionId).then(setRuns);
+      api.campaigns.get(campaignId).then(setCampaign);
+    }, 4000);
+    return () => clearInterval(interval);
+  }, [session?.campaign_id, sessionId]);
+
 
   const enabledTools = useMemo(() => tools.filter((t) => t.enabled), [tools]);
   const filteredTools = useMemo(() => {
@@ -440,7 +454,15 @@ export default function SessionDetailPage() {
           <ArrowLeft size={14} /> Sessions
         </button>
         <div className={styles.sessionInfo}>
-          <h1 className={styles.sessionName}>{session.name}</h1>
+          <div className={styles.sessionNameRow}>
+            <h1 className={styles.sessionName}>{session.name}</h1>
+            {campaign && (
+              <span className={`${styles.agentStatusTag} ${styles[`agentStatus_${campaign.status}`]}`}>
+                {campaign.status === "active" && <span className={styles.agentStatusDot} />}
+                {campaign.status === "active" ? "Running" : campaign.status === "completed" ? "Done" : "Paused"}
+              </span>
+            )}
+          </div>
           <code className={styles.target}>{session.target}</code>
         </div>
         <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={handleExport} disabled={isExporting}>
@@ -498,9 +520,80 @@ export default function SessionDetailPage() {
         )}
       </div>
 
-      <div className={styles.workspace} data-agent={!!session.campaign_id}>
-        {/* Left: tool picker / checklist — hidden for agent sessions */}
-        <aside className={styles.toolPicker} style={session.campaign_id ? { display: "none" } : {}}>
+      <div className={styles.workspace}>
+        {/* Left: reasoning terminal (agent sessions) or tool picker / checklist (manual) */}
+        <aside className={styles.toolPicker}>
+        {session.campaign_id ? (
+          /* ── Agent session: live reasoning log ── */
+          <div className={styles.reasoningTerminal}>
+            <div className={styles.reasoningHeader}>
+              <Cpu size={12} />
+              <span>Agent Reasoning</span>
+              {Object.values(streaming).some(Boolean) && (
+                <span className={styles.reasoningLive}>● live</span>
+              )}
+            </div>
+            <div className={styles.reasoningFeed}>
+              {runs.filter(r => r.reasoning).length === 0 && (
+                <p className={styles.reasoningEmpty}>Waiting for agent to run…</p>
+              )}
+              {runs.filter(r => r.reasoning).map((run, i, arr) => {
+                if (run.tool_name === "_summary") {
+                  const findings = run.param_values?._findings || [];
+                  const SEV_COLOR = { critical: "#f87171", high: "#fb923c", medium: "#facc15", low: "#60a5fa", info: "#94a3b8" };
+                  return (
+                    <div key={run.id} className={styles.summaryCard}>
+                      <div className={styles.summaryHeader}>
+                        <span className={styles.summaryLabel}>Agent Summary</span>
+                      </div>
+                      {run.reasoning && <p className={styles.summaryText}>{run.reasoning}</p>}
+                      {findings.length > 0 && (
+                        <div className={styles.summaryFindings}>
+                          <p className={styles.summaryFindingsLabel}>Findings logged ({findings.length})</p>
+                          {findings.map((f, fi) => (
+                            <div key={fi} className={styles.summaryFinding}>
+                              <span className={styles.summaryFindingSev} style={{ color: SEV_COLOR[f.severity] || "#94a3b8" }}>{f.severity}</span>
+                              <span className={styles.summaryFindingTitle}>{f.title}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {findings.length === 0 && (
+                        <p className={styles.summaryNoFindings}>No vulnerabilities identified.</p>
+                      )}
+                    </div>
+                  );
+                }
+
+                const isRunStreaming = streaming[run.id] || false;
+                const displayStatus = isRunStreaming ? "running" : run.status;
+                const regularRuns = arr.filter(r => r.tool_name !== "_summary");
+                const stepNum = regularRuns.length - regularRuns.indexOf(run);
+                return (
+                  <div key={run.id} className={styles.reasoningBlock}>
+                    <div className={styles.reasoningEntry}>
+                      <div className={styles.reasoningMeta}>
+                        <span className={styles.reasoningStep}>Step {stepNum}</span>
+                        <span className={`${styles.runStatus} ${styles[`status_${displayStatus}`]}`}>{displayStatus}</span>
+                      </div>
+                      <div className={styles.reasoningTool}>{run.tool_name}</div>
+                      <p className={styles.reasoningText}>{run.reasoning}</p>
+                      <code className={styles.reasoningCmd}>{run.command}</code>
+                    </div>
+                    {run.param_values?._thought && (
+                      <div className={styles.reasoningThought}>
+                        <span className={styles.reasoningThoughtLabel}>thinking</span>
+                        <p>{run.param_values._thought}</p>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          /* ── Manual session: tool picker / checklist ── */
+          <>
           {/* View toggle */}
           <div className={styles.sidebarToggle}>
             <button
@@ -649,8 +742,10 @@ export default function SessionDetailPage() {
               );
             })}
           </div>
-            </>
+          </>
           )}
+          </>
+        )}
         </aside>
 
         {/* Center: terminal output */}
@@ -761,7 +856,7 @@ export default function SessionDetailPage() {
                 <button className={styles.aiFloatBtn} onClick={() => handleAnalyze(activeRunId)}>
                   <Cpu size={13} />
                   Analyze with AI
-                  <span className={styles.aiModel}>phi3:mini</span>
+                  <span className={styles.aiModel}>qwen2.5:7b</span>
                 </button>
             )}
           </div>
@@ -776,7 +871,7 @@ export default function SessionDetailPage() {
                   <div className={styles.aiPanel}>
                     <div className={styles.aiLoading}>
                       <span className={styles.aiSpinner} />
-                      Analyzing with phi3:mini&hellip; this may take 30–60s on CPU
+                      Analyzing with qwen2.5:7b&hellip; this may take 30–60s on CPU
                     </div>
                   </div>
                 );
@@ -808,55 +903,18 @@ export default function SessionDetailPage() {
             })()}
         </div>
 
-        {/* Right panel — agent activity feed or normal sidebar */}
+        {/* Right panel */}
         <aside className={styles.rightPanel}>
-          {session.campaign_id ? (
-            /* ── Agent session: activity feed ── */
-            <div className={styles.agentFeed}>
-              <div className={styles.agentBanner}>
-                <Cpu size={12} />
-                <span>AI-managed session</span>
-                <button className={styles.agentBannerLink} onClick={() => navigate("/campaigns")}>
-                  ← Campaigns
-                </button>
-              </div>
-
-              <h3 className={styles.panelTitle} style={{ padding: "0 12px", marginBottom: 8 }}>
-                Agent Activity
-              </h3>
-
-              {runs.length === 0 && (
-                <p className={styles.empty} style={{ padding: "0 12px" }}>
-                  No actions yet — run the campaign to start.
-                </p>
-              )}
-
-              {[...runs].reverse().map((run) => {
-                const isRunStreaming = streaming[run.id] || false;
-                const displayStatus = isRunStreaming ? "running" : run.status;
-                return (
-                  <div
-                    key={run.id}
-                    className={`${styles.agentRunCard} ${run.id === activeRunId ? styles.agentRunCardActive : ""}`}
-                    onClick={() => openTab(run.id)}
-                  >
-                    <div className={styles.agentRunHeader}>
-                      <span className={styles.agentRunTool}>{run.tool_name}</span>
-                      <span className={`${styles.runStatus} ${styles[`status_${displayStatus}`]}`}>
-                        {displayStatus}
-                      </span>
-                    </div>
-                    {run.reasoning && (
-                      <p className={styles.agentRunReasoning}>{run.reasoning}</p>
-                    )}
-                    <code className={styles.agentRunCommand}>{run.command}</code>
-                  </div>
-                );
-              })}
+          {session.campaign_id && (
+            <div className={styles.campaignBanner}>
+              <Cpu size={12} />
+              <span>AI-managed session</span>
+              <button className={styles.campaignBannerLink} onClick={() => navigate("/campaigns")}>
+                ← Campaigns
+              </button>
             </div>
-          ) : (
-            /* ── Manual session: normal sidebar ── */
-            <>
+          )}
+
           {/* Session notes */}
           <div className={styles.notesSection}>
             <div className={styles.notesTitleRow}>
@@ -951,8 +1009,6 @@ export default function SessionDetailPage() {
               )}
             </div>
           </div>
-            </>
-          )}
         </aside>
       </div>
 

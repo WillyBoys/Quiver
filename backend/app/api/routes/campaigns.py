@@ -9,7 +9,7 @@ from app.db.database import get_db
 from app.models.campaign import Campaign
 from app.models.session import Session as EngagementSession
 from app.agent.scheduler import add_campaign_job, remove_campaign_job
-from app.agent.engine import run_campaign_agent
+from app.agent.engine import run_campaign_loop
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -113,7 +113,7 @@ async def trigger_campaign(
     campaign = await _get_or_404(campaign_id, db)
     if campaign.status != "active":
         raise HTTPException(status_code=400, detail="Campaign must be active to run")
-    background_tasks.add_task(run_campaign_agent, campaign_id)
+    background_tasks.add_task(run_campaign_loop, campaign_id)
     logger.info("CAMPAIGN RUN | id=%s triggered manually", campaign_id)
     return {"message": "Agent loop triggered", "campaign_id": campaign_id}
 

@@ -123,7 +123,7 @@ DEFAULT_TOOLS = [
         "default_flags": "dir -t 50 -x php,html,txt",
         "parameters": [
             {"name": "url", "flag": "-u", "placeholder": "http://10.10.10.1", "required": True, "description": "Target URL"},
-            {"name": "wordlist", "flag": "-w", "placeholder": "/wordlists/common.txt", "required": True, "description": "Wordlist path"},
+            {"name": "wordlist", "flag": "-w", "placeholder": "/wordlists/Discovery/Web-Content/common.txt", "required": True, "description": "Wordlist path"},
         ],
         "workflow_tags": ["web"],
         "is_builtin": True,
@@ -137,7 +137,7 @@ DEFAULT_TOOLS = [
         "parameters": [
             {"name": "url", "flag": "-u", "placeholder": "http://10.10.10.1", "required": True, "description": "Base URL"},
             {"name": "domain", "flag": "-d", "placeholder": "target.htb", "required": True, "description": "Base domain"},
-            {"name": "wordlist", "flag": "-w", "placeholder": "/wordlists/subdomains.txt", "required": True, "description": "Wordlist path"},
+            {"name": "wordlist", "flag": "-w", "placeholder": "/wordlists/Discovery/DNS/subdomains-top1million-5000.txt", "required": True, "description": "Wordlist path"},
         ],
         "workflow_tags": ["web"],
         "is_builtin": True,
@@ -150,7 +150,7 @@ DEFAULT_TOOLS = [
         "default_flags": "-c -mc 200,301,302,403",
         "parameters": [
             {"name": "url", "flag": "-u", "placeholder": "http://10.10.10.1/FUZZ", "required": True, "description": "URL with FUZZ keyword"},
-            {"name": "wordlist", "flag": "-w", "placeholder": "/wordlists/common.txt", "required": True, "description": "Wordlist path"},
+            {"name": "wordlist", "flag": "-w", "placeholder": "/wordlists/Discovery/Web-Content/common.txt", "required": True, "description": "Wordlist path"},
         ],
         "workflow_tags": ["web"],
         "is_builtin": True,
@@ -163,7 +163,7 @@ DEFAULT_TOOLS = [
         "default_flags": "--auto-tune",
         "parameters": [
             {"name": "url", "flag": "-u", "placeholder": "http://10.10.10.1", "required": True, "description": "Target URL"},
-            {"name": "wordlist", "flag": "-w", "placeholder": "/wordlists/common.txt", "required": True, "description": "Wordlist path"},
+            {"name": "wordlist", "flag": "-w", "placeholder": "/wordlists/Discovery/Web-Content/common.txt", "required": True, "description": "Wordlist path"},
         ],
         "workflow_tags": ["web"],
         "is_builtin": True,
@@ -298,7 +298,7 @@ DEFAULT_TOOLS = [
         "parameters": [
             {"name": "domain", "flag": "-d", "placeholder": "domain.local", "required": True, "description": "Target domain"},
             {"name": "dc", "flag": "--dc", "placeholder": "10.10.10.1", "required": True, "description": "Domain controller IP"},
-            {"name": "wordlist", "placeholder": "/wordlists/users.txt", "required": True, "description": "Username wordlist"},
+            {"name": "wordlist", "placeholder": "/wordlists/Usernames/top-usernames-shortlist.txt", "required": True, "description": "Username wordlist"},
         ],
         "workflow_tags": ["internal"],
         "is_builtin": True,
@@ -387,8 +387,8 @@ DEFAULT_TOOLS = [
         "binary": "hydra",
         "default_flags": "-t 4",
         "parameters": [
-            {"name": "userlist", "flag": "-L", "placeholder": "/wordlists/users.txt", "required": True, "description": "Username list"},
-            {"name": "passlist", "flag": "-P", "placeholder": "/wordlists/passwords.txt", "required": True, "description": "Password list"},
+            {"name": "userlist", "flag": "-L", "placeholder": "/wordlists/Usernames/top-usernames-shortlist.txt", "required": True, "description": "Username list"},
+            {"name": "passlist", "flag": "-P", "placeholder": "/wordlists/Passwords/Common-Credentials/10-million-password-list-top-1000.txt", "required": True, "description": "Password list"},
             {"name": "target", "placeholder": "10.10.10.1", "required": True, "description": "Target IP"},
             {"name": "protocol", "placeholder": "ssh", "required": True, "description": "Service (ssh, ftp, rdp, etc.)"},
         ],

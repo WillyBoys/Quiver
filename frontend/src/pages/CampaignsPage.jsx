@@ -41,19 +41,13 @@ export default function CampaignsPage() {
 
   useEffect(() => { load(); }, [load]);
 
-  async function handleToggle(campaign) {
-    const newStatus = campaign.status === "active" ? "paused" : "active";
-    await api.campaigns.update(campaign.id, { status: newStatus });
-    load();
-  }
-
-  async function handleDelete(id) {
-    if (!confirm("Delete this campaign? This cannot be undone.")) return;
-    await api.campaigns.delete(id);
-    load();
-  }
-
-  async function handleRun(campaign) {
+  async function handleRunPause(campaign) {
+    if (campaign.status === "active") {
+      await api.campaigns.update(campaign.id, { status: "paused" });
+      load();
+      return;
+    }
+    await api.campaigns.update(campaign.id, { status: "active" });
     setTriggering(t => ({ ...t, [campaign.id]: true }));
     try {
       await api.campaigns.run(campaign.id);
@@ -63,6 +57,12 @@ export default function CampaignsPage() {
     } finally {
       setTimeout(() => setTriggering(t => ({ ...t, [campaign.id]: false })), 2000);
     }
+  }
+
+  async function handleDelete(id) {
+    if (!confirm("Delete this campaign? This cannot be undone.")) return;
+    await api.campaigns.delete(id);
+    load();
   }
 
   async function handleViewSession(campaign) {
@@ -150,20 +150,16 @@ export default function CampaignsPage() {
                 <button
                   className="btn btn-ghost"
                   style={{ fontSize: 11 }}
-                  onClick={() => handleRun(c)}
-                  disabled={c.status !== "active" || triggering[c.id]}
-                  title="Run agent now"
+                  onClick={() => handleRunPause(c)}
+                  disabled={c.status === "completed" || triggering[c.id]}
+                  title={c.status === "active" ? "Pause campaign" : "Run campaign"}
                 >
-                  <Play size={11} /> {triggering[c.id] ? "Running…" : "Run Now"}
-                </button>
-                <button
-                  className="btn btn-ghost"
-                  style={{ fontSize: 11 }}
-                  onClick={() => handleToggle(c)}
-                  disabled={c.status === "completed"}
-                  title={c.status === "active" ? "Pause" : "Resume"}
-                >
-                  <Pause size={11} /> {c.status === "active" ? "Pause" : "Resume"}
+                  {triggering[c.id]
+                    ? <><span className={styles.runSpinner} /> Running…</>
+                    : c.status === "active"
+                      ? <><Pause size={11} /> Pause</>
+                      : <><Play size={11} /> Run</>
+                  }
                 </button>
                 {c.session_id && (
                   <button
@@ -332,7 +328,7 @@ function NewCampaignModal({ onClose, onCreated }) {
                 onClick={() => setForm(f => ({ ...f, ai_provider: "local" }))}
               >
                 <span className={styles.riskLabel}>Local (Ollama)</span>
-                <span className={styles.riskDesc}>phi3:mini — private, no API key required</span>
+                <span className={styles.riskDesc}>Qwen 2.5 7B — private, no API key required</span>
               </button>
               <button
                 type="button"

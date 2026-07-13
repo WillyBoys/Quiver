@@ -29,14 +29,17 @@ def is_in_scope(target: str, scope: list[str]) -> bool:
         except ValueError:
             pass  # entry is not a CIDR
 
+        # Normalize scope entry for domain matching — strip scheme and port
+        entry_host = _extract_host(entry)
+
         # Wildcard subdomain: *.example.com
-        if entry.startswith("*."):
-            if host.endswith(entry[1:]):
+        if entry_host.startswith("*."):
+            if host.endswith(entry_host[1:]):
                 return True
             continue
 
         # Exact match or subdomain
-        if host == entry or host.endswith("." + entry):
+        if host == entry_host or host.endswith("." + entry_host):
             return True
 
     logger.warning("SCOPE | %s not in scope %s", host, scope)

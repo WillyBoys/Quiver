@@ -4,7 +4,7 @@ from app.config import OLLAMA_URL, OLLAMA_MODEL, ANTHROPIC_API_KEY, CLAUDE_MODEL
 
 logger = logging.getLogger(__name__)
 
-OLLAMA_TIMEOUT = 360.0
+OLLAMA_TIMEOUT = 300.0
 CLAUDE_TIMEOUT = 60.0
 
 
@@ -28,7 +28,11 @@ async def _call_ollama(prompt: str) -> str:
                 "model": OLLAMA_MODEL,
                 "prompt": prompt,
                 "stream": False,
-                "options": {"temperature": 0.1, "num_ctx": 4096},
+                "options": {
+                    "temperature": 0.1,
+                    "num_ctx": 4096,
+                    "num_predict": 1024,
+                },
             },
         )
     if resp.status_code != 200:

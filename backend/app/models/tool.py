@@ -19,3 +19,8 @@ class Tool(Base):
     workflow_tags: Mapped[list] = mapped_column(JSON, default=list)
     is_builtin: Mapped[bool] = mapped_column(Boolean, default=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    # How the agent may use this tool: "auto" | "approve" | "never"
+    # "auto"    — runs without human confirmation
+    # "approve" — queued for human approval before executing
+    # "never"   — hidden from the LLM entirely; manual use only
+    agent_mode: Mapped[str] = mapped_column(String, default="auto")
