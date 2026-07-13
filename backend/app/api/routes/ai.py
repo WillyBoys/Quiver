@@ -1,12 +1,12 @@
 import logging
-import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from pydantic import BaseModel
+from typing import Optional
 from app.db.database import get_db
 from app.models.run import Run
-from app.config import OLLAMA_URL, OLLAMA_MODEL
+from app.agent.llm import generate as llm_generate
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -41,6 +41,7 @@ NEXT STEPS
 
 class AnalyzeRequest(BaseModel):
     run_id: str
+    provider: Optional[str] = "local"  # "local" or "claude"
 
 
 @router.post("/analyze")
@@ -55,45 +56,18 @@ async def analyze_run(body: AnalyzeRequest, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Run produced no output to analyze")
 
     prompt = _build_prompt(run.tool_name or "unknown", run.command or "", run.output)
+    provider = body.provider or "local"
 
-    logger.info("AI ANALYZE | run_id=%s tool=%s model=%s", run.id, run.tool_name, OLLAMA_MODEL)
+    logger.info("AI ANALYZE | run_id=%s tool=%s provider=%s", run.id, run.tool_name, provider)
 
     try:
-        async with httpx.AsyncClient(timeout=360.0) as client:
-            resp = await client.post(
-                f"{OLLAMA_URL}/api/generate",
-                json={
-                    "model": OLLAMA_MODEL,
-                    "prompt": prompt,
-                    "stream": False,
-                    "options": {
-                        "temperature": 0.1,
-                        "num_ctx": 4096,
-                    },
-                },
-            )
-
-        if resp.status_code != 200:
-            logger.error("Ollama returned %s: %s", resp.status_code, resp.text[:500])
-            raise HTTPException(status_code=502, detail="AI service returned an error")
-
-        data = resp.json()
-        analysis = data.get("response", "").strip()
-        logger.info("AI DONE   | run_id=%s chars=%d", run.id, len(analysis))
-        return {"analysis": analysis, "model": OLLAMA_MODEL, "run_id": body.run_id}
-
-    except httpx.ConnectError:
-        raise HTTPException(
-            status_code=503,
-            detail="AI service unavailable. Make sure Ollama is running (docker compose up ai).",
-        )
-    except httpx.TimeoutException:
-        raise HTTPException(
-            status_code=504,
-            detail="Analysis timed out. The model may still be loading — try again in a moment.",
-        )
-    except HTTPException:
-        raise
+        analysis, model_used = await llm_generate(prompt, provider=provider)
+        logger.info("AI DONE   | run_id=%s model=%s chars=%d", run.id, model_used, len(analysis))
+        return {"analysis": analysis, "model": model_used, "run_id": body.run_id}
+    except RuntimeError as e:
+        if "ANTHROPIC_API_KEY" in str(e):
+            raise HTTPException(status_code=503, detail=str(e))
+        raise HTTPException(status_code=503, detail=f"AI service unavailable: {e}")
     except Exception as e:
         logger.error("AI analyze unexpected error: %s", str(e))
         raise HTTPException(status_code=500, detail="Analysis failed")

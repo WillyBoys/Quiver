@@ -21,6 +21,7 @@ class CampaignCreate(BaseModel):
     target_scope: list[str] = []
     schedule: Optional[str] = None
     risk_level: str = "notify"
+    ai_provider: str = "local"
 
 
 class CampaignUpdate(BaseModel):
@@ -29,6 +30,7 @@ class CampaignUpdate(BaseModel):
     target_scope: Optional[list[str]] = None
     schedule: Optional[str] = None
     risk_level: Optional[str] = None
+    ai_provider: Optional[str] = None
     status: Optional[str] = None
 
 
@@ -51,6 +53,7 @@ async def create_campaign(body: CampaignCreate, db: AsyncSession = Depends(get_d
         target_scope=[t.strip() for t in body.target_scope if t.strip()],
         schedule=body.schedule or None,
         risk_level=body.risk_level,
+        ai_provider=body.ai_provider,
     )
     db.add(campaign)
     await db.commit()
@@ -76,6 +79,8 @@ async def update_campaign(campaign_id: str, body: CampaignUpdate, db: AsyncSessi
         campaign.schedule = body.schedule or None
     if body.risk_level is not None:
         campaign.risk_level = body.risk_level
+    if body.ai_provider is not None:
+        campaign.ai_provider = body.ai_provider
     if body.status is not None:
         campaign.status = body.status
         if body.status == "paused":
@@ -142,6 +147,7 @@ def _dict(c: Campaign) -> dict:
         "schedule": c.schedule,
         "status": c.status,
         "risk_level": c.risk_level,
+        "ai_provider": c.ai_provider or "local",
         "session_id": c.session_id,
         "last_agent_reasoning": c.last_agent_reasoning or "",
         "created_at": c.created_at.isoformat(),

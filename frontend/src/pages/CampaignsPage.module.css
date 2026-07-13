@@ -280,6 +280,52 @@
   gap: 8px;
 }
 
+/* Provider badge */
+.providerBadge {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  padding: 2px 7px;
+  border-radius: 3px;
+  font-weight: 600;
+}
+
+.providerBadge[data-provider="claude"] {
+  background: rgba(139, 92, 246, 0.12);
+  border: 1px solid rgba(139, 92, 246, 0.4);
+  color: #a78bfa;
+}
+
+.providerBadge[data-provider="local"] {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+}
+
+/* Provider selector (modal) */
+.providerRow {
+  display: flex;
+  gap: 8px;
+}
+
+.providerOption {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-panel);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.providerOption[data-active="true"] {
+  border-color: var(--accent);
+  background: var(--accent-glow);
+}
+
 /* Risk level selector */
 .riskRow {
   display: flex;

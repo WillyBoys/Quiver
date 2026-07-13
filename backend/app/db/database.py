@@ -38,6 +38,10 @@ async def init_db():
             await conn.execute(text("ALTER TABLE campaigns ADD COLUMN last_agent_reasoning TEXT DEFAULT ''"))
         except OperationalError:
             pass  # column already exists
+        try:
+            await conn.execute(text("ALTER TABLE campaigns ADD COLUMN ai_provider TEXT DEFAULT 'local'"))
+        except OperationalError:
+            pass  # column already exists
 
 
 async def get_db() -> AsyncSession:

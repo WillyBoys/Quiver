@@ -2,10 +2,8 @@ import json
 import re
 import asyncio
 import logging
-import httpx
 from datetime import datetime, timezone
 from sqlalchemy import select, func
-from app.config import OLLAMA_URL, OLLAMA_MODEL
 from app.db.database import AsyncSessionLocal
 from app.models.campaign import Campaign, ApprovalRequest
 from app.models.run import Run
@@ -13,6 +11,7 @@ from app.models.tool import Tool
 from app.models.session import Session as EngagementSession
 from app.agent.scope_guard import is_in_scope
 from app.agent.context import build_agent_prompt
+from app.agent.llm import generate as llm_generate
 from app.execution import (
     execute_run_background,
     build_command,
@@ -22,7 +21,6 @@ from app.execution import (
 
 logger = logging.getLogger(__name__)
 
-AGENT_TIMEOUT = 300.0  # seconds per Ollama call
 
 # Risk tiers for known tool binaries.
 # Tools not in this map default to "notify" (active, requires campaign risk_level >= notify to auto-run).
@@ -117,31 +115,17 @@ async def run_campaign_agent(campaign_id: str) -> str:
 
         prompt = await build_agent_prompt(campaign, db)
 
-    logger.info("AGENT | campaign=%s calling %s", campaign_id, OLLAMA_MODEL)
+    provider = campaign.ai_provider or "local"
+    logger.info("AGENT | campaign=%s provider=%s", campaign_id, provider)
     try:
-        async with httpx.AsyncClient(timeout=AGENT_TIMEOUT) as client:
-            resp = await client.post(
-                f"{OLLAMA_URL}/api/generate",
-                json={
-                    "model": OLLAMA_MODEL,
-                    "prompt": prompt,
-                    "stream": False,
-                    "options": {"temperature": 0.2, "num_ctx": 4096},
-                },
-            )
-    except httpx.ConnectError:
-        logger.error("AGENT | Ollama unreachable")
-        return "ai_unavailable"
-    except httpx.TimeoutException:
-        logger.error("AGENT | LLM timed out for campaign %s", campaign_id)
-        return "ai_timeout"
-
-    if resp.status_code != 200:
-        logger.error("AGENT | Ollama returned %s for campaign %s", resp.status_code, campaign_id)
+        raw, model_used = await llm_generate(prompt, provider=provider)
+        logger.info("AGENT | campaign=%s model=%s raw: %.300s", campaign_id, model_used, raw)
+    except RuntimeError as e:
+        logger.error("AGENT | LLM error for campaign %s: %s", campaign_id, e)
         return "ai_error"
-
-    raw = resp.json().get("response", "").strip()
-    logger.info("AGENT | campaign=%s raw: %.300s", campaign_id, raw)
+    except Exception as e:
+        logger.error("AGENT | LLM unexpected error for campaign %s: %s", campaign_id, e)
+        return "ai_error"
 
     try:
         action = _parse_action(raw)

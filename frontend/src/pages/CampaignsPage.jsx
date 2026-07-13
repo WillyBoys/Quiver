@@ -114,6 +114,9 @@ export default function CampaignsPage() {
               </div>
               <div className={styles.cardBadges}>
                 <span className={styles.badge}>{RISK_LABELS[c.risk_level]?.label || c.risk_level}</span>
+                <span className={styles.providerBadge} data-provider={c.ai_provider || "local"}>
+                  {c.ai_provider === "claude" ? "Claude API" : "Local"}
+                </span>
                 <span className={styles.badge} style={{ color: "var(--text-muted)" }}>
                   {c.schedule || "manual"}
                 </span>
@@ -204,6 +207,7 @@ function NewCampaignModal({ onClose, onCreated }) {
     schedulePreset: "",
     customCron: "",
     risk_level: "notify",
+    ai_provider: "local",
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -225,6 +229,7 @@ function NewCampaignModal({ onClose, onCreated }) {
         target_scope,
         schedule: schedule || null,
         risk_level: form.risk_level,
+        ai_provider: form.ai_provider,
       });
       onCreated();
     } catch (e) {
@@ -314,6 +319,30 @@ function NewCampaignModal({ onClose, onCreated }) {
                   <span className={styles.riskDesc}>{desc}</span>
                 </button>
               ))}
+            </div>
+          </label>
+
+          <label className={styles.label}>
+            AI Provider
+            <div className={styles.providerRow}>
+              <button
+                type="button"
+                className={styles.providerOption}
+                data-active={form.ai_provider === "local"}
+                onClick={() => setForm(f => ({ ...f, ai_provider: "local" }))}
+              >
+                <span className={styles.riskLabel}>Local (Ollama)</span>
+                <span className={styles.riskDesc}>phi3:mini — private, no API key required</span>
+              </button>
+              <button
+                type="button"
+                className={styles.providerOption}
+                data-active={form.ai_provider === "claude"}
+                onClick={() => setForm(f => ({ ...f, ai_provider: "claude" }))}
+              >
+                <span className={styles.riskLabel}>Claude API</span>
+                <span className={styles.riskDesc}>Haiku — fast, accurate, requires API key</span>
+              </button>
             </div>
           </label>
 
