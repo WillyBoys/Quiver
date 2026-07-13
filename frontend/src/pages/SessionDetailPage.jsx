@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Play, Plus, Trash2, Flag, X, FolderOpen, Search, Download, ListOrdered, Link2, SlidersHorizontal, Cpu } from "lucide-react";
+import { ArrowLeft, Play, Plus, Trash2, Flag, X, FolderOpen, Search, Download, Link2, Cpu } from "lucide-react";
 import { api, createRunSocket } from "../utils/api.js";
 import TerminalPane from "../components/terminal/TerminalPane.jsx";
 import ChecklistPane from "../components/checklist/ChecklistPane.jsx";
@@ -47,11 +47,6 @@ export default function SessionDetailPage() {
   const [newTargetValue, setNewTargetValue] = useState("");
 
   const [isExporting, setIsExporting] = useState(false);
-  const [suitePickerOpen, setSuitePickerOpen] = useState(false);
-  const [suites, setSuites] = useState(null);           // null = not loaded yet
-  const [selectedSuite, setSelectedSuite] = useState(null);
-  const [suiteParams, setSuiteParams] = useState({});   // stepIdx -> {paramName: value}
-  const [runningSuite, setRunningSuite] = useState(false);
   const [sidebarView, setSidebarView] = useState("tools");   // "tools" | "checklist"
   const [shellCmd, setShellCmd] = useState("");
   const [workflowFilter, setWorkflowFilter] = useState("all"); // "all" | "external" | "internal" | "web"
@@ -363,92 +358,6 @@ export default function SessionDetailPage() {
     await api.sessions.patchTargets(sessionId, updated).catch(() => {});
   }
 
-  async function openSuitePicker() {
-    setSuitePickerOpen(true);
-    setSelectedSuite(null);
-    setSuiteParams({});
-    if (!suites) {
-      const list = await api.suites.list().catch(() => []);
-      setSuites(list);
-    }
-  }
-
-  function selectSuite(suite) {
-    setSelectedSuite(suite);
-    const initial = {};
-    suite.steps.forEach((step, i) => {
-      const merged = { ...step.param_values };
-      // Pre-fill blank target params with the active target
-      if (activeTarget) {
-        const toolDef = tools.find(t => t.id === step.tool_id);
-        (toolDef?.parameters || []).forEach(p => {
-          if (isTargetParam(p) && !merged[p.name]) {
-            merged[p.name] = activeTarget.value;
-          }
-        });
-      }
-      initial[i] = merged;
-    });
-    setSuiteParams(initial);
-  }
-
-  // Collect steps that have at least one blank required param
-  function blankParams(suite) {
-    const blank = [];
-    suite.steps.forEach((step, stepIdx) => {
-      const toolDef = tools.find(t => t.id === step.tool_id);
-      (toolDef?.parameters || []).forEach(p => {
-        const val = (suiteParams[stepIdx] || {})[p.name] || "";
-        if (!val) blank.push({ stepIdx, stepName: step.tool_name, param: p });
-      });
-    });
-    return blank;
-  }
-
-  async function executeSuite() {
-    if (!selectedSuite) return;
-    setSuitePickerOpen(false);
-    setRunningSuite(true);
-
-    for (const [i, step] of selectedSuite.steps.entries()) {
-      const merged = { ...(step.param_values || {}), ...(suiteParams[i] || {}) };
-      let run;
-      try {
-        run = await api.runs.create({
-          session_id: sessionId,
-          tool_id: step.tool_id,
-          param_values: merged,
-          extra_flags: step.extra_flags || "",
-        });
-      } catch {
-        break;
-      }
-
-      setRuns(prev => [run, ...prev]);
-      openTab(run.id);
-      setLiveOutput(o => ({ ...o, [run.id]: "" }));
-      setStreaming(s => ({ ...s, [run.id]: true }));
-
-      await new Promise(resolve => {
-        createRunSocket(run.id, {
-          onOutput: line => setLiveOutput(o => ({ ...o, [run.id]: (o[run.id] || "") + line })),
-          onDone: msg => {
-            setStreaming(s => ({ ...s, [run.id]: false }));
-            setRuns(prev => prev.map(r => r.id === run.id ? { ...r, status: msg.status } : r));
-            resolve();
-          },
-          onError: err => {
-            setStreaming(s => ({ ...s, [run.id]: false }));
-            setLiveOutput(o => ({ ...o, [run.id]: (o[run.id] || "") + `\n[ERROR] ${err}` }));
-            resolve();
-          },
-        });
-      });
-    }
-
-    setRunningSuite(false);
-  }
-
   async function handleAnalyze(runId) {
     setAiAnalysis((prev) => ({ ...prev, [runId]: { status: "loading" } }));
     try {
@@ -534,10 +443,6 @@ export default function SessionDetailPage() {
           <h1 className={styles.sessionName}>{session.name}</h1>
           <code className={styles.target}>{session.target}</code>
         </div>
-        <button className="btn btn-ghost" style={{ fontSize: 12 }}
-          onClick={openSuitePicker} disabled={runningSuite}>
-          <ListOrdered size={13} /> {runningSuite ? "Running suite…" : "Run Suite"}
-        </button>
         <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={handleExport} disabled={isExporting}>
           <Download size={13} /> {isExporting ? "Exporting…" : "Export Report"}
         </button>
@@ -998,83 +903,6 @@ export default function SessionDetailPage() {
           </div>
         </aside>
       </div>
-
-      {/* Suite picker modal */}
-      {suitePickerOpen && (
-        <div className={styles.modal}>
-          <div className={styles.modalBox}>
-            <h2 className={styles.modalTitle}>Run Suite</h2>
-
-            {suites === null && <p style={{ color: "var(--text-muted)", fontSize: 13 }}>Loading suites…</p>}
-            {suites && suites.length === 0 && (
-              <p style={{ color: "var(--text-muted)", fontSize: 13 }}>
-                No suites yet. Build one in the Suites tab first.
-              </p>
-            )}
-
-            {suites && suites.length > 0 && (
-              <div className={styles.form}>
-                {/* Suite picker list */}
-                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  {suites.map(suite => (
-                    <button key={suite.id} type="button"
-                      onClick={() => selectSuite(suite)}
-                      style={{
-                        textAlign: "left", padding: "10px 12px", borderRadius: 5,
-                        border: `1px solid ${selectedSuite?.id === suite.id ? "var(--accent)" : "var(--border)"}`,
-                        background: selectedSuite?.id === suite.id ? "var(--accent-glow)" : "var(--bg-elevated)",
-                        cursor: "pointer", display: "flex", flexDirection: "column", gap: 4,
-                      }}>
-                      <span style={{ fontWeight: 600, fontSize: 13, color: "var(--text-primary)" }}>
-                        {suite.name}
-                      </span>
-                      <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-                        {suite.steps.length} step{suite.steps.length !== 1 ? "s" : ""}
-                        {suite.description ? ` — ${suite.description}` : ""}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-
-                {/* Blank params for selected suite */}
-                {selectedSuite && blankParams(selectedSuite).length > 0 && (
-                  <div style={{ borderTop: "1px solid var(--border)", paddingTop: 16 }}>
-                    <p style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase",
-                      letterSpacing: "0.06em", color: "var(--text-secondary)", marginBottom: 12 }}>
-                      Fill in parameters
-                    </p>
-                    {blankParams(selectedSuite).map(({ stepIdx, stepName, param }) => (
-                      <label key={`${stepIdx}-${param.name}`} className={styles.label}
-                        style={{ marginBottom: 10 }}>
-                        <span style={{ color: "var(--text-muted)", fontSize: 10 }}>
-                          Step {stepIdx + 1} — {stepName}
-                        </span>
-                        {param.name}{param.required && <span style={{ color: "var(--critical)" }}> *</span>}
-                        <input className="input input-mono" style={{ fontSize: 12 }}
-                          placeholder={param.placeholder || param.name}
-                          value={(suiteParams[stepIdx] || {})[param.name] || ""}
-                          onChange={e => setSuiteParams(sp => ({
-                            ...sp,
-                            [stepIdx]: { ...(sp[stepIdx] || {}), [param.name]: e.target.value },
-                          }))} />
-                      </label>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            <div className={styles.formActions}>
-              <button className="btn btn-ghost" onClick={() => setSuitePickerOpen(false)}>Cancel</button>
-              <button className="btn btn-primary"
-                disabled={!selectedSuite}
-                onClick={executeSuite}>
-                <ListOrdered size={13} /> Run Suite
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Wordlist picker modal */}
       {wordlistPicker && (

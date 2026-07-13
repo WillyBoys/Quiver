@@ -5,8 +5,6 @@ import SessionDetailPage from "./pages/SessionDetailPage.jsx";
 import ToolsPage from "./pages/ToolsPage.jsx";
 import WordlistsPage from "./pages/WordlistsPage.jsx";
 import RemotePage from "./pages/RemotePage.jsx";
-import SuitesPage from "./pages/SuitesPage.jsx";
-import OsintPage from "./pages/OsintPage.jsx"
 import ActivityPage from "./pages/ActivityPage.jsx";
 
 export default function App() {
@@ -17,10 +15,8 @@ export default function App() {
         <Route path="/sessions" element={<SessionsPage />} />
         <Route path="/sessions/:sessionId" element={<SessionDetailPage />} />
         <Route path="/tools" element={<ToolsPage />} />
-        <Route path="/suites" element={<SuitesPage />} />
         <Route path="/wordlists" element={<WordlistsPage />} />
         <Route path="/remote" element={<RemotePage />} />
-        <Route path="/osint" element={<OsintPage />} />
         <Route path="/activity" element={<ActivityPage />} />
       </Routes>
     </Layout>

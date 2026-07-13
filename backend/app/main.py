@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 import httpx
 
 from app.db.database import init_db
-from app.api.routes import tools, sessions, wordlists, runs, suites, ai
+from app.api.routes import tools, sessions, wordlists, runs, ai
 from app.db.seed import seed_default_tools
 
 
@@ -92,7 +92,6 @@ app.include_router(tools.router, prefix="/api/tools", tags=["tools"])
 app.include_router(sessions.router, prefix="/api/sessions", tags=["sessions"])
 app.include_router(wordlists.router, prefix="/api/wordlists", tags=["wordlists"])
 app.include_router(runs.router, prefix="/api/runs", tags=["runs"])
-app.include_router(suites.router, prefix="/api/suites", tags=["suites"])
 app.include_router(ai.router, prefix="/api/ai", tags=["ai"])
 
 

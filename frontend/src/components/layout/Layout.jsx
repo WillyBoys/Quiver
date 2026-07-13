@@ -1,15 +1,13 @@
 import { NavLink } from "react-router-dom";
-import { Terminal, Shield, BookOpen, Radio, ListOrdered, Globe, Github, Clock } from "lucide-react";
+import { Terminal, Shield, BookOpen, Radio, Github, Clock } from "lucide-react";
 import styles from "./Layout.module.css";
 
 const NAV = [
-  { to: "/sessions", icon: Terminal,    label: "Sessions" },
-  { to: "/tools",    icon: Shield,      label: "Tools" },
-  { to: "/suites",   icon: ListOrdered, label: "Suites" },
-  { to: "/activity", icon: Clock,       label: "Activity" },
-  { to: "/osint",    icon: Globe,       label: "OSINT" },
-  { to: "/wordlists",icon: BookOpen,    label: "Wordlists" },
-  { to: "/remote",   icon: Radio,       label: "Remote" },
+  { to: "/sessions", icon: Terminal, label: "Sessions" },
+  { to: "/tools",    icon: Shield,   label: "Tools" },
+  { to: "/activity", icon: Clock,    label: "Activity" },
+  { to: "/wordlists",icon: BookOpen, label: "Wordlists" },
+  { to: "/remote",   icon: Radio,    label: "Remote" },
 ];
 
 export default function Layout({ children }) {

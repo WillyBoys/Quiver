@@ -63,13 +63,6 @@ export const api = {
     create: (name, content) => req("/wordlists/", { method: "POST", body: JSON.stringify({ name, content }) }),
     delete: (path) => req(`/wordlists/?path=${encodeURIComponent(path)}`, { method: "DELETE" }),
   },
-  suites: {
-    list: () => req("/suites/"),
-    get: (id) => req(`/suites/${id}`),
-    create: (body) => req("/suites/", { method: "POST", body: JSON.stringify(body) }),
-    update: (id, body) => req(`/suites/${id}`, { method: "PUT", body: JSON.stringify(body) }),
-    delete: (id) => req(`/suites/${id}`, { method: "DELETE" }),
-  },
   ai: {
     analyze: (runId) => req("/ai/analyze", { method: "POST", body: JSON.stringify({ run_id: runId }) }),
   },
