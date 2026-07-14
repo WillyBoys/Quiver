@@ -144,6 +144,10 @@
 
 .paramRow { display: flex; gap: 8px; align-items: center; }
 .noParams { font-size: 12px; color: var(--text-muted); text-align: center; padding: 8px; }
+.paramsHint {
+  font-size: 11px; color: var(--text-muted); line-height: 1.5; margin-bottom: 4px;
+}
+.paramsHint code { font-family: var(--font-mono); color: var(--text-secondary); }
 
 .formActions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 6px; }
 
@@ -190,3 +194,34 @@
   background: color-mix(in srgb, var(--text-muted) 15%, transparent);
   color: var(--text-muted); border-color: color-mix(in srgb, var(--text-muted) 30%, transparent);
 }
+
+/* Scope type checkboxes in edit form */
+.scopeCheckboxRow { display: flex; gap: 8px; }
+.scopeCheckbox {
+  flex: 1; display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; border-radius: 6px; cursor: pointer; text-align: left;
+  background: var(--bg-base); border: 1px solid var(--border);
+  transition: border-color 0.15s, background 0.15s;
+}
+.scopeCheckbox[data-active="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.scopeCheckboxMark {
+  width: 16px; height: 16px; border-radius: 3px; border: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700; color: var(--accent); flex-shrink: 0;
+  background: var(--bg-surface);
+}
+.scopeCheckbox[data-active="true"] .scopeCheckboxMark { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 20%, transparent); }
+.scopeCheckboxLabel { display: block; font-size: 12px; font-weight: 600; color: var(--text-primary); text-transform: none; letter-spacing: 0; }
+.scopeCheckboxDesc  { display: block; font-size: 11px; color: var(--text-muted); text-transform: none; letter-spacing: 0; font-weight: 400; }
+
+/* Scope badges on tool list rows */
+.toolScopeBadges { display: flex; gap: 4px; margin-bottom: 3px; }
+.scopeBadge {
+  font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 3px;
+  text-transform: uppercase; letter-spacing: 0.04em;
+  background: color-mix(in srgb, var(--text-muted) 12%, transparent);
+  color: var(--text-muted); border: 1px solid color-mix(in srgb, var(--text-muted) 25%, transparent);
+}
+.scopeBadge[data-scope="web"]    { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); border-color: color-mix(in srgb, var(--accent) 25%, transparent); }
+.scopeBadge[data-scope="ip"]     { color: #60a5fa; background: color-mix(in srgb, #60a5fa 12%, transparent); border-color: color-mix(in srgb, #60a5fa 25%, transparent); }
+.scopeBadge[data-scope="domain"] { color: #c084fc; background: color-mix(in srgb, #c084fc 12%, transparent); border-color: color-mix(in srgb, #c084fc 25%, transparent); }

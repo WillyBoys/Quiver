@@ -14,22 +14,9 @@ MAX_RUNS = 10
 
 TARGET_PARAM_NAMES = {"target", "host", "url", "domain"}
 
-# Which tool binaries are appropriate for each target class.
-# Ordered from most-preferred to least — the model tends to pick near the top.
-# nmap is listed LAST for web targets so the model tries web-specific tools first.
-_WEB_TOOLS = [
-    "whatweb", "wafw00f", "nikto", "feroxbuster", "dirb", "gobuster", "ffuf",
-    "wpscan", "nuclei", "curl", "cewl", "sqlmap", "nmap",
-]
-_IP_TOOLS = [
-    "nmap", "whois", "nslookup", "enum4linux-ng", "smbclient",
-    "snmpwalk", "nxc", "kerbrute", "impacket-secretsdump",
-    "impacket-GetNPUsers", "searchsploit",
-]
-_DOMAIN_TOOLS = [
-    "nmap", "whois", "nslookup", "dnsrecon", "bbot",
-    "subdominator", "cloud_enum", "trufflehog", "searchsploit",
-]
+# nmap is deprioritised for web targets — push it to the end so the model
+# tries web-specific tools first. All other ordering is alphabetical.
+_WEB_DEPRIORITISE = {"nmap"}
 
 
 def _classify_scope(scope: list[str]) -> str:
@@ -78,26 +65,35 @@ async def build_agent_prompt(campaign: Campaign, db: AsyncSession) -> str:
     kind = _classify_scope(scope)
     primary = _primary_target(scope, kind)
 
-    allowed = _WEB_TOOLS if kind == "web" else (_IP_TOOLS if kind == "ip" else _DOMAIN_TOOLS)
-
     scope_str = "\n".join(f"  - {s}" for s in scope)
 
-    # Deduplicate by binary; only include tools appropriate for this target type.
-    # Preserve the preferred order defined in the list (web tools: nmap is last).
+    # Filter tools by scope_type and agent_mode.
+    # A tool matches if its scope_types list contains `kind`, OR if scope_types is
+    # empty (meaning "works for all target types" — the safe default for new tools).
     # Tools with agent_mode="never" are always excluded from the LLM.
     seen_binaries: set[str] = set()
     tool_map: dict[str, Tool] = {}
     for t in tools:
-        if t.binary in set(allowed) and t.binary not in seen_binaries and (t.agent_mode or "auto") != "never":
+        if (t.agent_mode or "auto") == "never":
+            continue
+        scopes = t.scope_types or []
+        if scopes and kind not in scopes:
+            continue
+        if t.binary not in seen_binaries:
             seen_binaries.add(t.binary)
             tool_map[t.binary] = t
 
     # Binaries that completed successfully are removed from the available tool list.
-    # Errored runs stay available so the model can retry them.
     completed_binaries = {run.tool_name for run in runs if run.status == "complete"}
 
-    # Re-filter ordered_binaries to exclude already-completed tools
-    ordered_binaries = [b for b in allowed if b in tool_map and b not in completed_binaries]
+    # Sort: deprioritised binaries go last, rest alphabetical.
+    def _sort_key(binary: str) -> tuple:
+        return (1 if (kind == "web" and binary in _WEB_DEPRIORITISE) else 0, binary)
+
+    ordered_binaries = sorted(
+        [b for b in tool_map if b not in completed_binaries],
+        key=_sort_key,
+    )
 
     tool_lines = []
     for binary in ordered_binaries:
