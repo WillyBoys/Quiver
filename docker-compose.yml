@@ -14,7 +14,7 @@ services:
       - DATABASE_URL=sqlite:////data/pentest.db
       - WORDLISTS_DIR=/wordlists
       - OLLAMA_URL=http://ai:11434
-      - OLLAMA_MODEL=${OLLAMA_MODEL:-phi3:mini}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:7b}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - CLAUDE_MODEL=${CLAUDE_MODEL:-claude-haiku-4-5-20251001}
     privileged: true
@@ -65,7 +65,7 @@ services:
     depends_on:
       ai:
         condition: service_healthy
-    entrypoint: ["ollama", "pull", "${OLLAMA_MODEL:-phi3:mini}"]
+    entrypoint: ["ollama", "pull", "${OLLAMA_MODEL:-qwen2.5:7b}"]
     restart: "no"
 
 volumes:
