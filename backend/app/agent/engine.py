@@ -12,6 +12,7 @@ from app.models.session import Session as EngagementSession
 from app.agent.scope_guard import is_in_scope
 from app.agent.context import build_agent_prompt, build_retry_prompt, build_summary_prompt
 from app.agent.llm import generate as llm_generate
+from app.constants import TARGET_PARAM_NAMES
 from app.execution import (
     execute_run_background,
     build_command,
@@ -20,8 +21,6 @@ from app.execution import (
 )
 
 logger = logging.getLogger(__name__)
-
-_TARGET_PARAM_NAMES = {"target", "host", "url", "domain"}
 
 
 def _normalize_host(target: str) -> str:
@@ -44,7 +43,7 @@ def _build_param_values(tool, target: str, llm_params: dict) -> dict:
     for p in (tool.parameters or []):
         name = p.get("name", "")
         placeholder = p.get("placeholder", "")
-        if name in _TARGET_PARAM_NAMES:
+        if name in TARGET_PARAM_NAMES:
             # Use full URL when the tool expects one; bare host/IP otherwise
             if placeholder.startswith("http"):
                 # Ensure the value looks like a URL
@@ -76,8 +75,11 @@ def _needs_approval(tool_agent_mode: str, campaign_risk_level: str) -> bool:
     return tool_tier > campaign_tier
 
 
-def _parse_summary(text: str) -> dict:
-    """Parse the final summary JSON from the LLM. Same resilience as _parse_action."""
+def _parse_json(text: str) -> dict:
+    """Extract the first JSON object from an LLM response.
+
+    Handles markdown fences, bare newlines inside strings, and missing commas.
+    """
     text = text.strip()
     text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.MULTILINE)
     text = re.sub(r"```\s*$", "", text, flags=re.MULTILINE)
@@ -113,7 +115,7 @@ async def _generate_and_save_summary(campaign_id: str, session_id: str, provider
         logger.info("AGENT SUMMARY | campaign=%s raw: %.400s", campaign_id, raw)
 
         try:
-            data = _parse_summary(raw)
+            data = _parse_json(raw)
         except Exception as e:
             logger.error("AGENT SUMMARY | parse failed for campaign=%s: %s | raw=%.200s",
                          campaign_id, e, raw)
@@ -163,37 +165,6 @@ async def _generate_and_save_summary(campaign_id: str, session_id: str, provider
         logger.error("AGENT SUMMARY | unexpected error for campaign=%s: %s", campaign_id, e)
 
 
-def _parse_action(text: str) -> dict:
-    """Extract JSON action from LLM response.
-
-    Handles: markdown fences, literal newlines inside string values,
-    missing commas between fields (common phi3:mini failures).
-    """
-    text = text.strip()
-    # Strip markdown fences
-    text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.MULTILINE)
-    text = re.sub(r"```\s*$", "", text, flags=re.MULTILINE)
-    text = text.strip()
-
-    match = re.search(r"\{.*\}", text, re.DOTALL)
-    candidate = match.group() if match else text
-
-    # Attempt 1: parse as-is
-    try:
-        return json.loads(candidate)
-    except json.JSONDecodeError:
-        pass
-
-    # Attempt 2: collapse bare newlines (phi3 puts literal \n inside strings)
-    collapsed = re.sub(r"\r?\n", " ", candidate)
-    try:
-        return json.loads(collapsed)
-    except json.JSONDecodeError:
-        pass
-
-    # Attempt 3: also add missing commas before "key": after a string/} value
-    repaired = re.sub(r'(["\d}])\s+"', r'\1,"', collapsed)
-    return json.loads(repaired)
 
 
 async def _attempt_fix(campaign: Campaign, failed_run: Run, tool, provider: str) -> bool:
@@ -206,7 +177,7 @@ async def _attempt_fix(campaign: Campaign, failed_run: Run, tool, provider: str)
     try:
         raw, _ = await llm_generate(prompt, provider=provider)
         logger.info("AGENT RETRY | campaign=%s raw: %.300s", campaign.id, raw)
-        action = _parse_action(raw)
+        action = _parse_json(raw)
     except Exception as e:
         logger.warning("AGENT RETRY | parse failed for campaign=%s: %s", campaign.id, e)
         return False
@@ -333,7 +304,7 @@ async def run_campaign_agent(campaign_id: str) -> str:
         return "ai_error"
 
     try:
-        action = _parse_action(raw)
+        action = _parse_json(raw)
     except Exception as e:
         logger.error("AGENT | JSON parse failed for campaign %s: %s | raw=%.200s", campaign_id, e, raw)
         return "parse_error"

@@ -6,13 +6,12 @@ from sqlalchemy import select
 from app.models.run import Run
 from app.models.tool import Tool
 from app.models.campaign import Campaign
+from app.constants import TARGET_PARAM_NAMES
 
 logger = logging.getLogger(__name__)
 
 MAX_OUTPUT_PER_RUN = 600
 MAX_RUNS = 10
-
-TARGET_PARAM_NAMES = {"target", "host", "url", "domain"}
 
 # nmap is deprioritised for web targets — push it to the end so the model
 # tries web-specific tools first. All other ordering is alphabetical.

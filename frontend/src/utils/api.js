@@ -52,6 +52,7 @@ export const api = {
   },
   runs: {
     listForSession: (sessionId) => req(`/runs/session/${sessionId}`),
+    listAll: () => req("/runs/all"),
     get: (id) => req(`/runs/${id}`),
     create: (body) => req("/runs/", { method: "POST", body: JSON.stringify(body) }),
     kill: (id) => req(`/runs/${id}/kill`, { method: "POST" }),

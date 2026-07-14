@@ -3,7 +3,7 @@ import { ShieldAlert, Check, X, Clock, Terminal } from "lucide-react";
 import { api } from "../utils/api";
 import styles from "./ApprovalQueuePage.module.css";
 
-const TABS = ["pending", "approved", "rejected"];
+const TABS = ["pending", "approved", "rejected", "dismissed"];
 
 export default function ApprovalQueuePage() {
   const [tab, setTab] = useState("pending");

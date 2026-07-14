@@ -1,7 +1,7 @@
 import logging
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 from datetime import datetime, timezone
 from app.db.database import get_db
 from app.models.campaign import ApprovalRequest, Campaign
@@ -26,9 +26,9 @@ async def list_approvals(status: str = "pending", db: AsyncSession = Depends(get
 @router.get("/pending-count")
 async def pending_count(db: AsyncSession = Depends(get_db)):
     result = await db.execute(
-        select(ApprovalRequest).where(ApprovalRequest.status == "pending")
+        select(func.count()).select_from(ApprovalRequest).where(ApprovalRequest.status == "pending")
     )
-    return {"count": len(result.scalars().all())}
+    return {"count": result.scalar_one()}
 
 
 @router.post("/{approval_id}/approve")

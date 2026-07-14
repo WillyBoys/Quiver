@@ -1,9 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { RefreshCw, Clock, Download } from "lucide-react";
 import { Link } from "react-router-dom";
+import { api } from "../utils/api";
 import styles from "./ActivityPage.module.css";
-
-const API = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
 function formatUtc(iso) {
   if (!iso) return "—";
@@ -70,9 +69,7 @@ export default function ActivityPage() {
 
   const fetchRuns = useCallback(async () => {
     try {
-      const res = await fetch(`${API}/api/runs/all`);
-      if (!res.ok) throw new Error(res.statusText);
-      const data = await res.json();
+      const data = await api.runs.listAll();
       setRuns(data);
       setLastRefresh(new Date());
     } catch (err) {

@@ -13,7 +13,7 @@ class Campaign(Base):
     description: Mapped[str] = mapped_column(Text, default="")
     target_scope: Mapped[list] = mapped_column(JSON, default=list)   # ["10.0.0.1", "example.com"]
     schedule: Mapped[str | None] = mapped_column(String, nullable=True)  # cron string; None = manual only
-    status: Mapped[str] = mapped_column(String, default="paused")    # active / paused / completed
+    status: Mapped[str] = mapped_column(String, default="paused")    # active / paused / completed / awaiting_approval
     risk_level: Mapped[str] = mapped_column(String, default="notify")   # auto / notify / approve
     ai_provider: Mapped[str] = mapped_column(String, default="local")   # local / claude
     session_id: Mapped[str | None] = mapped_column(String, ForeignKey("sessions.id"), nullable=True)
@@ -33,6 +33,6 @@ class ApprovalRequest(Base):
     command: Mapped[str] = mapped_column(Text, nullable=False)
     reasoning: Mapped[str] = mapped_column(Text, default="")
     target: Mapped[str] = mapped_column(String, default="")
-    status: Mapped[str] = mapped_column(String, default="pending")   # pending / approved / rejected
+    status: Mapped[str] = mapped_column(String, default="pending")   # pending / approved / rejected / dismissed
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

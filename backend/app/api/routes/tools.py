@@ -1,17 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete
+from sqlalchemy import select
 from app.db.database import get_db
 from app.models.tool import Tool
+from app.constants import TARGET_PARAM_NAMES
 from pydantic import BaseModel
 from typing import Optional
 import shutil
 
 router = APIRouter()
-
-# Parameter names that trigger automatic target injection in the agent.
-# Any param named with these (case-insensitive) should be stored lowercase.
-_TARGET_PARAM_NAMES = {"target", "host", "url", "domain"}
 
 
 def _normalize_param(p: dict) -> dict:

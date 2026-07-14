@@ -859,7 +859,7 @@ export default function SessionDetailPage() {
                 <button className={styles.aiFloatBtn} onClick={() => handleAnalyze(activeRunId)}>
                   <Cpu size={13} />
                   Analyze with AI
-                  <span className={styles.aiModel}>qwen2.5:7b</span>
+                  <span className={styles.aiModel}>Local AI</span>
                 </button>
             )}
           </div>
@@ -874,7 +874,7 @@ export default function SessionDetailPage() {
                   <div className={styles.aiPanel}>
                     <div className={styles.aiLoading}>
                       <span className={styles.aiSpinner} />
-                      Analyzing with qwen2.5:7b&hellip; this may take 30–60s on CPU
+                      Analyzing with Local AI&hellip; this may take 30–60s on CPU
                     </div>
                   </div>
                 );

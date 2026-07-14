@@ -11,11 +11,11 @@ _scheduler = AsyncIOScheduler()
 
 
 async def _run_job(campaign_id: str) -> None:
-    from app.agent.engine import run_campaign_agent  # late import avoids circular at module load
+    from app.agent.engine import run_campaign_loop  # late import avoids circular at module load
     logger.info("SCHEDULER | firing campaign %s", campaign_id)
     try:
-        status = await run_campaign_agent(campaign_id)
-        logger.info("SCHEDULER | campaign %s result: %s", campaign_id, status)
+        await run_campaign_loop(campaign_id)
+        logger.info("SCHEDULER | campaign %s loop complete", campaign_id)
     except Exception as e:
         logger.error("SCHEDULER | campaign %s error: %s", campaign_id, e)
 

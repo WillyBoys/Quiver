@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { Target, Play, Pause, Trash2, ExternalLink, Plus, X, ChevronDown } from "lucide-react";
+import { Target, Play, Pause, Trash2, ExternalLink, Plus, X } from "lucide-react";
 import { api } from "../utils/api";
 import styles from "./CampaignsPage.module.css";
 
@@ -328,7 +328,7 @@ function NewCampaignModal({ onClose, onCreated }) {
                 onClick={() => setForm(f => ({ ...f, ai_provider: "local" }))}
               >
                 <span className={styles.riskLabel}>Local (Ollama)</span>
-                <span className={styles.riskDesc}>Qwen 2.5 7B — private, no API key required</span>
+                <span className={styles.riskDesc}>Local AI — private, no API key required</span>
               </button>
               <button
                 type="button"

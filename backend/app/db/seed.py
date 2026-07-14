@@ -433,7 +433,11 @@ async def seed_default_tools():
             else:
                 # Keep builtin tool definitions in sync with seed data
                 existing.category = tool_data["category"]
+                existing.binary = tool_data["binary"]
                 existing.default_flags = tool_data["default_flags"]
                 existing.parameters = tool_data["parameters"]
                 existing.description = tool_data["description"]
+                existing.workflow_tags = tool_data.get("workflow_tags", [])
+                existing.agent_mode = tool_data.get("agent_mode", existing.agent_mode or "auto")
+                existing.scope_types = tool_data.get("scope_types", existing.scope_types or [])
         await db.commit()
