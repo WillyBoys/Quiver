@@ -1,6 +1,10 @@
 # Quiver
 
-A self-hosted penetration testing platform with two operating modes: **manual** (you drive every tool) and **continuous AI** (an autonomous agent runs the engagement for you). Both modes share the same tool library, session tracking, findings tracker, and reporting — you choose how much control to hand off.
+An AI-powered penetration testing platform for security consulting firms. Quiver orchestrates autonomous agents across three engagement tracks — **External**, **Internal**, and **Web Application** — under a single management layer with campaigns, findings, approval gates, and reporting.
+
+Quiver's agent handles network and infrastructure testing (External and Internal). For Web Application depth, Quiver integrates [Shannon](https://github.com/KeygraphHQ/shannon) — a parallel multi-agent web app testing pipeline — and imports its findings into the same session. Both modes support manual operation (you drive every tool) alongside the autonomous AI agent, and share the same tool library, session tracking, findings tracker, and reporting.
+
+See [ROADMAP.md](ROADMAP.md) for the full platform vision, current status by track, and what's coming next.
 
 ## Quick Start
 
