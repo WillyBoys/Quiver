@@ -324,17 +324,18 @@
   align-items: center;
   gap: 6px;
   padding: 8px 16px;
-  background: var(--accent);
-  color: #fff;
-  border: none;
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--accent);
   border-radius: 4px;
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
+  transition: background 0.15s;
 }
 
-.primaryBtn:hover { opacity: 0.9; }
-.primaryBtn:disabled { opacity: 0.5; cursor: default; }
+.primaryBtn:hover { background: var(--accent-glow); }
+.primaryBtn:disabled { opacity: 0.4; cursor: default; }
 
 .cancelBtn {
   padding: 8px 14px;

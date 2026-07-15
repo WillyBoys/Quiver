@@ -12,23 +12,23 @@ See [ROADMAP.md](ROADMAP.md) for the full platform vision, current status by tra
 │                       Pentest Engagement Platform                       │
 │                                                                         │
 │          Campaigns · Findings · Approval Gates · Scheduling · Reports   │
-└──────────────┬──────────────────────────┬──────────────────┬───────────┘
+└──────────────┬──────────────────────────┬──────────────────┬────────────┘
                │                          │                  │
                ▼                          ▼                  ▼
  ┌─────────────────────┐   ┌──────────────────────┐   ┌─────────────────────┐
- │      EXTERNAL       │   │       INTERNAL        │   │      WEB APP        │
- │    Quiver Agent     │   │    Quiver Agent       │   │  Shannon (planned)  │
+ │      EXTERNAL       │   │       INTERNAL       │   │       WEB APP       │
+ │    Quiver Agent     │   │   Planned Addition   │   │ Shannon (integrated)│
  │─────────────────────│   │──────────────────────│   │─────────────────────│
- │ nmap · nuclei       │   │ AD enumeration        │   │ 19 parallel vuln    │
- │ gobuster · ffuf     │   │ SMB · LDAP · Kerb.    │   │ agents (SQLi, XSS,  │
- │ nikto · whatweb     │   │ Credential attacks    │   │ SSRF, auth, authz,  │
- │ cloud_enum          │   │ Lateral movement      │   │ injection, +13)     │
- │ trufflehog          │   │ impacket suite        │   │                     │
- │ sqlmap · wafw00f    │   │ netexec · hydra       │   │ Playwright browser  │
- │ sslscan · bbot      │   │ john · snmpwalk       │   │ Authenticated flows │
- │                     │   │                       │   │ TOTP / 2FA support  │
- │ External network    │   │ Post-access enum      │   │ Source code         │
- │ attack surface      │   │ & path to DA          │   │ analysis (optional) │
+ │ nmap · nuclei       │   │ AD enumeration       │   │ 19 parallel vuln    │
+ │ gobuster · ffuf     │   │ SMB · LDAP · Kerb.   │   │ agents (SQLi, XSS,  │
+ │ nikto · whatweb     │   │ Credential attacks   │   │ SSRF, auth, authz,  │
+ │ cloud_enum          │   │ Lateral movement     │   │ injection, +13)     │
+ │ trufflehog          │   │ impacket suite       │   │                     │
+ │ sqlmap · wafw00f    │   │ netexec · hydra      │   │ Playwright browser  │
+ │ sslscan · bbot      │   │ john · snmpwalk      │   │ Authenticated flows │
+ │                     │   │                      │   │ TOTP / 2FA support  │
+ │ External network    │   │ Post-access enum     │   │ Source code         │
+ │ attack surface      │   │ & path to DA         │   │ analysis (optional) │
  └─────────────────────┘   └──────────────────────┘   └─────────────────────┘
 ```
 

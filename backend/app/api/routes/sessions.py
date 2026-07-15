@@ -36,6 +36,7 @@ class SessionUpdate(SessionCreate):
     status: Optional[str] = "active"
     findings: Optional[list[Finding]] = []
     targets: Optional[list] = None
+    campaign_id: Optional[str] = None
 
 
 class ChecklistUpdate(BaseModel):
@@ -88,6 +89,8 @@ async def update_session(session_id: str, body: SessionUpdate, db: AsyncSession 
     session.engagement_type = body.engagement_type
     session.notes = body.notes
     session.status = body.status
+    if body.campaign_id is not None:
+        session.campaign_id = body.campaign_id
     if body.findings is not None:
         session.findings = [f.model_dump() for f in body.findings]
     if body.targets is not None:

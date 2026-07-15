@@ -47,6 +47,8 @@ export default function SessionDetailPage() {
   const [newTargetValue, setNewTargetValue] = useState("");
 
   const [campaign, setCampaign] = useState(null);
+  const [agentSidebarView, setAgentSidebarView] = useState("reasoning"); // "reasoning" | "tools" | "checklist"
+  const connectedRunIds = useRef(new Set());
   const [showAgentSetup, setShowAgentSetup] = useState(false);
   const [agentForm, setAgentForm] = useState({ ai_provider: "claude", risk_level: "notify", schedule: "" });
   const [agentSubmitting, setAgentSubmitting] = useState(false);
@@ -60,7 +62,7 @@ export default function SessionDetailPage() {
   const [aiAnalysis, setAiAnalysis] = useState({});        // runId -> { status, text, model, error }
 
   useEffect(() => {
-    api.sessions.get(sessionId).then((s) => {
+    api.sessions.get(sessionId).then(async (s) => {
       setSession(s);
       setNotesValue(s.notes || "");
       setPhaseChecks(s.checklist_state?.phase_checks || {});
@@ -75,6 +77,19 @@ export default function SessionDetailPage() {
       setTargets(initTargets);
       setActiveTarget(initTargets[0] || null);
       if (s.engagement_type) setWorkflowFilter(s.engagement_type);
+
+      // Backfill campaign_id if missing — handles the case where the session update
+      // failed mid-flight (e.g. backend reloading when the agent was launched).
+      if (!s.campaign_id) {
+        try {
+          const allCampaigns = await api.campaigns.list();
+          const linked = allCampaigns.find((c) => c.session_id === sessionId);
+          if (linked) {
+            setSession((prev) => ({ ...prev, campaign_id: linked.id }));
+            api.sessions.update(sessionId, { ...s, campaign_id: linked.id }).catch(() => {});
+          }
+        } catch { /* ignore */ }
+      }
     });
     api.tools.list().then(setTools);
     api.runs.listForSession(sessionId).then((fetchedRuns) => {
@@ -101,13 +116,40 @@ export default function SessionDetailPage() {
     });
   }, [sessionId]);
 
-  // Poll for new agent-created runs + campaign status, and auto-scroll the reasoning feed
+  // Poll for new agent-created runs + campaign status; auto-connect streaming for new running runs
   useEffect(() => {
     if (!session?.campaign_id) return;
     const campaignId = session.campaign_id;
+
+    function connectNewRunningRuns(fetchedRuns) {
+      const running = fetchedRuns.filter(
+        (r) => r.status === "running" && !connectedRunIds.current.has(r.id)
+      );
+      for (const run of running) {
+        connectedRunIds.current.add(run.id);
+        setLiveOutput((o) => ({ ...o, [run.id]: o[run.id] || "" }));
+        setStreaming((s) => ({ ...s, [run.id]: true }));
+        setOpenTabs((t) => (t.includes(run.id) ? t : [...t, run.id]));
+        setActiveRunId(run.id);
+        createRunSocket(run.id, {
+          onOutput: (line) => setLiveOutput((o) => ({ ...o, [run.id]: (o[run.id] || "") + line })),
+          onDone: (msg) => {
+            setStreaming((s) => ({ ...s, [run.id]: false }));
+            setRuns((prev) => prev.map((r) => r.id === run.id ? { ...r, status: msg.status } : r));
+          },
+          onError: (err) => {
+            setStreaming((s) => ({ ...s, [run.id]: false }));
+            setLiveOutput((o) => ({ ...o, [run.id]: (o[run.id] || "") + `\n[ERROR] ${err}` }));
+          },
+        });
+      }
+    }
+
     api.campaigns.get(campaignId).then(setCampaign);
+    api.runs.listForSession(sessionId).then((r) => { setRuns(r); connectNewRunningRuns(r); });
+
     const interval = setInterval(() => {
-      api.runs.listForSession(sessionId).then(setRuns);
+      api.runs.listForSession(sessionId).then((r) => { setRuns(r); connectNewRunningRuns(r); });
       api.campaigns.get(campaignId).then(setCampaign);
     }, 4000);
     return () => clearInterval(interval);
@@ -633,18 +675,31 @@ export default function SessionDetailPage() {
       <div className={styles.workspace}>
         {/* Left: reasoning terminal (agent sessions) or tool picker / checklist (manual) */}
         <aside className={styles.toolPicker}>
-        {session.campaign_id ? (
-          /* ── Agent session: live reasoning log ── */
-          <div className={styles.reasoningTerminal}>
-            <div className={styles.reasoningHeader}>
-              <Cpu size={12} />
-              <span>Agent Reasoning</span>
-              {Object.values(streaming).some(Boolean) && (
-                <span className={styles.reasoningLive}>● live</span>
-              )}
-            </div>
+          {/* Unified toggle — Reasoning tab only appears when agent is active */}
+          <div className={styles.sidebarToggle}>
+            {session.campaign_id && (
+              <button
+                className={`${styles.toggleBtn} ${agentSidebarView === "reasoning" ? styles.toggleBtnActive : ""}`}
+                onClick={() => setAgentSidebarView("reasoning")}>Reasoning</button>
+            )}
+            <button
+              className={`${styles.toggleBtn} ${(session.campaign_id ? agentSidebarView : sidebarView) === "tools" ? styles.toggleBtnActive : ""}`}
+              onClick={() => session.campaign_id ? setAgentSidebarView("tools") : setSidebarView("tools")}>Tools</button>
+            <button
+              className={`${styles.toggleBtn} ${(session.campaign_id ? agentSidebarView : sidebarView) === "checklist" ? styles.toggleBtnActive : ""}`}
+              onClick={() => session.campaign_id ? setAgentSidebarView("checklist") : setSidebarView("checklist")}>Checklist</button>
+          </div>
+
+          {/* Agent reasoning view */}
+          {session.campaign_id && agentSidebarView === "reasoning" && (
             <div className={styles.reasoningFeed}>
-              {runs.filter(r => r.reasoning).length === 0 && (
+              {campaign?.last_agent_reasoning && campaign.status === "active" && (
+                <div className={styles.reasoningThinking}>
+                  <span className={styles.reasoningThinkingLabel}>thinking</span>
+                  <p>{campaign.last_agent_reasoning}</p>
+                </div>
+              )}
+              {runs.filter(r => r.reasoning).length === 0 && !campaign?.last_agent_reasoning && (
                 <p className={styles.reasoningEmpty}>Waiting for agent to run…</p>
               )}
               {runs.filter(r => r.reasoning).map((run, i, arr) => {
@@ -674,7 +729,6 @@ export default function SessionDetailPage() {
                     </div>
                   );
                 }
-
                 const isRunStreaming = streaming[run.id] || false;
                 const displayStatus = isRunStreaming ? "running" : run.status;
                 const regularRuns = arr.filter(r => r.tool_name !== "_summary");
@@ -700,21 +754,10 @@ export default function SessionDetailPage() {
                 );
               })}
             </div>
-          </div>
-        ) : (
-          /* ── Manual session: tool picker / checklist ── */
-          <>
-          {/* View toggle */}
-          <div className={styles.sidebarToggle}>
-            <button
-              className={`${styles.toggleBtn} ${sidebarView === "tools" ? styles.toggleBtnActive : ""}`}
-              onClick={() => setSidebarView("tools")}>Tools</button>
-            <button
-              className={`${styles.toggleBtn} ${sidebarView === "checklist" ? styles.toggleBtnActive : ""}`}
-              onClick={() => setSidebarView("checklist")}>Checklist</button>
-          </div>
+          )}
 
-          {sidebarView === "checklist" ? (
+          {/* Checklist view */}
+          {(session.campaign_id ? agentSidebarView : sidebarView) === "checklist" && (
             <ChecklistPane
               session={session}
               tools={enabledTools}
@@ -727,135 +770,132 @@ export default function SessionDetailPage() {
               onDeleteCustomItem={handleDeleteCustomItem}
               onJumpToTool={handleJumpToTool}
             />
-          ) : (
-            <>
-          {/* Filter row */}
-          <div className={styles.filterRow}>
-            {toolSearchOpen ? (
-              <>
-                <Search size={12} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
-                <input
-                  className={styles.toolSearchInput}
-                  placeholder="Search tools…"
-                  value={toolSearch}
-                  onChange={e => setToolSearch(e.target.value)}
-                  autoFocus
-                />
-                <button className={styles.toolSearchClose} title="Close search"
-                  onClick={() => { setToolSearchOpen(false); setToolSearch(""); }}>
-                  <X size={12} />
-                </button>
-              </>
-            ) : (
-              <>
-                <select
-                  className={`${styles.filterSelect} ${workflowFilter !== "all" ? styles.filterSelectActive : ""}`}
-                  value={workflowFilter}
-                  onChange={e => setWorkflowFilter(e.target.value)}
-                >
-                  <option value="all">All Engagements</option>
-                  <option value="external">External</option>
-                  <option value="internal">Internal</option>
-                  <option value="web">Web</option>
-                </select>
-                <select
-                  className={`${styles.filterSelect} ${selectedCat !== "all" ? styles.filterSelectActive : ""}`}
-                  value={selectedCat}
-                  onChange={e => setSelectedCat(e.target.value)}
-                >
-                  <option value="all">All Categories</option>
-                  {CAT_ORDER.map(c => (
-                    <option key={c} value={c}>{CAT_LABELS[c]}</option>
-                  ))}
-                </select>
-                <button className={styles.toolSearchOpen} title="Search tools"
-                  onClick={() => setToolSearchOpen(true)}>
-                  <Search size={12} />
-                </button>
-              </>
-            )}
-          </div>
-          <div className={styles.toolList}>
-            {filteredTools.length === 0 && (
-              <div className={styles.toolFilterEmpty}>
-                <p>No {selectedCat === "all" ? "" : `${CAT_LABELS[selectedCat]} `}tools tagged for {workflowFilter} engagements.</p>
-                <button className={styles.toolFilterReset}
-                  onClick={() => { setWorkflowFilter("all"); setSelectedCat("all"); }}>
-                  Show all tools
-                </button>
-              </div>
-            )}
-            {filteredTools.map((tool) => {
-              const params = runParams[tool.id] || {};
-              const flags = extraFlags[tool.id] || "";
-              return (
-                <div key={tool.id} className={`${styles.toolCard} ${runningToolIds.has(tool.id) ? styles.toolRunning : ""}`}>
-                  <div className={styles.toolHeader}>
-                    <span className={`${styles.toolCat} cat-${tool.category}`}>{tool.category}</span>
-                    <span className={styles.toolName}>{tool.name}</span>
-                  </div>
-                  <code className={styles.toolCmd}>{tool.binary} {tool.default_flags}</code>
-
-                  {tool.parameters?.map((p) => (
-                    <div key={p.name} className={styles.paramField}>
-                      <label className={styles.paramLabel}>
-                        {p.name}{p.required && <span style={{ color: "var(--critical)" }}> *</span>}
-                      </label>
-                      {isWordlistParam(p) ? (
-                        <div className={styles.wordlistInput}>
-                          <input className="input input-mono" style={{ fontSize: 11 }}
-                            placeholder={p.placeholder || p.name}
-                            value={params[p.name] || ""}
-                            onChange={(e) => setRunParams((rp) => ({
-                              ...rp,
-                              [tool.id]: { ...params, [p.name]: e.target.value },
-                            }))} />
-                          <button type="button" className={styles.browseBtn}
-                            title="Browse wordlists"
-                            onClick={() => openWordlistPicker(tool.id, p.name)}>
-                            <FolderOpen size={12} />
-                          </button>
-                        </div>
-                      ) : (
-                        <input className="input input-mono" style={{ fontSize: 11 }}
-                          placeholder={p.placeholder || p.name}
-                          value={params[p.name] || ""}
-                          onChange={(e) => setRunParams((rp) => ({
-                            ...rp,
-                            [tool.id]: { ...params, [p.name]: e.target.value },
-                          }))} />
-                      )}
-                    </div>
-                  ))}
-
-                  <div className={styles.paramField}>
-                    <label className={styles.paramLabel}>Extra flags</label>
-                    <input className="input input-mono" style={{ fontSize: 11 }}
-                      placeholder="-v --timeout 30"
-                      value={flags}
-                      onChange={(e) => setExtraFlags((ef) => ({ ...ef, [tool.id]: e.target.value }))} />
-                  </div>
-
-                  <div className={styles.toolActions}>
-                    <button className="btn btn-primary" style={{ flex: 1, justifyContent: "center" }}
-                      onClick={() => stageTool(tool)}
-                      title="Fill command in shell tab for review/edit">
-                      Stage
-                    </button>
-                    <button className="btn btn-ghost" style={{ padding: "0 10px", justifyContent: "center", border: "1px solid var(--accent-dim)", color: "var(--accent)" }}
-                      onClick={() => runTool(tool)}
-                      title="Run immediately">
-                      <Play size={12} />
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-          </>
           )}
-          </>
-        )}
+
+          {/* Tools view */}
+          {(session.campaign_id ? agentSidebarView : sidebarView) === "tools" && (
+            <>
+              <div className={styles.filterRow}>
+                {toolSearchOpen ? (
+                  <>
+                    <Search size={12} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
+                    <input
+                      className={styles.toolSearchInput}
+                      placeholder="Search tools…"
+                      value={toolSearch}
+                      onChange={e => setToolSearch(e.target.value)}
+                      autoFocus
+                    />
+                    <button className={styles.toolSearchClose} title="Close search"
+                      onClick={() => { setToolSearchOpen(false); setToolSearch(""); }}>
+                      <X size={12} />
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <select
+                      className={`${styles.filterSelect} ${workflowFilter !== "all" ? styles.filterSelectActive : ""}`}
+                      value={workflowFilter}
+                      onChange={e => setWorkflowFilter(e.target.value)}
+                    >
+                      <option value="all">All Engagements</option>
+                      <option value="external">External</option>
+                      <option value="internal">Internal</option>
+                      <option value="web">Web</option>
+                    </select>
+                    <select
+                      className={`${styles.filterSelect} ${selectedCat !== "all" ? styles.filterSelectActive : ""}`}
+                      value={selectedCat}
+                      onChange={e => setSelectedCat(e.target.value)}
+                    >
+                      <option value="all">All Categories</option>
+                      {CAT_ORDER.map(c => (
+                        <option key={c} value={c}>{CAT_LABELS[c]}</option>
+                      ))}
+                    </select>
+                    <button className={styles.toolSearchOpen} title="Search tools"
+                      onClick={() => setToolSearchOpen(true)}>
+                      <Search size={12} />
+                    </button>
+                  </>
+                )}
+              </div>
+              <div className={styles.toolList}>
+                {filteredTools.length === 0 && (
+                  <div className={styles.toolFilterEmpty}>
+                    <p>No {selectedCat === "all" ? "" : `${CAT_LABELS[selectedCat]} `}tools tagged for {workflowFilter} engagements.</p>
+                    <button className={styles.toolFilterReset}
+                      onClick={() => { setWorkflowFilter("all"); setSelectedCat("all"); }}>
+                      Show all tools
+                    </button>
+                  </div>
+                )}
+                {filteredTools.map((tool) => {
+                  const params = runParams[tool.id] || {};
+                  const flags = extraFlags[tool.id] || "";
+                  return (
+                    <div key={tool.id} className={`${styles.toolCard} ${runningToolIds.has(tool.id) ? styles.toolRunning : ""}`}>
+                      <div className={styles.toolHeader}>
+                        <span className={`${styles.toolCat} cat-${tool.category}`}>{tool.category}</span>
+                        <span className={styles.toolName}>{tool.name}</span>
+                      </div>
+                      <code className={styles.toolCmd}>{tool.binary} {tool.default_flags}</code>
+                      {tool.parameters?.map((p) => (
+                        <div key={p.name} className={styles.paramField}>
+                          <label className={styles.paramLabel}>
+                            {p.name}{p.required && <span style={{ color: "var(--critical)" }}> *</span>}
+                          </label>
+                          {isWordlistParam(p) ? (
+                            <div className={styles.wordlistInput}>
+                              <input className="input input-mono" style={{ fontSize: 11 }}
+                                placeholder={p.placeholder || p.name}
+                                value={params[p.name] || ""}
+                                onChange={(e) => setRunParams((rp) => ({
+                                  ...rp,
+                                  [tool.id]: { ...params, [p.name]: e.target.value },
+                                }))} />
+                              <button type="button" className={styles.browseBtn}
+                                title="Browse wordlists"
+                                onClick={() => openWordlistPicker(tool.id, p.name)}>
+                                <FolderOpen size={12} />
+                              </button>
+                            </div>
+                          ) : (
+                            <input className="input input-mono" style={{ fontSize: 11 }}
+                              placeholder={p.placeholder || p.name}
+                              value={params[p.name] || ""}
+                              onChange={(e) => setRunParams((rp) => ({
+                                ...rp,
+                                [tool.id]: { ...params, [p.name]: e.target.value },
+                              }))} />
+                          )}
+                        </div>
+                      ))}
+                      <div className={styles.paramField}>
+                        <label className={styles.paramLabel}>Extra flags</label>
+                        <input className="input input-mono" style={{ fontSize: 11 }}
+                          placeholder="-v --timeout 30"
+                          value={flags}
+                          onChange={(e) => setExtraFlags((ef) => ({ ...ef, [tool.id]: e.target.value }))} />
+                      </div>
+                      <div className={styles.toolActions}>
+                        <button className="btn btn-primary" style={{ flex: 1, justifyContent: "center" }}
+                          onClick={() => stageTool(tool)}
+                          title="Fill command in shell tab for review/edit">
+                          Stage
+                        </button>
+                        <button className="btn btn-ghost" style={{ padding: "0 10px", justifyContent: "center", border: "1px solid var(--accent-dim)", color: "var(--accent)" }}
+                          onClick={() => runTool(tool)}
+                          title="Run immediately">
+                          <Play size={12} />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
         </aside>
 
         {/* Center: terminal output */}

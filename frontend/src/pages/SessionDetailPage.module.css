@@ -470,6 +470,30 @@
   line-height: 1.55; margin: 0;
 }
 
+.reasoningThinking {
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-base));
+  border-left: 2px solid var(--accent);
+  padding: 10px 14px 10px 12px;
+  margin: 0 0 4px 0;
+  animation: thinkingPulse 2s ease-in-out infinite;
+}
+
+.reasoningThinking p {
+  font-size: 11px; color: var(--text-secondary);
+  line-height: 1.6; margin: 0;
+}
+
+.reasoningThinkingLabel {
+  font-size: 9px; font-weight: 700; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--accent);
+  display: block; margin-bottom: 4px;
+}
+
+@keyframes thinkingPulse {
+  0%, 100% { border-left-color: var(--accent); }
+  50% { border-left-color: var(--accent-dim); }
+}
+
 .reasoningThought {
   background: color-mix(in srgb, var(--accent) 5%, var(--bg-base));
   border-left: 2px solid var(--accent-dim);
