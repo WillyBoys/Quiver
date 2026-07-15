@@ -8,6 +8,7 @@ import RemotePage from "./pages/RemotePage.jsx";
 import ActivityPage from "./pages/ActivityPage.jsx";
 import CampaignsPage from "./pages/CampaignsPage.jsx";
 import ApprovalQueuePage from "./pages/ApprovalQueuePage.jsx";
+import ShannonScansPage from "./pages/ShannonScansPage.jsx";
 
 export default function App() {
   return (
@@ -16,6 +17,7 @@ export default function App() {
         <Route path="/" element={<Navigate to="/campaigns" replace />} />
         <Route path="/campaigns" element={<CampaignsPage />} />
         <Route path="/approvals" element={<ApprovalQueuePage />} />
+        <Route path="/web-scans" element={<ShannonScansPage />} />
         <Route path="/sessions" element={<SessionsPage />} />
         <Route path="/sessions/:sessionId" element={<SessionDetailPage />} />
         <Route path="/tools" element={<ToolsPage />} />

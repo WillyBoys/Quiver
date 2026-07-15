@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 import httpx
 
 from app.db.database import init_db
-from app.api.routes import tools, sessions, wordlists, runs, ai, campaigns, approvals
+from app.api.routes import tools, sessions, wordlists, runs, ai, campaigns, approvals, shannon
 from app.db.seed import seed_default_tools
 from app.config import OLLAMA_URL, OLLAMA_MODEL
 from app.agent.scheduler import start_scheduler, stop_scheduler
@@ -99,6 +99,7 @@ app.include_router(runs.router, prefix="/api/runs", tags=["runs"])
 app.include_router(ai.router, prefix="/api/ai", tags=["ai"])
 app.include_router(campaigns.router, prefix="/api/campaigns", tags=["campaigns"])
 app.include_router(approvals.router, prefix="/api/approvals", tags=["approvals"])
+app.include_router(shannon.router, prefix="/api/shannon", tags=["shannon"])
 
 
 @app.get("/api/health")

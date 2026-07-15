@@ -82,6 +82,20 @@ export const api = {
     approve: (id)                 => req(`/approvals/${id}/approve`, { method: "POST" }),
     reject:  (id)                 => req(`/approvals/${id}/reject`, { method: "POST" }),
   },
+  shannon: {
+    health:           ()              => req("/shannon/health"),
+    listScans:        ()              => req("/shannon/scans"),
+    createScan:       (body)          => req("/shannon/scans", { method: "POST", body: JSON.stringify(body) }),
+    getScan:          (id)            => req(`/shannon/scans/${id}`),
+    getPipeline:      (id)            => req(`/shannon/scans/${id}/pipeline`),
+    listDeliverables: (id)            => req(`/shannon/scans/${id}/deliverables`),
+    getDeliverable:   async (id, fn)  => {
+      const res = await fetch(`/api/shannon/scans/${id}/deliverables/${encodeURIComponent(fn)}`);
+      if (!res.ok) throw new Error("Failed to load deliverable");
+      return res.text();
+    },
+    cancelScan:       (id)            => req(`/shannon/scans/${id}/cancel`, { method: "POST" }),
+  },
 };
 
 // WebSocket helper for streaming run output

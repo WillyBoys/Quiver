@@ -1,12 +1,13 @@
 import { NavLink } from "react-router-dom";
 import { useEffect, useState } from "react";
-import { Terminal, Shield, BookOpen, Radio, Github, Clock, Target, ShieldAlert } from "lucide-react";
+import { Terminal, Shield, BookOpen, Radio, Github, Clock, Target, ShieldAlert, Globe } from "lucide-react";
 import { api } from "../../utils/api.js";
 import styles from "./Layout.module.css";
 
 const NAV = [
   { to: "/campaigns",  icon: Target,      label: "Campaigns"  },
   { to: "/approvals",  icon: ShieldAlert, label: "Approvals"  },
+  { to: "/web-scans",  icon: Globe,       label: "Web Scans"  },
   { to: "/sessions",   icon: Terminal,    label: "Sessions"   },
   { to: "/tools",      icon: Shield,      label: "Tools"      },
   { to: "/activity",   icon: Clock,       label: "Activity"   },

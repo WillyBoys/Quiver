@@ -15,3 +15,8 @@ CLAUDE_CODE_OAUTH_TOKEN = os.getenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
 CLAUDE_BRIDGE_URL = os.getenv("CLAUDE_BRIDGE_URL", "http://claude-bridge:3001")
+
+# Shannon integration
+SHANNON_URL = os.getenv("SHANNON_URL", "http://shannon-web:4000")
+SHANNON_ADMIN_EMAIL = os.getenv("SHANNON_ADMIN_EMAIL", "admin@localhost")
+SHANNON_ADMIN_PASSWORD = os.getenv("SHANNON_ADMIN_PASSWORD", "admin")
