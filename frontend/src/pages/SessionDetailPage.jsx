@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Play, Plus, Trash2, Flag, X, FolderOpen, Search, Download, Link2, Cpu } from "lucide-react";
+import { ArrowLeft, Play, Plus, Trash2, Flag, X, FolderOpen, Search, Download, Link2, Cpu, Pause, Settings } from "lucide-react";
 import { api, createRunSocket } from "../utils/api.js";
 import TerminalPane from "../components/terminal/TerminalPane.jsx";
 import ChecklistPane from "../components/checklist/ChecklistPane.jsx";
@@ -47,6 +47,9 @@ export default function SessionDetailPage() {
   const [newTargetValue, setNewTargetValue] = useState("");
 
   const [campaign, setCampaign] = useState(null);
+  const [showAgentSetup, setShowAgentSetup] = useState(false);
+  const [agentForm, setAgentForm] = useState({ ai_provider: "claude", risk_level: "notify", schedule: "" });
+  const [agentSubmitting, setAgentSubmitting] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [sidebarView, setSidebarView] = useState("tools");   // "tools" | "checklist"
   const [shellCmd, setShellCmd] = useState("");
@@ -382,6 +385,52 @@ export default function SessionDetailPage() {
     }
   }
 
+  const trackPath = {
+    external: "/external",
+    internal: "/internal",
+    web:      "/web-app",
+  }[session?.engagement_type] || "/external";
+
+  async function handleLaunchAgent(e) {
+    e.preventDefault();
+    setAgentSubmitting(true);
+    try {
+      const targetScope = targets.map((t) => t.value).filter(Boolean);
+      const newCampaign = await api.campaigns.create({
+        name:         `${session.name} — AI Agent`,
+        description:  "",
+        target_scope: targetScope.length ? targetScope : [session.target],
+        ai_provider:  agentForm.ai_provider,
+        risk_level:   agentForm.risk_level,
+        schedule:     agentForm.schedule || null,
+        session_id:   sessionId,
+      });
+      // Link back to session so the session knows its campaign
+      await api.sessions.update(sessionId, { ...session, campaign_id: newCampaign.id });
+      setSession((s) => ({ ...s, campaign_id: newCampaign.id }));
+      setCampaign(newCampaign);
+      setShowAgentSetup(false);
+      // Start immediately
+      await api.campaigns.run(newCampaign.id);
+    } catch (err) {
+      alert(err.message || "Failed to launch agent");
+    } finally {
+      setAgentSubmitting(false);
+    }
+  }
+
+  async function handleAgentToggle() {
+    if (!campaign) return;
+    if (campaign.status === "active") {
+      await api.campaigns.update(campaign.id, { status: "paused" });
+      setCampaign((c) => ({ ...c, status: "paused" }));
+    } else {
+      await api.campaigns.update(campaign.id, { status: "active" });
+      setCampaign((c) => ({ ...c, status: "active" }));
+      await api.campaigns.run(campaign.id);
+    }
+  }
+
   function handleJumpToTool(tool) {
     setSidebarView("tools");
     setSelectedCat(tool.category);
@@ -448,23 +497,51 @@ export default function SessionDetailPage() {
         </div>
       )}
 
+      {/* Agent setup modal */}
+      {showAgentSetup && (
+        <div className={styles.modal} onClick={() => setShowAgentSetup(false)}>
+          <div className={styles.modalBox} onClick={(e) => e.stopPropagation()}>
+            <h2 className={styles.modalTitle}>Configure AI Agent</h2>
+            <form onSubmit={handleLaunchAgent} className={styles.form}>
+              <label className={styles.label}>AI Provider
+                <select className="input" value={agentForm.ai_provider}
+                  onChange={(e) => setAgentForm({ ...agentForm, ai_provider: e.target.value })}>
+                  <option value="claude">Claude (Anthropic)</option>
+                  <option value="local">Local AI (Ollama)</option>
+                </select>
+              </label>
+              <label className={styles.label}>Approval Mode
+                <select className="input" value={agentForm.risk_level}
+                  onChange={(e) => setAgentForm({ ...agentForm, risk_level: e.target.value })}>
+                  <option value="auto">Auto Only — passive recon runs freely</option>
+                  <option value="notify">Moderate — active scanning runs freely</option>
+                  <option value="approve">Full Auto — all actions without approval</option>
+                </select>
+              </label>
+              <label className={styles.label}>Schedule <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>(optional cron)</span>
+                <input className="input input-mono" placeholder="0 * * * *  or leave blank for manual"
+                  value={agentForm.schedule}
+                  onChange={(e) => setAgentForm({ ...agentForm, schedule: e.target.value })} />
+              </label>
+              <div className={styles.formActions}>
+                <button type="button" className="btn btn-ghost" onClick={() => setShowAgentSetup(false)}>Cancel</button>
+                <button type="submit" className="btn btn-primary" disabled={agentSubmitting}>
+                  {agentSubmitting ? "Launching…" : "Launch Agent"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Top bar */}
       <div className={styles.topBar}>
-        <button className="btn btn-ghost" style={{ padding: "4px 10px" }} onClick={() => navigate("/sessions")}>
-          <ArrowLeft size={14} /> Sessions
+        <button className="btn btn-ghost" style={{ padding: "4px 10px" }} onClick={() => navigate(trackPath)}>
+          <ArrowLeft size={14} /> {session.engagement_type === "internal" ? "Internal" : "External"}
         </button>
         <div className={styles.sessionInfo}>
           <div className={styles.sessionNameRow}>
             <h1 className={styles.sessionName}>{session.name}</h1>
-            {campaign && (
-              <span className={`${styles.agentStatusTag} ${styles[`agentStatus_${campaign.status}`]}`}>
-                {(campaign.status === "active" || campaign.status === "awaiting_approval") && <span className={styles.agentStatusDot} />}
-                {campaign.status === "active" ? "Running"
-                  : campaign.status === "completed" ? "Done"
-                  : campaign.status === "awaiting_approval" ? "Awaiting Approval"
-                  : "Paused"}
-              </span>
-            )}
           </div>
           <code className={styles.target}>{session.target}</code>
         </div>
@@ -474,6 +551,36 @@ export default function SessionDetailPage() {
         <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => setShowFinding(true)}>
           <Flag size={13} /> Log Finding
         </button>
+      </div>
+
+      {/* AI Agent strip */}
+      <div className={styles.agentStrip}>
+        <Cpu size={13} style={{ color: "var(--accent)", flexShrink: 0 }} />
+        {!campaign ? (
+          <>
+            <span className={styles.agentStripLabel}>No AI agent configured</span>
+            <button className={styles.agentStripBtn} onClick={() => setShowAgentSetup(true)}>
+              <Settings size={11} /> Set up Agent
+            </button>
+          </>
+        ) : (
+          <>
+            <span className={styles.agentStripLabel}>
+              {campaign.status === "active"       ? "Agent running"
+               : campaign.status === "completed"  ? "Agent completed"
+               : campaign.status === "awaiting_approval" ? "Awaiting approval"
+               : "Agent paused"}
+            </span>
+            <span className={styles.agentStripProvider}>{campaign.ai_provider === "claude" ? "Claude" : "Local AI"}</span>
+            {campaign.status !== "completed" && (
+              <button className={styles.agentToggleBtn} onClick={handleAgentToggle}>
+                {campaign.status === "active"
+                  ? <><Pause size={11} /> Pause</>
+                  : <><Play size={11} /> Resume</>}
+              </button>
+            )}
+          </>
+        )}
       </div>
 
       {/* Target bar */}
@@ -908,16 +1015,6 @@ export default function SessionDetailPage() {
 
         {/* Right panel */}
         <aside className={styles.rightPanel}>
-          {session.campaign_id && (
-            <div className={styles.campaignBanner}>
-              <Cpu size={12} />
-              <span>AI-managed session</span>
-              <button className={styles.campaignBannerLink} onClick={() => navigate("/campaigns")}>
-                ← Campaigns
-              </button>
-            </div>
-          )}
-
           {/* Session notes */}
           <div className={styles.notesSection}>
             <div className={styles.notesTitleRow}>

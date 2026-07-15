@@ -22,6 +22,7 @@ class CampaignCreate(BaseModel):
     schedule: Optional[str] = None
     risk_level: str = "notify"
     ai_provider: str = "local"
+    session_id: Optional[str] = None
 
 
 class CampaignUpdate(BaseModel):
@@ -54,6 +55,7 @@ async def create_campaign(body: CampaignCreate, db: AsyncSession = Depends(get_d
         schedule=body.schedule or None,
         risk_level=body.risk_level,
         ai_provider=body.ai_provider,
+        session_id=body.session_id or None,
     )
     db.add(campaign)
     await db.commit()
