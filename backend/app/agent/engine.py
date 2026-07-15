@@ -11,7 +11,7 @@ from app.models.tool import Tool
 from app.models.session import Session as EngagementSession
 from app.agent.scope_guard import is_in_scope
 from app.agent.context import build_agent_prompt, build_retry_prompt, build_summary_prompt
-from app.agent.llm import generate as llm_generate
+from app.agent.llm import generate as llm_generate, generate_summary, AuthError
 from app.constants import TARGET_PARAM_NAMES
 from app.execution import (
     execute_run_background,
@@ -102,6 +102,12 @@ def _parse_json(text: str) -> dict:
 async def _generate_and_save_summary(campaign_id: str, session_id: str, provider: str) -> None:
     """Generate a final summary + findings after the campaign completes."""
     import uuid as _uuid
+
+    summary_text = ""
+    findings_data: list = []
+    llm_succeeded = False
+
+    # --- LLM call (best-effort) ---
     try:
         async with AsyncSessionLocal() as db:
             result = await db.execute(select(Campaign).where(Campaign.id == campaign_id))
@@ -111,7 +117,7 @@ async def _generate_and_save_summary(campaign_id: str, session_id: str, provider
             prompt = await build_summary_prompt(campaign, db)
 
         logger.info("AGENT SUMMARY | campaign=%s generating...", campaign_id)
-        raw, _ = await llm_generate(prompt, provider=provider)
+        raw, _ = await generate_summary(prompt, provider=provider)
         logger.info("AGENT SUMMARY | campaign=%s raw: %.400s", campaign_id, raw)
 
         try:
@@ -123,9 +129,16 @@ async def _generate_and_save_summary(campaign_id: str, session_id: str, provider
 
         summary_text = data.get("summary", "")
         findings_data = [f for f in (data.get("findings") or []) if isinstance(f, dict)]
+        llm_succeeded = True
 
+    except Exception:
+        # Log the full traceback so the cause is always visible in logs.
+        logger.exception("AGENT SUMMARY | LLM call failed for campaign=%s — saving stub summary", campaign_id)
+        summary_text = "Summary generation failed — see backend logs for details."
+
+    # --- DB save (always runs, even when LLM failed) ---
+    try:
         async with AsyncSessionLocal() as db:
-            # Append findings to the session
             sess_result = await db.execute(
                 select(EngagementSession).where(EngagementSession.id == session_id)
             )
@@ -144,7 +157,7 @@ async def _generate_and_save_summary(campaign_id: str, session_id: str, provider
                 ]
                 sess.findings = existing + new_findings
 
-            # Create a summary run so it appears in the reasoning terminal
+            # Always create a summary run so it appears in the session terminal.
             summary_run = Run(
                 session_id=session_id,
                 tool_id="agent",
@@ -152,17 +165,17 @@ async def _generate_and_save_summary(campaign_id: str, session_id: str, provider
                 command="",
                 param_values={"_findings": findings_data},
                 reasoning=summary_text,
-                status="complete",
+                status="complete" if llm_succeeded else "error",
                 started_at=datetime.now(timezone.utc),
                 output="",
             )
             db.add(summary_run)
             await db.commit()
-            logger.info("AGENT SUMMARY | campaign=%s saved summary with %d finding(s)",
-                        campaign_id, len(findings_data))
+            logger.info("AGENT SUMMARY | campaign=%s saved summary (ok=%s) with %d finding(s)",
+                        campaign_id, llm_succeeded, len(findings_data))
 
-    except Exception as e:
-        logger.error("AGENT SUMMARY | unexpected error for campaign=%s: %s", campaign_id, e)
+    except Exception:
+        logger.exception("AGENT SUMMARY | DB save failed for campaign=%s", campaign_id)
 
 
 
@@ -295,6 +308,9 @@ async def run_campaign_agent(campaign_id: str) -> str:
     try:
         raw, model_used = await llm_generate(prompt, provider=provider)
         logger.info("AGENT | campaign=%s model=%s raw: %.300s", campaign_id, model_used, raw)
+    except AuthError as e:
+        logger.error("AGENT | Auth error for campaign %s: %s", campaign_id, e)
+        return "auth_error"
     except RuntimeError as e:
         logger.error("AGENT | LLM error for campaign %s: %s", campaign_id, e)
         return "ai_error"
@@ -470,7 +486,7 @@ async def run_campaign_loop(campaign_id: str) -> None:
     """
     MAX_ITERATIONS = 30
     MAX_CONSECUTIVE_DUPES = 5
-    STOP_STATUSES = {"completed", "not_found", "pending_approval", "waiting_approval"}
+    STOP_STATUSES = {"completed", "not_found", "pending_approval", "waiting_approval", "auth_error"}
 
     consecutive_dupes = 0
 

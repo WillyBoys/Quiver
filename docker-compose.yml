@@ -15,8 +15,10 @@ services:
       - WORDLISTS_DIR=/wordlists
       - OLLAMA_URL=http://ai:11434
       - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:7b}
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - CLAUDE_MODEL=${CLAUDE_MODEL:-claude-haiku-4-5-20251001}
+      - CLAUDE_BRIDGE_URL=http://claude-bridge:3001
     privileged: true
     restart: unless-stopped
 
@@ -33,6 +35,15 @@ services:
       - VITE_API_URL=http://localhost:8000
     depends_on:
       - backend
+    restart: unless-stopped
+
+  claude-bridge:
+    build:
+      context: ./claude-bridge
+    container_name: quiver_claude_bridge
+    environment:
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
+      - CLAUDE_MODEL=${CLAUDE_MODEL:-claude-haiku-4-5-20251001}
     restart: unless-stopped
 
   juice-shop:

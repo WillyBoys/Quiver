@@ -82,17 +82,11 @@ async def build_agent_prompt(campaign: Campaign, db: AsyncSession) -> str:
             seen_binaries.add(t.binary)
             tool_map[t.binary] = t
 
-    # Binaries that completed successfully are removed from the available tool list.
-    completed_binaries = {run.tool_name for run in runs if run.status == "complete"}
-
     # Sort: deprioritised binaries go last, rest alphabetical.
     def _sort_key(binary: str) -> tuple:
         return (1 if (kind == "web" and binary in _WEB_DEPRIORITISE) else 0, binary)
 
-    ordered_binaries = sorted(
-        [b for b in tool_map if b not in completed_binaries],
-        key=_sort_key,
-    )
+    ordered_binaries = sorted(tool_map.keys(), key=_sort_key)
 
     tool_lines = []
     for binary in ordered_binaries:
@@ -113,10 +107,6 @@ async def build_agent_prompt(campaign: Campaign, db: AsyncSession) -> str:
         tool_lines.append(" | ".join(parts))
 
     tools_str = "\n".join(tool_lines) or "  (no tools configured)"
-    completed_note = (
-        f"  (already completed, not available: {', '.join(sorted(completed_binaries))})"
-        if completed_binaries else ""
-    )
 
     action_lines = []
     already_run_commands: list[str] = []
@@ -143,7 +133,6 @@ SCOPE (only test these):
 
 TOOLS AVAILABLE (use binary name as tool_name):
 {tools_str}
-{completed_note}
 
 HISTORY (oldest first — read this to understand what was found):
 {actions_str}

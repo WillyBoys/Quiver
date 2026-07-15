@@ -1,56 +1,52 @@
-FROM python:3.13-slim-bookworm
+FROM kalilinux/kali-rolling
 
-# Single apt layer — includes both runtime deps and Ruby/nokogiri build deps.
-# Build-only packages are purged after all gem compilation is done (see below).
+# Python runtime + core utilities + all Kali-packaged pentest tools in one apt layer.
+# Kali rolling gives us most tools via apt, eliminating the manual binary downloads,
+# Go compilation, and Ruby gem chains required on the old Debian base.
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    # Python
+    python3 python3-pip python3-venv \
     # Core utilities
     curl wget git netcat-openbsd dnsutils whois unzip \
-    # Pentest tools available in Debian bookworm
-    nmap \
-    sqlmap \
-    hydra \
-    john \
-    smbclient \
-    samba-common-bin \
-    snmp \
-    sslscan \
-    # Ruby runtime (kept) + build deps (purged after gem compilation)
-    ruby ruby-dev \
-    gcc make libc6-dev libffi-dev libssl-dev \
-    pkg-config libxml2-dev libxslt1-dev zlib1g-dev \
-    # Perl (needed for nikto)
-    perl libnet-ssleay-perl libjson-perl libxml-writer-perl \
+    # Web testing
+    nikto gobuster ffuf nuclei feroxbuster dirb \
+    whatweb wafw00f sqlmap wpscan cewl \
+    # Network / SSL
+    nmap sslscan \
+    # SMB / Active Directory / SNMP
+    smbclient samba-common-bin snmp enum4linux-ng \
+    # Password attacks
+    hydra john \
+    # Recon & exploit research
+    dnsrecon exploitdb \
+    # Impacket suite (impacket-secretsdump, impacket-smbexec, etc.)
+    python3-impacket \
     && rm -rf /var/lib/apt/lists/*
 
-# nikto (removed from Debian repos — install from GitHub)
-RUN git clone --depth=1 https://github.com/sullo/nikto /opt/nikto && \
-    ln -sf /opt/nikto/program/nikto.pl /usr/local/bin/nikto && \
-    chmod +x /opt/nikto/program/nikto.pl
+# kerbrute — not in Kali apt; grab the release binary (graceful: skips on network failure)
+RUN curl -fL --retry 3 --retry-delay 2 \
+    "https://github.com/ropnop/kerbrute/releases/latest/download/kerbrute_linux_amd64" \
+    -o /usr/local/bin/kerbrute && chmod +x /usr/local/bin/kerbrute \
+    || echo "WARNING: kerbrute download failed — binary will not be available"
 
-# gobuster
-RUN curl -L https://github.com/OJ/gobuster/releases/download/v3.6.0/gobuster_Linux_x86_64.tar.gz \
-    | tar xz -C /usr/local/bin gobuster && chmod +x /usr/local/bin/gobuster
+# SpiSuite — not in Kali; build from source
+RUN curl -L https://go.dev/dl/go1.24.5.linux-amd64.tar.gz | tar xz -C /usr/local && \
+    git clone --depth=1 https://github.com/waffl3ss/SpiSuite.git /opt/SpiSuite && \
+    cd /opt/SpiSuite && \
+    CGO_ENABLED=0 /usr/local/go/bin/go build -o /usr/local/bin/spisuite . && \
+    rm -rf /usr/local/go
 
-# ffuf
-RUN curl -L https://github.com/ffuf/ffuf/releases/download/v2.1.0/ffuf_2.1.0_linux_amd64.tar.gz \
-    | tar xz -C /usr/local/bin ffuf && chmod +x /usr/local/bin/ffuf
+# trufflehog — not in Kali; official install script
+RUN curl -sSfL https://raw.githubusercontent.com/trufflesecurity/trufflehog/main/scripts/install.sh \
+    | sh -s -- -b /usr/local/bin
 
-# nuclei
-RUN curl -L https://github.com/projectdiscovery/nuclei/releases/download/v3.2.4/nuclei_3.2.4_linux_amd64.zip \
-    -o /tmp/nuclei.zip && cd /tmp && unzip nuclei.zip && mv nuclei /usr/local/bin/ && chmod +x /usr/local/bin/nuclei
+# cloud_enum — not in Kali
+RUN git clone --depth=1 https://github.com/initstring/cloud_enum /opt/cloud_enum && \
+    pip install --no-cache-dir --break-system-packages dnspython requests requests-futures && \
+    printf '#!/bin/sh\nexec python3 /opt/cloud_enum/cloud_enum.py "$@"\n' \
+        > /usr/local/bin/cloud_enum && chmod +x /usr/local/bin/cloud_enum
 
-# whatweb — install runtime gems only, skip bundler (Gemfile pulls heavy dev deps that need make)
-RUN gem install webrick addressable && \
-    git clone --depth=1 https://github.com/urbanadventurer/WhatWeb /opt/whatweb && \
-    ln -sf /opt/whatweb/whatweb /usr/local/bin/whatweb && \
-    chmod +x /opt/whatweb/whatweb
-
-# enum4linux-ng (replaces the old enum4linux)
-RUN git clone --depth=1 https://github.com/cddmp/enum4linux-ng /opt/enum4linux-ng && \
-    pip install -r /opt/enum4linux-ng/requirements.txt --break-system-packages && \
-    ln -sf /opt/enum4linux-ng/enum4linux-ng.py /usr/local/bin/enum4linux-ng
-
-# User-added packages — edit user-tools.txt and run: docker-compose up --build backend
+# User-added apt packages — edit user-tools.txt and run: docker-compose up --build backend
 COPY user-tools.txt /tmp/user-tools.txt
 RUN if grep -qvE '^\s*#|^\s*$' /tmp/user-tools.txt; then \
       apt-get update && \
@@ -65,78 +61,21 @@ RUN if grep -qvE '^\s*#|^\s*$' /tmp/user-pip.txt; then \
       xargs pip install --no-cache-dir --break-system-packages; \
     fi
 
-# SpiSuite (requires Go 1.24.5 — apt golang is too old, install from official release)
-RUN curl -L https://go.dev/dl/go1.24.5.linux-amd64.tar.gz | tar xz -C /usr/local && \
-    git clone --depth=1 https://github.com/waffl3ss/SpiSuite.git /opt/SpiSuite && \
-    cd /opt/SpiSuite && \
-    CGO_ENABLED=0 /usr/local/go/bin/go build -o /usr/local/bin/spisuite . && \
-    rm -rf /usr/local/go
-
-# feroxbuster
-RUN curl -L "https://github.com/epi052/feroxbuster/releases/latest/download/x86_64-linux-feroxbuster.zip" \
-    -o /tmp/ferox.zip && \
-    cd /tmp && unzip ferox.zip feroxbuster && \
-    mv /tmp/feroxbuster /usr/local/bin/feroxbuster && \
-    chmod +x /usr/local/bin/feroxbuster && \
-    rm /tmp/ferox.zip
-
-# kerbrute
-RUN curl -L "https://github.com/ropnop/kerbrute/releases/latest/download/kerbrute_linux_amd64" \
-    -o /usr/local/bin/kerbrute && chmod +x /usr/local/bin/kerbrute
-
-# trufflehog (install script resolves versioned release asset automatically)
-RUN curl -sSfL https://raw.githubusercontent.com/trufflesecurity/trufflehog/main/scripts/install.sh \
-    | sh -s -- -b /usr/local/bin
-
-# wpscan — nokogiri build deps are already installed above; compile against system libxml2
-RUN gem install nokogiri -- --use-system-libraries \
-    && gem install wpscan
-
-# cewl — not on RubyGems; install via git clone
-RUN git clone --depth=1 https://github.com/digininja/CeWL /opt/cewl && \
-    cd /opt/cewl && \
-    gem install bundler && \
-    bundle config build.nokogiri --use-system-libraries && \
-    bundle install && \
-    ln -sf /opt/cewl/cewl.rb /usr/local/bin/cewl && \
-    chmod +x /opt/cewl/cewl.rb
-
-# Purge build-only packages now that all gem native extensions are compiled.
-# NOTE: intentionally NOT using --auto-remove / apt-get autoremove here.
-# autoremove would remove libxml2/libxslt1.1/zlib1g (the runtime .so files) because
-# apt sees them as auto-installed deps of the -dev packages — but nokogiri links
-# against them at runtime and apt has no way to know that.
-RUN apt-get purge -y \
-        ruby-dev \
-        gcc make libc6-dev libffi-dev libssl-dev \
-        pkg-config libxml2-dev libxslt1-dev zlib1g-dev \
-    && rm -rf /var/lib/apt/lists/* \
-    && rm -rf /var/lib/gems/*/cache/ \
-    && rm -rf /root/.bundle/cache \
-    && rm -rf /root/.gem/cache
-
-# pip-based tools
+# pip tools not packaged in Kali
 RUN pip install --no-cache-dir --break-system-packages \
-    wafw00f \
-    dnsrecon \
-    impacket \
     bbot \
     subdominator
 
-# searchsploit / exploit-db
-RUN git clone --depth=1 https://gitlab.com/exploit-database/exploitdb /opt/exploitdb && \
-    ln -sf /opt/exploitdb/searchsploit /usr/local/bin/searchsploit
-
-# cloud_enum
-RUN git clone --depth=1 https://github.com/initstring/cloud_enum /opt/cloud_enum && \
-    pip install --no-cache-dir --break-system-packages dnspython requests requests-futures && \
-    printf '#!/bin/sh\nexec python3 /opt/cloud_enum/cloud_enum.py "$@"\n' \
-        > /usr/local/bin/cloud_enum && chmod +x /usr/local/bin/cloud_enum
-
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Use a virtualenv at /opt/venv — outside /app so the host volume mount doesn't wipe it.
+# Kali's system Python has pentest tool deps (uvicorn, fastapi, etc.) installed as apt
+# packages; isolating here prevents version conflicts.
+COPY requirements.txt /tmp/requirements.txt
+RUN python3 -m venv /opt/venv && \
+    /opt/venv/bin/pip install --no-cache-dir -r /tmp/requirements.txt
+
+ENV PATH="/opt/venv/bin:$PATH"
 
 COPY . .
 
