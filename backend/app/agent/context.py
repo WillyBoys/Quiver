@@ -151,6 +151,7 @@ RULES (follow all):
 - target must be {primary!r} (or a specific discovered path/endpoint)
 - DO NOT use any command listed in COMMANDS ALREADY RUN
 - extra_flags: optional string of additional CLI flags to append (e.g. "-p 80,443" or "--timeout 10"); leave empty string if not needed
+- bash special rule: when tool_name is "bash", put the COMPLETE shell command in extra_flags (e.g. "curl -si 'http://juice-shop:3000/api/users' | head -50"). The bash tool requires human approval and is your escape hatch for custom probes, chained commands, or anything no other tool covers.
 - Reply with exactly one line of JSON, no line breaks inside"""
 
 

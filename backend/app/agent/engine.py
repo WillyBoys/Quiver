@@ -219,7 +219,9 @@ async def _attempt_fix(campaign: Campaign, failed_run: Run, tool, provider: str)
         )
         retry_tool = tool_result.scalars().first() or tool
 
-        if retry_tool:
+        if retry_tool and retry_tool.binary == "bash":
+            command = extra_flags or failed_run.command
+        elif retry_tool:
             param_values = _build_param_values(retry_tool, target, parameters)
             command = build_command(retry_tool, param_values, extra_flags=extra_flags)
         else:
@@ -373,7 +375,13 @@ async def run_campaign_agent(campaign_id: str) -> str:
             )
             tool = tool_result.scalar_one_or_none()
 
-        if tool:
+        if tool and tool.binary == "bash":
+            # bash pseudo-tool: extra_flags IS the full command the model wants to run
+            if not extra_flags:
+                logger.error("AGENT | campaign=%s bash tool chosen but extra_flags is empty", campaign_id)
+                return "invalid_action"
+            command = extra_flags
+        elif tool:
             param_values = _build_param_values(tool, target, parameters)
             command = build_command(tool, param_values, extra_flags=extra_flags)
         else:

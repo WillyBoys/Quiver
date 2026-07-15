@@ -46,6 +46,19 @@ RUN git clone --depth=1 https://github.com/initstring/cloud_enum /opt/cloud_enum
     printf '#!/bin/sh\nexec python3 /opt/cloud_enum/cloud_enum.py "$@"\n' \
         > /usr/local/bin/cloud_enum && chmod +x /usr/local/bin/cloud_enum
 
+# Thin wrapper scripts — each gives the agent a distinct binary name for a common
+# curl/nc pattern, letting the seed add them as separate auto-approved tools without
+# changing the binary-keyed tool-prompt logic.
+RUN printf '#!/bin/sh\nexec curl -si --max-time 15 "$@"\n'                                                         > /usr/local/bin/curl-probe   && \
+    printf '#!/bin/sh\nexec curl -sI --max-time 10 "$@"\n'                                                         > /usr/local/bin/curl-headers && \
+    printf '#!/bin/sh\nexec curl -si -X OPTIONS -H "Origin: https://evil.com" -H "Access-Control-Request-Method: GET" --max-time 10 "$@"\n' \
+                                                                                                                    > /usr/local/bin/curl-cors    && \
+    printf '#!/bin/sh\nexec curl -si -H "Accept: application/json" --max-time 15 "$@"\n'                          > /usr/local/bin/curl-json    && \
+    printf '#!/bin/sh\nexec curl -siL --max-time 15 "$@"\n'                                                        > /usr/local/bin/curl-redirect && \
+    printf '#!/bin/sh\nexec nc -nv -w 5 "$@"\n'                                                                    > /usr/local/bin/nc-banner    && \
+    chmod +x /usr/local/bin/curl-probe /usr/local/bin/curl-headers /usr/local/bin/curl-cors \
+             /usr/local/bin/curl-json /usr/local/bin/curl-redirect /usr/local/bin/nc-banner
+
 # User-added apt packages — edit user-tools.txt and run: docker-compose up --build backend
 COPY user-tools.txt /tmp/user-tools.txt
 RUN if grep -qvE '^\s*#|^\s*$' /tmp/user-tools.txt; then \
