@@ -596,8 +596,8 @@ export default function SessionDetailPage() {
       </div>
 
       {/* AI Agent strip */}
-      <div className={styles.agentStrip}>
-        <Cpu size={13} style={{ color: "var(--accent)", flexShrink: 0 }} />
+      <div className={`${styles.agentStrip} ${campaign?.status === "awaiting_approval" ? styles.agentStripAlert : ""}`}>
+        <Cpu size={13} style={{ color: campaign?.status === "awaiting_approval" ? "#f59e0b" : "var(--accent)", flexShrink: 0 }} />
         {!campaign ? (
           <>
             <span className={styles.agentStripLabel}>No AI agent configured</span>
@@ -607,10 +607,10 @@ export default function SessionDetailPage() {
           </>
         ) : (
           <>
-            <span className={styles.agentStripLabel}>
-              {campaign.status === "active"       ? "Agent running"
-               : campaign.status === "completed"  ? "Agent completed"
-               : campaign.status === "awaiting_approval" ? "Awaiting approval"
+            <span className={campaign.status === "awaiting_approval" ? styles.agentStripLabelAlert : styles.agentStripLabel}>
+              {campaign.status === "active"             ? "Agent running"
+               : campaign.status === "completed"        ? "Agent completed"
+               : campaign.status === "awaiting_approval" ? "⚠ Awaiting approval"
                : "Agent paused"}
             </span>
             <span className={styles.agentStripProvider}>{campaign.ai_provider === "claude" ? "Claude" : "Local AI"}</span>
@@ -693,9 +693,11 @@ export default function SessionDetailPage() {
           {/* Agent reasoning view */}
           {session.campaign_id && agentSidebarView === "reasoning" && (
             <div className={styles.reasoningFeed}>
-              {campaign?.last_agent_reasoning && campaign.status === "active" && (
+              {campaign?.last_agent_reasoning && (campaign.status === "active" || campaign.status === "awaiting_approval") && (
                 <div className={styles.reasoningThinking}>
-                  <span className={styles.reasoningThinkingLabel}>thinking</span>
+                  <span className={styles.reasoningThinkingLabel}>
+                    {campaign.status === "awaiting_approval" ? "awaiting approval" : "thinking"}
+                  </span>
                   <p>{campaign.last_agent_reasoning}</p>
                 </div>
               )}

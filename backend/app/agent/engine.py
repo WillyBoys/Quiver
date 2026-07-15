@@ -593,6 +593,7 @@ async def execute_approval(approval_id: str) -> bool:
             tool_name=approval.tool_name,
             command=approval.command,
             param_values={},
+            reasoning=approval.reasoning,
             status="running",
             started_at=datetime.now(timezone.utc),
             output="",

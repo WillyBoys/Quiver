@@ -43,11 +43,29 @@
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
   font-size: 12px;
+  transition: background 0.3s, border-color 0.3s;
+}
+
+.agentStripAlert {
+  background: rgba(245, 158, 11, 0.07);
+  border-bottom-color: rgba(245, 158, 11, 0.35);
 }
 
 .agentStripLabel {
   color: var(--text-muted);
   flex: 1;
+}
+
+.agentStripLabelAlert {
+  color: #f59e0b;
+  font-weight: 600;
+  flex: 1;
+  animation: alertPulse 1.8s ease-in-out infinite;
+}
+
+@keyframes alertPulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.65; }
 }
 
 .agentStripProvider {
