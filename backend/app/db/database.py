@@ -1,4 +1,5 @@
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+from sqlalchemy.pool import NullPool
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
@@ -9,7 +10,9 @@ DATABASE_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:////data/pentest.db")
 if DATABASE_URL.startswith("sqlite:///"):
     DATABASE_URL = DATABASE_URL.replace("sqlite:///", "sqlite+aiosqlite:///", 1)
 
-engine = create_async_engine(DATABASE_URL, echo=False)
+# NullPool: each async session gets its own SQLite connection, preventing pool exhaustion
+# when the agent loop holds connections across long awaits.
+engine = create_async_engine(DATABASE_URL, echo=False, poolclass=NullPool)
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 
@@ -20,6 +23,9 @@ class Base(DeclarativeBase):
 async def init_db():
     from app.models import tool, session, run, campaign  # noqa: import all models
     async with engine.begin() as conn:
+        # Enable WAL mode so reads never block writes (persists in the DB file)
+        await conn.execute(text("PRAGMA journal_mode=WAL"))
+        await conn.execute(text("PRAGMA busy_timeout=5000"))
         await conn.run_sync(Base.metadata.create_all)
         # Migrate: add checklist_state to existing sessions tables that pre-date this column
         try:
