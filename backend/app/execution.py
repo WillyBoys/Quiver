@@ -15,18 +15,35 @@ _run_done_events: dict[str, asyncio.Event] = {}
 
 
 def build_command(tool, param_values: dict, extra_flags: str = "") -> str:
+    import shlex
     parts = [tool.binary]
     if tool.default_flags:
         parts.append(tool.default_flags)
+
+    # Collect flags already present in extra_flags so we don't emit them twice.
+    # extra_flags represents an explicit override and always wins.
+    extra_flag_tokens: set[str] = set()
+    if extra_flags:
+        try:
+            for tok in shlex.split(extra_flags):
+                if tok.startswith("-"):
+                    extra_flag_tokens.add(tok)
+        except ValueError:
+            pass
+
     for param in tool.parameters:
         name = param.get("name")
         flag = param.get("flag", "")
         value = param_values.get(name, "")
-        if value:
-            if flag:
-                parts.append(f"{flag} {value}")
-            else:
-                parts.append(value)
+        if not value:
+            continue
+        if flag and flag in extra_flag_tokens:
+            continue  # already supplied in extra_flags
+        if flag:
+            parts.append(f"{flag} {value}")
+        else:
+            parts.append(value)
+
     if extra_flags:
         parts.append(extra_flags)
     return " ".join(parts)
