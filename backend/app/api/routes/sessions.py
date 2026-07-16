@@ -44,6 +44,10 @@ class ChecklistUpdate(BaseModel):
     custom_items: list = []
 
 
+class ReportGenerateRequest(BaseModel):
+    provider: Optional[str] = "claude"
+
+
 class TargetsUpdate(BaseModel):
     targets: list
 
@@ -122,6 +126,24 @@ async def delete_session(session_id: str, db: AsyncSession = Depends(get_db)):
     await db.commit()
 
 
+@router.post("/{session_id}/report/generate")
+async def generate_ai_report(session_id: str, body: ReportGenerateRequest, db: AsyncSession = Depends(get_db)):
+    from app.agent.llm import generate_report as llm_generate_report, AuthError
+    session = await _get_or_404(session_id, db)
+    result = await db.execute(
+        select(Run).where(Run.session_id == session_id).order_by(Run.created_at)
+    )
+    runs = result.scalars().all()
+    prompt = _build_ai_report_prompt(session, runs)
+    try:
+        markdown = await llm_generate_report(prompt, provider=body.provider or "claude")
+        return {"markdown": markdown}
+    except AuthError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Report generation failed: {e}")
+
+
 @router.get("/{session_id}/report.md")
 async def export_report(session_id: str, db: AsyncSession = Depends(get_db)):
     session = await _get_or_404(session_id, db)
@@ -139,6 +161,92 @@ async def export_report(session_id: str, db: AsyncSession = Depends(get_db)):
 
 
 # ── Report helpers ────────────────────────────────────────────────────────────
+
+_SEVERITY_CVSS = {
+    "critical": "9.0–10.0 (Critical)",
+    "high": "7.0–8.9 (High)",
+    "medium": "4.0–6.9 (Medium)",
+    "low": "0.1–3.9 (Low)",
+    "info": "0.0 (Informational)",
+}
+
+
+def _build_ai_report_prompt(session, runs) -> str:
+    findings = session.findings or []
+    findings_sorted = sorted(
+        findings,
+        key=lambda f: _SEVERITY_ORDER.index(f.get("severity", "info"))
+        if f.get("severity") in _SEVERITY_ORDER else 99,
+    )
+
+    findings_text = ""
+    if findings_sorted:
+        for f in findings_sorted:
+            sev = f.get("severity", "info")
+            findings_text += (
+                f"Finding: {f.get('title', 'Untitled')}\n"
+                f"Severity: {sev.upper()} — {_SEVERITY_CVSS.get(sev, '')}\n"
+                f"Notes: {f.get('notes', '').strip() or '(no notes)'}\n\n"
+            )
+    else:
+        findings_text = "(no findings logged)\n"
+
+    tool_outputs = ""
+    completed = [r for r in runs if r.status in ("complete", "error") and r.tool_name != "_summary"]
+    for run in completed[:15]:
+        out = _strip_ansi(run.output or "")[:600]
+        if len(run.output or "") > 600:
+            out += "..."
+        tool_outputs += (
+            f"Tool: {run.tool_name}\n"
+            f"Command: {run.command}\n"
+            f"Status: {run.status}\n"
+            f"Output:\n{out or '(no output)'}\n\n"
+        )
+    if not tool_outputs:
+        tool_outputs = "(no tool runs recorded)\n"
+
+    return f"""You are a professional penetration testing consultant writing a client deliverable report.
+
+ENGAGEMENT DETAILS:
+- Target: {session.target}
+- Scope: {session.scope or 'Not specified'}
+- Type: {session.engagement_type.title()} Assessment
+- Engagement notes: {(session.notes or '').strip() or '(none)'}
+
+CONFIRMED FINDINGS:
+{findings_text}
+TOOL OUTPUT EVIDENCE:
+{tool_outputs}
+Write a professional penetration testing report in Markdown. Structure it exactly as follows:
+
+# Penetration Testing Report — {session.target}
+
+## Executive Summary
+[2-3 paragraphs. Write for a non-technical audience: what was tested, the overall risk posture, and the single most important thing to fix. Do not use jargon.]
+
+## Scope & Methodology
+[What was in scope, what testing techniques were used based on the tool output above.]
+
+## Findings
+
+[For EACH confirmed finding above, write a section:]
+### [SEVERITY] Finding Title
+**Severity:** [severity level]
+**Description:** [What the vulnerability is and where it was found]
+**Impact:** [What an attacker could do if they exploited this]
+**Evidence:** [Specific output or observations that confirm this finding]
+**Remediation:** [Concrete, actionable steps to fix it. Be specific — not just "patch the system".]
+
+## Conclusion
+[1 paragraph: overall risk level, what the most critical actions are, and a closing statement.]
+
+RULES:
+- Write only what the evidence supports. Do not invent findings not present above.
+- If findings list is empty, write the report noting no significant vulnerabilities were found and describe what was tested.
+- Use professional, clear language. Avoid overly technical jargon in the Executive Summary.
+- Remediation steps must be actionable and specific.
+- Reply with the full report in Markdown only — no preamble, no "Here is the report:" intro."""
 
 _SEVERITY_ORDER = ["critical", "high", "medium", "low", "info"]
 _ANSI_RE = re.compile(r'\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')

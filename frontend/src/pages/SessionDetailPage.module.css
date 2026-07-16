@@ -1,6 +1,8 @@
 .page { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 .loading { padding: 40px; color: var(--text-muted); font-family: var(--font-mono); }
 
+@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
 .topBar {
   display: flex; align-items: center; gap: 16px;
   padding: 12px 20px; border-bottom: 1px solid var(--border);

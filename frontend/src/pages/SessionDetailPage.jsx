@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Play, Plus, Trash2, Flag, X, FolderOpen, Search, Download, Link2, Cpu, Pause, Settings } from "lucide-react";
+import { ArrowLeft, Play, Plus, Trash2, Flag, X, FolderOpen, Search, Download, Link2, Cpu, Pause, Settings, Sparkles } from "lucide-react";
 import { api, createRunSocket } from "../utils/api.js";
 import TerminalPane from "../components/terminal/TerminalPane.jsx";
 import ChecklistPane from "../components/checklist/ChecklistPane.jsx";
@@ -53,6 +53,9 @@ export default function SessionDetailPage() {
   const [agentForm, setAgentForm] = useState({ ai_provider: "claude", risk_level: "notify", schedule: "" });
   const [agentSubmitting, setAgentSubmitting] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [showAiReport, setShowAiReport] = useState(false);
+  const [aiReport, setAiReport] = useState(null);
+  const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const [sidebarView, setSidebarView] = useState("tools");   // "tools" | "checklist"
   const [shellCmd, setShellCmd] = useState("");
   const [workflowFilter, setWorkflowFilter] = useState("all"); // "all" | "external" | "internal" | "web"
@@ -363,6 +366,31 @@ export default function SessionDetailPage() {
     }
   }
 
+  async function handleGenerateAiReport() {
+    setIsGeneratingReport(true);
+    setAiReport(null);
+    setShowAiReport(true);
+    try {
+      const data = await api.sessions.generateAiReport(sessionId, campaign?.ai_provider || "claude");
+      setAiReport(data.markdown);
+    } catch (err) {
+      setAiReport(`**Report generation failed:** ${err.message}`);
+    } finally {
+      setIsGeneratingReport(false);
+    }
+  }
+
+  function downloadAiReport() {
+    const slug = (session.name || "report").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    const blob = new Blob([aiReport], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `quiver-ai-report-${slug}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   function isTargetParam(p) {
     const name = (p.name || "").toLowerCase();
     const flag = (p.flag || "").toLowerCase();
@@ -589,6 +617,9 @@ export default function SessionDetailPage() {
         </div>
         <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={handleExport} disabled={isExporting}>
           <Download size={13} /> {isExporting ? "Exporting…" : "Export Report"}
+        </button>
+        <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={handleGenerateAiReport} disabled={isGeneratingReport}>
+          <Sparkles size={13} /> AI Report
         </button>
         <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => setShowFinding(true)}>
           <Flag size={13} /> Log Finding
@@ -1301,6 +1332,39 @@ export default function SessionDetailPage() {
                 <button className="btn btn-ghost" onClick={() => { setShowFinding(false); setNewFinding({ title: "", severity: "high", notes: "", evidence_run_ids: [] }); }}>Cancel</button>
                 <button className="btn btn-primary" onClick={addFinding} disabled={!newFinding.title}>Log Finding</button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* AI Report modal */}
+      {showAiReport && (
+        <div className={styles.modal} onClick={() => setShowAiReport(false)}>
+          <div className={styles.modalBox} style={{ maxWidth: 760, width: "90vw", maxHeight: "85vh", display: "flex", flexDirection: "column" }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+              <h2 className={styles.modalTitle} style={{ margin: 0, display: "flex", alignItems: "center", gap: 8 }}>
+                <Sparkles size={16} style={{ color: "var(--accent)" }} /> AI-Generated Report
+              </h2>
+              <div style={{ display: "flex", gap: 8 }}>
+                {aiReport && !isGeneratingReport && (
+                  <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={downloadAiReport}>
+                    <Download size={13} /> Download .md
+                  </button>
+                )}
+                <button className="btn btn-ghost" style={{ fontSize: 12, padding: "4px 8px" }} onClick={() => setShowAiReport(false)}>
+                  <X size={14} />
+                </button>
+              </div>
+            </div>
+            <div style={{ flex: 1, overflow: "auto", background: "var(--bg-base)", borderRadius: 6, padding: "12px 16px", fontFamily: "var(--font-mono)", fontSize: 12, lineHeight: 1.7, whiteSpace: "pre-wrap", wordBreak: "break-word", border: "1px solid var(--border)" }}>
+              {isGeneratingReport ? (
+                <div style={{ color: "var(--accent)", display: "flex", alignItems: "center", gap: 8, padding: 16 }}>
+                  <Sparkles size={14} style={{ animation: "spin 1.5s linear infinite" }} />
+                  Generating report with Claude… this may take 15–30 seconds.
+                </div>
+              ) : (
+                aiReport || "No report generated."
+              )}
             </div>
           </div>
         </div>

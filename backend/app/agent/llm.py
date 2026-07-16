@@ -31,6 +31,27 @@ async def generate(prompt: str, provider: str = "local") -> tuple[str, str]:
     return text, OLLAMA_MODEL
 
 
+async def generate_report(prompt: str, provider: str = "claude") -> str:
+    """Generate a long-form narrative report. Prefers Claude for quality."""
+    if provider == "claude" or CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY:
+        if CLAUDE_CODE_OAUTH_TOKEN:
+            return await _call_claude_bridge(prompt)
+        if ANTHROPIC_API_KEY:
+            import anthropic
+            client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+            try:
+                message = await client.messages.create(
+                    model=CLAUDE_MODEL,
+                    max_tokens=4096,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+            except anthropic.AuthenticationError as e:
+                raise AuthError(f"Anthropic authentication failed: {e}") from e
+            return message.content[0].text.strip()
+    # Fallback to local model
+    return await _call_ollama_summary(prompt)
+
+
 async def generate_summary(prompt: str, provider: str = "local") -> tuple[str, str]:
     """Like generate() but tuned for the final campaign summary.
 

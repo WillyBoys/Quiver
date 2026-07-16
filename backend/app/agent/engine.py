@@ -68,11 +68,45 @@ def _build_param_values(tool, target: str, llm_params: dict) -> dict:
 TIER_ORDER = {"auto": 0, "approve": 1}
 
 
-def _needs_approval(tool_agent_mode: str, campaign_risk_level: str) -> bool:
-    # "auto" tools always run; "approve" tools always need human sign-off regardless of campaign level
+def _is_readonly_curl(command: str) -> bool:
+    """Return True when a command is a curl/wget call that only reads (GET/HEAD, no payload)."""
+    import shlex
+    cmd = command.strip()
+    # Must start with curl or wget
+    if not (cmd.startswith("curl") or cmd.startswith("wget")):
+        return False
+    try:
+        parts = shlex.split(cmd)
+    except ValueError:
+        return False
+    write_flags = {"-d", "--data", "--data-raw", "--data-binary", "--data-urlencode", "--json",
+                   "--upload-file", "-T", "--form", "-F"}
+    i = 0
+    while i < len(parts):
+        p = parts[i]
+        if p in ("-X", "--request"):
+            method = parts[i + 1].upper() if i + 1 < len(parts) else ""
+            if method not in ("GET", "HEAD", ""):
+                return False
+            i += 2
+            continue
+        if p in write_flags:
+            return False
+        # e.g. -d'data' or --data=value combined forms
+        if any(p.startswith(f) for f in write_flags):
+            return False
+        i += 1
+    return True
+
+
+def _needs_approval(tool_agent_mode: str, campaign_risk_level: str, command: str = "") -> bool:
+    # "auto" tools always run; "approve" tools need human sign-off
+    # Exception: read-only curl/wget GET/HEAD requests are always auto-approved
     tool_tier = TIER_ORDER.get(tool_agent_mode or "auto", 0)
     campaign_tier = TIER_ORDER.get(campaign_risk_level, 0)
-    return tool_tier > campaign_tier
+    if tool_tier > campaign_tier:
+        return not _is_readonly_curl(command)
+    return False
 
 
 def _parse_json(text: str) -> dict:
@@ -97,6 +131,42 @@ def _parse_json(text: str) -> dict:
         pass
     repaired = re.sub(r'(["\d}])\s+"', r'\1,"', collapsed)
     return json.loads(repaired)
+
+
+_VALID_SEVERITIES = {"critical", "high", "medium", "low", "info"}
+
+
+async def _save_inline_finding(session_id: str, finding: dict, reasoning: str) -> None:
+    """Persist an agent-discovered finding to the session immediately."""
+    import uuid as _uuid
+    title = (finding.get("title") or "Agent Finding").strip()[:200]
+    severity = finding.get("severity", "info").lower()
+    if severity not in _VALID_SEVERITIES:
+        severity = "info"
+    notes = (finding.get("notes") or "").strip()
+    if reasoning:
+        notes = notes + (f"\n\n*Agent reasoning:* {reasoning}" if notes else f"*Agent reasoning:* {reasoning}")
+
+    async with AsyncSessionLocal() as db:
+        sess = (await db.execute(
+            select(EngagementSession).where(EngagementSession.id == session_id)
+        )).scalar_one_or_none()
+        if not sess:
+            return
+        existing = list(sess.findings or [])
+        if any(f.get("title", "").strip().lower() == title.lower() for f in existing):
+            logger.info("AGENT | session=%s inline finding skipped (duplicate): %s", session_id, title)
+            return
+        new_finding = {
+            "id": str(_uuid.uuid4()),
+            "title": title,
+            "severity": severity,
+            "notes": notes,
+            "evidence_run_ids": [],
+        }
+        sess.findings = existing + [new_finding]
+        await db.commit()
+        logger.info("AGENT | session=%s inline finding saved: [%s] %s", session_id, severity, title)
 
 
 async def _generate_and_save_summary(campaign_id: str, session_id: str, provider: str) -> None:
@@ -350,6 +420,11 @@ async def run_campaign_agent(campaign_id: str) -> str:
         reasoning = action.get("reasoning", "")
         thought = action.get("thought", "")
 
+        # If the agent flagged a finding, persist it immediately before running the tool
+        inline_finding = action.get("finding")
+        if inline_finding and isinstance(inline_finding, dict) and campaign.session_id:
+            asyncio.create_task(_save_inline_finding(campaign.session_id, inline_finding, reasoning))
+
         if not tool_name or not target:
             logger.error("AGENT | campaign=%s action missing tool_name or target", campaign_id)
             return "invalid_action"
@@ -406,7 +481,7 @@ async def run_campaign_agent(campaign_id: str) -> str:
                 return "duplicate"
 
         tool_agent_mode = tool.agent_mode if tool else "auto"
-        if _needs_approval(tool_agent_mode, campaign.risk_level):
+        if _needs_approval(tool_agent_mode, campaign.risk_level, command):
             # Don't queue the same command twice
             existing_approval = (await db.execute(
                 select(ApprovalRequest)

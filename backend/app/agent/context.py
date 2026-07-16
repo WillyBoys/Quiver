@@ -143,6 +143,9 @@ COMMANDS ALREADY RUN — DO NOT REPEAT:
 Reply with a SINGLE LINE of compact JSON — no markdown, no newlines inside the JSON:
 {{"thought":"2-3 sentences: what the previous results show and why you are choosing this tool","reasoning":"one sentence summary","tool_name":"binary","target":"{primary}","parameters":{{}},"extra_flags":""}}
 
+Or if you have confirmed a vulnerability this step, add a finding alongside your action:
+{{"thought":"...","reasoning":"...","tool_name":"binary","target":"{primary}","parameters":{{}},"extra_flags":"","finding":{{"title":"Short descriptive title","severity":"critical|high|medium|low|info","notes":"What was found, where, why it matters, any evidence from output"}}}}
+
 Or if all useful enumeration is complete:
 {{"reasoning":"why done","done":true}}
 
@@ -152,6 +155,7 @@ RULES (follow all):
 - DO NOT use any command listed in COMMANDS ALREADY RUN
 - extra_flags: optional string of additional CLI flags to append (e.g. "-p 80,443" or "--timeout 10"); leave empty string if not needed
 - bash special rule: when tool_name is "bash", put the COMPLETE shell command in extra_flags (e.g. "curl -si 'http://juice-shop:3000/api/users' | head -50"). The bash tool requires human approval and is your escape hatch for custom probes, chained commands, or anything no other tool covers.
+- finding: ONLY include when the CURRENT step's output confirms a real vulnerability or significant issue. Do not duplicate findings you've already reported.
 - Reply with exactly one line of JSON, no line breaks inside"""
 
 

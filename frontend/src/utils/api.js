@@ -41,6 +41,11 @@ export const api = {
       a.click();
       URL.revokeObjectURL(url);
     },
+    generateAiReport: (id, provider = "claude") =>
+      req(`/sessions/${id}/report/generate`, {
+        method: "POST",
+        body: JSON.stringify({ provider }),
+      }),
   },
   tools: {
     list: (category) => req(`/tools/${category ? `?category=${category}` : ""}`),
