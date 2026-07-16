@@ -50,7 +50,9 @@ export default function SessionDetailPage() {
   const [agentSidebarView, setAgentSidebarView] = useState("reasoning"); // "reasoning" | "tools" | "checklist"
   const connectedRunIds = useRef(new Set());
   const [showAgentSetup, setShowAgentSetup] = useState(false);
-  const [agentForm, setAgentForm] = useState({ ai_provider: "claude", risk_level: "notify", schedule: "" });
+  const [agentForm, setAgentForm] = useState({ ai_provider: "claude", risk_level: "notify" });
+  const [scheduleMode, setScheduleMode] = useState("now"); // "now" | "later"
+  const [scheduledAt, setScheduledAt] = useState(""); // datetime-local value
   const [agentSubmitting, setAgentSubmitting] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [showAiReport, setShowAiReport] = useState(false);
@@ -466,13 +468,16 @@ export default function SessionDetailPage() {
     setAgentSubmitting(true);
     try {
       const targetScope = targets.map((t) => t.value).filter(Boolean);
+      const isScheduled = scheduleMode === "later" && scheduledAt;
+      const scheduleIso = isScheduled ? new Date(scheduledAt).toISOString() : null;
+
       const newCampaign = await api.campaigns.create({
         name:         `${session.name} — AI Agent`,
         description:  "",
         target_scope: targetScope.length ? targetScope : [session.target],
         ai_provider:  agentForm.ai_provider,
         risk_level:   agentForm.risk_level,
-        schedule:     agentForm.schedule || null,
+        schedule:     scheduleIso,
         session_id:   sessionId,
       });
       // Link back to session so the session knows its campaign
@@ -480,8 +485,10 @@ export default function SessionDetailPage() {
       setSession((s) => ({ ...s, campaign_id: newCampaign.id }));
       setCampaign(newCampaign);
       setShowAgentSetup(false);
-      // Start immediately
-      await api.campaigns.run(newCampaign.id);
+      // Only fire immediately when running now; scheduled runs are handled by APScheduler
+      if (!isScheduled) {
+        await api.campaigns.run(newCampaign.id);
+      }
     } catch (err) {
       alert(err.message || "Failed to launch agent");
     } finally {
@@ -550,6 +557,20 @@ export default function SessionDetailPage() {
     return new Date(isoStr).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   }
 
+  function getScheduledTime(c) {
+    if (!c?.schedule || !c.schedule.includes("T")) return null;
+    const dt = new Date(c.schedule);
+    return isNaN(dt) || dt <= new Date() ? null : dt;
+  }
+
+  function fmtScheduledTime(dt) {
+    const today = new Date();
+    const isToday = dt.toDateString() === today.toDateString();
+    const timePart = dt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    if (isToday) return `today at ${timePart}`;
+    return dt.toLocaleDateString([], { month: "short", day: "numeric" }) + ` at ${timePart}`;
+  }
+
   if (!session) return <div className={styles.loading}>Loading session...</div>;
 
   return (
@@ -588,15 +609,46 @@ export default function SessionDetailPage() {
                   <option value="approve">Full Auto — all actions without approval</option>
                 </select>
               </label>
-              <label className={styles.label}>Schedule <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>(optional cron)</span>
-                <input className="input input-mono" placeholder="0 * * * *  or leave blank for manual"
-                  value={agentForm.schedule}
-                  onChange={(e) => setAgentForm({ ...agentForm, schedule: e.target.value })} />
-              </label>
+              <div className={styles.label}>
+                When to run
+                <div className={styles.scheduleToggle}>
+                  <button
+                    type="button"
+                    className={`${styles.scheduleBtn} ${scheduleMode === "now" ? styles.scheduleBtnActive : ""}`}
+                    onClick={() => setScheduleMode("now")}
+                  >
+                    Run now
+                  </button>
+                  <button
+                    type="button"
+                    className={`${styles.scheduleBtn} ${scheduleMode === "later" ? styles.scheduleBtnActive : ""}`}
+                    onClick={() => setScheduleMode("later")}
+                  >
+                    Schedule for later
+                  </button>
+                </div>
+                {scheduleMode === "later" && (
+                  <input
+                    type="datetime-local"
+                    className="input"
+                    style={{ marginTop: 8 }}
+                    value={scheduledAt}
+                    min={new Date(Date.now() + 60000).toISOString().slice(0, 16)}
+                    onChange={(e) => setScheduledAt(e.target.value)}
+                    required={scheduleMode === "later"}
+                  />
+                )}
+              </div>
               <div className={styles.formActions}>
                 <button type="button" className="btn btn-ghost" onClick={() => setShowAgentSetup(false)}>Cancel</button>
-                <button type="submit" className="btn btn-primary" disabled={agentSubmitting}>
-                  {agentSubmitting ? "Launching…" : "Launch Agent"}
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={agentSubmitting || (scheduleMode === "later" && !scheduledAt)}
+                >
+                  {agentSubmitting
+                    ? (scheduleMode === "later" ? "Scheduling…" : "Launching…")
+                    : (scheduleMode === "later" ? "Schedule Agent" : "Launch Agent")}
                 </button>
               </div>
             </form>
@@ -632,17 +684,21 @@ export default function SessionDetailPage() {
         {!campaign ? (
           <>
             <span className={styles.agentStripLabel}>No AI agent configured</span>
-            <button className={styles.agentStripBtn} onClick={() => setShowAgentSetup(true)}>
+            <button className={styles.agentStripBtn} onClick={() => { setShowAgentSetup(true); setScheduleMode("now"); setScheduledAt(""); }}>
               <Settings size={11} /> Set up Agent
             </button>
           </>
         ) : (
           <>
             <span className={campaign.status === "awaiting_approval" ? styles.agentStripLabelAlert : styles.agentStripLabel}>
-              {campaign.status === "active"             ? "Agent running"
-               : campaign.status === "completed"        ? "Agent completed"
-               : campaign.status === "awaiting_approval" ? "⚠ Awaiting approval"
-               : "Agent paused"}
+              {(() => {
+                const scheduled = getScheduledTime(campaign);
+                if (scheduled && campaign.status === "active") return `Scheduled — ${fmtScheduledTime(scheduled)}`;
+                if (campaign.status === "active")              return "Agent running";
+                if (campaign.status === "completed")           return "Agent completed";
+                if (campaign.status === "awaiting_approval")   return "⚠ Awaiting approval";
+                return "Agent paused";
+              })()}
             </span>
             <span className={styles.agentStripProvider}>{campaign.ai_provider === "claude" ? "Claude" : "Local AI"}</span>
             {campaign.status !== "completed" && (

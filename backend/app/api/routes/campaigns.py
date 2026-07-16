@@ -53,6 +53,7 @@ async def create_campaign(body: CampaignCreate, db: AsyncSession = Depends(get_d
         description=body.description,
         target_scope=[t.strip() for t in body.target_scope if t.strip()],
         schedule=body.schedule or None,
+        status="active",
         risk_level=body.risk_level,
         ai_provider=body.ai_provider,
         session_id=body.session_id or None,
@@ -113,8 +114,12 @@ async def trigger_campaign(
     db: AsyncSession = Depends(get_db),
 ):
     campaign = await _get_or_404(campaign_id, db)
-    if campaign.status != "active":
-        raise HTTPException(status_code=400, detail="Campaign must be active to run")
+    if campaign.status == "completed":
+        raise HTTPException(status_code=400, detail="Campaign has already completed")
+    # Ensure campaign is active before running (handles paused campaigns resumed manually)
+    if campaign.status not in ("active", "awaiting_approval"):
+        campaign.status = "active"
+        await db.commit()
     background_tasks.add_task(run_campaign_loop, campaign_id)
     logger.info("CAMPAIGN RUN | id=%s triggered manually", campaign_id)
     return {"message": "Agent loop triggered", "campaign_id": campaign_id}

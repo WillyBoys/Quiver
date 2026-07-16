@@ -6,12 +6,115 @@ from sqlalchemy import select
 from app.models.run import Run
 from app.models.tool import Tool
 from app.models.campaign import Campaign
+from app.models.session import Session as EngagementSession
 from app.constants import TARGET_PARAM_NAMES
 
 logger = logging.getLogger(__name__)
 
 MAX_OUTPUT_PER_RUN = 600
 MAX_RUNS = 10
+
+METHODOLOGY = {
+    "external": """\
+Follow these phases IN ORDER. Use HISTORY to determine current phase, then act accordingly.
+
+Phase 1 — Passive Recon & OSINT
+  Enumerate subdomains (subfinder, dnsx, amass), DNS records, certificate transparency logs.
+  Identify ASN/CIDR ranges, technologies, and any exposed credentials or sensitive info.
+
+Phase 2 — Active Service Discovery
+  Full TCP port scan + UDP on critical ports (53, 161, 500, 1433, 3306, 5432).
+  Banner-grab all open services; identify OS, software versions, running daemons.
+
+Phase 3 — Web Application Discovery
+  Enumerate vhosts, directories (gobuster/ffuf), detect web tech stack (whatweb).
+  Find login panels, admin interfaces, API endpoints, and exposed files (robots.txt, .env, .git).
+
+Phase 4 — Vulnerability Identification
+  Run nuclei templates against all discovered hosts and web surfaces.
+  Cross-reference identified versions against known CVEs. Test default credentials on services.
+
+Phase 5 — Exploitation & Validation
+  Exploit confirmed vulns with minimal-impact PoC (do not cause outages or data loss).
+  Attempt credential attacks: password spray, credential stuffing, brute-force with lockout awareness.
+  Probe for misconfigurations: open redirects, SSRF, XXE, directory traversal, file upload bypass.
+
+Phase 6 — Post-Exploitation
+  If foothold established: enumerate host, find credentials/sensitive files, document access level.
+  Check for lateral movement paths. Do not exfiltrate real data.""",
+
+    "internal": """\
+Follow these phases IN ORDER. Use HISTORY to determine current phase, then act accordingly.
+
+Phase 1 — Network Discovery
+  Host discovery across all subnets (nmap ping sweep). Full port scan of live hosts.
+  Identify domain controllers, file servers, databases, and critical infrastructure nodes.
+
+Phase 2 — Service & AD Enumeration
+  SMB: enumerate shares, null sessions, file permissions, sensitive file names.
+  LDAP: dump users, groups, OUs, GPOs, SPNs, trust relationships. Identify privileged accounts.
+  RPC/NetBIOS enumeration. Test for unauthenticated or guest access on all services.
+
+Phase 3 — Credential Access
+  Kerberoasting: request TGS tickets for all SPN accounts; crack offline.
+  AS-REP Roasting: find accounts with preauthentication disabled; crack hashes.
+  Password spraying: test common/seasonal passwords against domain accounts (lockout-safe).
+  Check shares/scripts/GPP for cleartext credentials. Responder/LLMNR poisoning if applicable.
+
+Phase 4 — Lateral Movement
+  Pass-the-Hash / Pass-the-Ticket with obtained credentials.
+  WMI, SMBExec, PSExec remote execution. RDP/WinRM if creds allow.
+  Exploit trust relationships and misconfigured delegations (unconstrained, resource-based).
+
+Phase 5 — Privilege Escalation
+  Local privesc: unquoted service paths, weak ACLs, token impersonation, always-install-elevated.
+  AD privesc: DCSync rights, WriteDACL/GenericAll on privileged objects, shadow credentials.
+  BloodHound shortest-path analysis. Kerberoast higher-privileged SPN accounts.
+
+Phase 6 — Domain Dominance & Data Exfiltration
+  Domain Admin acquisition and Golden/Silver ticket creation.
+  Locate sensitive data: credential stores, PII, source code, financial records.
+  Document complete attack path from initial access to domain dominance.""",
+
+    "web": """\
+Follow OWASP Top 10 phases IN ORDER. Use HISTORY to determine current phase, then act accordingly.
+
+Phase 1 — Recon & Discovery (OWASP A05)
+  Directory/endpoint brute-force (gobuster/ffuf). Fingerprint tech stack and frameworks.
+  Check robots.txt, sitemap, .git, .env, backup files. Find admin panels and API docs.
+
+Phase 2 — Authentication Testing (OWASP A07)
+  Default/weak credentials. Lockout policy (brute-force resistance).
+  Password reset flaws, username enumeration via timing/response. MFA bypass techniques.
+
+Phase 3 — Injection & Input Validation (OWASP A03)
+  SQL injection in all inputs, headers, cookies — manual probes then sqlmap.
+  Command injection, SSTI (Jinja2/Twig), XPath, LDAP injection.
+  Path traversal (../), file inclusion (LFI/RFI), XXE in XML endpoints.
+
+Phase 4 — XSS & Client-Side Attacks (OWASP A03)
+  Reflected, stored, DOM-based XSS in all input vectors.
+  Content Security Policy analysis and bypass. Open redirects.
+
+Phase 5 — Session Management (OWASP A02)
+  Cookie flags: HttpOnly, Secure, SameSite. Session token entropy and predictability.
+  CSRF bypass. Session fixation. JWT: none algorithm, weak HS256 secret, alg confusion.
+
+Phase 6 — Authorization & IDOR (OWASP A01)
+  IDOR: manipulate object IDs to access/modify other users' data.
+  Privilege escalation: reach admin functions as a regular user.
+  Mass assignment: inject extra fields (isAdmin, role) in JSON/form bodies.
+
+Phase 7 — API Testing (OWASP A09)
+  Enumerate API routes (versioning: /v1/, /api/, /graphql). Test unauthenticated access.
+  GraphQL introspection, excessive data exposure, BOLA (broken object-level auth).
+  API rate limiting absence. HTTP method abuse (GET vs POST vs PUT on sensitive endpoints).
+
+Phase 8 — Misconfigurations & Outdated Components (OWASP A05, A06)
+  Security headers: CSP, HSTS, X-Frame-Options, Referrer-Policy. CORS wildcard origins.
+  TLS: SSLv3/TLS 1.0/weak ciphers. Outdated component CVEs (nuclei templates).
+  Exposed error messages, stack traces, debug endpoints, server version headers.""",
+}
 
 # nmap is deprioritised for web targets — push it to the end so the model
 # tries web-specific tools first. All other ordering is alphabetical.
@@ -56,6 +159,16 @@ async def build_agent_prompt(campaign: Campaign, db: AsyncSession) -> str:
             .limit(MAX_RUNS)
         )
         runs = list(reversed(result.scalars().all()))
+
+    # Resolve engagement type from the linked session
+    engagement_type = "external"
+    if campaign.session_id:
+        sess_res = await db.execute(
+            select(EngagementSession).where(EngagementSession.id == campaign.session_id)
+        )
+        sess = sess_res.scalar_one_or_none()
+        if sess and sess.engagement_type:
+            engagement_type = sess.engagement_type
 
     result = await db.execute(select(Tool).where(Tool.enabled == True))
     tools = result.scalars().all()
@@ -125,16 +238,22 @@ async def build_agent_prompt(campaign: Campaign, db: AsyncSession) -> str:
     actions_str = "\n".join(action_lines) or "  (none yet)"
     already_run_str = "\n".join(already_run_commands) if already_run_commands else "  (none)"
 
+    methodology_str = METHODOLOGY.get(engagement_type, METHODOLOGY["external"])
+    eng_label = engagement_type.upper()
+
     return f"""You are a penetration tester AI. Choose the single best NEXT action against the target.
 
 PRIMARY TARGET: {primary}
 SCOPE (only test these):
 {scope_str}
 
+ENGAGEMENT METHODOLOGY ({eng_label} — follow phases in order):
+{methodology_str}
+
 TOOLS AVAILABLE (use binary name as tool_name):
 {tools_str}
 
-HISTORY (oldest first — read this to understand what was found):
+HISTORY (oldest first — read this to understand what was found and which phase you are in):
 {actions_str}
 
 COMMANDS ALREADY RUN — DO NOT REPEAT:

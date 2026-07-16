@@ -4,31 +4,37 @@ import styles from "./ChecklistPane.module.css";
 
 const PHASES_BY_TYPE = {
   external: [
-    { key: "ext_host_discovery", label: "Host & Port Discovery" },
-    { key: "ext_service_enum",   label: "Service Enumeration" },
-    { key: "ext_web_discovery",  label: "Web Application Discovery" },
-    { key: "ext_vuln_scan",      label: "Vulnerability Scanning" },
-    { key: "ext_exploitation",   label: "Exploitation & Validation" },
-    { key: "ext_post_exploit",   label: "Post-Exploitation" },
-    { key: "ext_reporting",      label: "Reporting & Documentation" },
+    { key: "ext_passive_recon",   label: "Passive Recon & OSINT",             detail: "Subdomains, DNS, cert transparency, ASN ranges, exposed credentials" },
+    { key: "ext_host_discovery",  label: "Active Service Discovery",           detail: "Full TCP port scan, UDP critical ports, banner grab, OS/version ID" },
+    { key: "ext_web_discovery",   label: "Web Application Discovery",          detail: "Vhosts, directories, tech stack, admin panels, API endpoints, exposed files" },
+    { key: "ext_vuln_scan",       label: "Vulnerability Identification",       detail: "Nuclei templates, CVE cross-reference, default credentials on services" },
+    { key: "ext_exploitation",    label: "Exploitation & Validation",          detail: "Confirm vulns with minimal-impact PoC, password spray, misconfig probes" },
+    { key: "ext_post_exploit",    label: "Post-Exploitation",                  detail: "Enumerate foothold, lateral paths, credential files, access level documentation" },
+    { key: "ext_reporting",       label: "Reporting & Documentation",          detail: "Findings documented, evidence captured, AI report drafted" },
   ],
   internal: [
-    { key: "int_host_discovery", label: "Host & Port Discovery" },
-    { key: "int_ad_enum",        label: "AD / Domain Enumeration" },
-    { key: "int_cred_access",    label: "Credential Access" },
-    { key: "int_lateral_move",   label: "Lateral Movement" },
-    { key: "int_priv_esc",       label: "Privilege Escalation" },
-    { key: "int_data_exfil",     label: "Data Exfiltration" },
-    { key: "int_reporting",      label: "Reporting & Documentation" },
+    { key: "int_net_discovery",   label: "Network Discovery",                  detail: "Subnet sweep, live host discovery, DC/server/DB identification" },
+    { key: "int_smb_enum",        label: "SMB & NetBIOS Enumeration",          detail: "Shares, null sessions, file permissions, guest access" },
+    { key: "int_ldap_enum",       label: "LDAP / AD Enumeration",              detail: "Users, groups, OUs, GPOs, SPNs, trusts, privileged account identification" },
+    { key: "int_kerberoast",      label: "Kerberoasting & AS-REP Roasting",   detail: "TGS tickets for SPN accounts, accounts with preauth disabled — offline crack" },
+    { key: "int_spray",           label: "Password Spraying & Cred Hunting",  detail: "Common passwords vs domain accounts (lockout-aware), GPP/share/script cred search" },
+    { key: "int_lateral_move",    label: "Lateral Movement",                   detail: "Pass-the-Hash/Ticket, WMI/SMBExec/PSExec, RDP/WinRM, delegation abuse" },
+    { key: "int_priv_esc",        label: "Privilege Escalation",               detail: "Local privesc, DCSync, WriteDACL/GenericAll, BloodHound path, shadow creds" },
+    { key: "int_domain_dom",      label: "Domain Dominance",                   detail: "Domain Admin acquisition, Golden/Silver ticket, full attack path documented" },
+    { key: "int_data_exfil",      label: "Data Exfiltration & Sensitive Data", detail: "Credential stores, PII, IP, source code; DLP control testing" },
+    { key: "int_reporting",       label: "Reporting & Documentation",          detail: "Findings documented, attack path diagrammed, AI report drafted" },
   ],
   web: [
-    { key: "web_recon",          label: "Recon & Discovery" },
-    { key: "web_auth",           label: "Authentication Testing" },
-    { key: "web_input",          label: "Input Validation" },
-    { key: "web_session",        label: "Session Management" },
-    { key: "web_biz_logic",      label: "Business Logic Testing" },
-    { key: "web_api",            label: "API Testing" },
-    { key: "web_reporting",      label: "Reporting & Documentation" },
+    { key: "web_recon",           label: "Recon & Discovery (A05)",            detail: "Dirs, endpoints, tech stack, robots.txt, .git/.env, admin panels, API docs" },
+    { key: "web_auth",            label: "Authentication Testing (A07)",       detail: "Default creds, lockout, password reset flaws, username enum, MFA bypass" },
+    { key: "web_injection",       label: "Injection & Input Validation (A03)", detail: "SQLi, command injection, SSTI, XPath/LDAP injection, path traversal, XXE" },
+    { key: "web_xss",             label: "XSS & Client-Side Attacks (A03)",   detail: "Reflected, stored, DOM-based XSS; CSP bypass; open redirects" },
+    { key: "web_session",         label: "Session Management (A02)",           detail: "Cookie flags, token entropy, CSRF, session fixation, JWT weaknesses" },
+    { key: "web_authz",           label: "Authorization & IDOR (A01)",        detail: "IDOR via ID manipulation, vertical/horizontal privesc, mass assignment" },
+    { key: "web_api",             label: "API Testing (A09)",                  detail: "Endpoint enum, unauthenticated access, BOLA, GraphQL introspection, rate limits" },
+    { key: "web_misconfig",       label: "Misconfigurations & Components (A05/A06)", detail: "Security headers, CORS, TLS weaknesses, outdated component CVEs, debug endpoints" },
+    { key: "web_biz_logic",       label: "Business Logic Testing (A04)",      detail: "Workflow bypass, price manipulation, race conditions, privilege inference" },
+    { key: "web_reporting",       label: "Reporting & Documentation",          detail: "Findings documented, OWASP refs noted, AI report drafted" },
   ],
 };
 
@@ -107,11 +113,15 @@ export default function ChecklistPane({
               key={phase.key}
               className={`${styles.phaseItem} ${checked ? styles.checked : ""}`}
               onClick={() => onPhaseToggle(phase.key)}
+              title={phase.detail}
             >
               <span className={styles.icon}>
                 {checked ? <CheckCircle2 size={14} /> : <Circle size={14} />}
               </span>
-              <span className={styles.phaseLabel}>{phase.label}</span>
+              <span className={styles.phaseText}>
+                <span className={styles.phaseLabel}>{phase.label}</span>
+                {phase.detail && <span className={styles.phaseDetail}>{phase.detail}</span>}
+              </span>
             </button>
           );
         })}

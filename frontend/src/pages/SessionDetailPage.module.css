@@ -732,6 +732,34 @@
 }
 .formActions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 6px; }
 
+.scheduleToggle {
+  display: flex;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  overflow: hidden;
+  margin-top: 4px;
+}
+
+.scheduleBtn {
+  flex: 1;
+  padding: 7px 12px;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-family: var(--font-ui);
+  cursor: pointer;
+  transition: all 0.12s;
+}
+.scheduleBtn:first-child { border-right: 1px solid var(--border); }
+.scheduleBtn:hover { background: var(--bg-hover); color: var(--text-primary); }
+.scheduleBtnActive {
+  background: var(--accent-glow);
+  color: var(--accent);
+  font-weight: 600;
+}
+
 /* ── Evidence linking ─────────────────────────────────────── */
 
 .evidenceRow {

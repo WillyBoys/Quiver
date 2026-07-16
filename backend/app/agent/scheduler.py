@@ -1,6 +1,8 @@
 import logging
+from datetime import datetime, timezone
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.date import DateTrigger
 from sqlalchemy import select
 from app.db.database import AsyncSessionLocal
 from app.models.campaign import Campaign
@@ -37,9 +39,25 @@ async def start_scheduler() -> None:
     logger.info("SCHEDULER | started with %d scheduled campaign(s)", len(campaigns))
 
 
-def _add_job(campaign_id: str, cron_str: str) -> None:
+def _is_datetime_schedule(s: str) -> bool:
+    """True when s looks like an ISO 8601 datetime rather than a cron expression."""
+    return "T" in s or (s.count("-") >= 2 and s.count(" ") < 4)
+
+
+def _add_job(campaign_id: str, schedule: str) -> None:
     try:
-        trigger = CronTrigger.from_crontab(cron_str)
+        if _is_datetime_schedule(schedule):
+            run_date = datetime.fromisoformat(schedule.replace("Z", "+00:00"))
+            # If the time has already passed, skip rather than fire instantly
+            if run_date < datetime.now(timezone.utc):
+                logger.warning("SCHEDULER | scheduled time already passed for campaign %s — skipping", campaign_id)
+                return
+            trigger = DateTrigger(run_date=run_date, timezone=timezone.utc)
+            logger.info("SCHEDULER | one-shot job added for campaign %s at %s", campaign_id, run_date.isoformat())
+        else:
+            trigger = CronTrigger.from_crontab(schedule)
+            logger.info("SCHEDULER | cron job added for campaign %s: %s", campaign_id, schedule)
+
         _scheduler.add_job(
             _run_job,
             trigger=trigger,
@@ -48,13 +66,12 @@ def _add_job(campaign_id: str, cron_str: str) -> None:
             replace_existing=True,
             misfire_grace_time=120,
         )
-        logger.info("SCHEDULER | job added for campaign %s: %s", campaign_id, cron_str)
     except Exception as e:
         logger.error("SCHEDULER | failed to add job for campaign %s: %s", campaign_id, e)
 
 
-def add_campaign_job(campaign_id: str, cron_str: str) -> None:
-    _add_job(campaign_id, cron_str)
+def add_campaign_job(campaign_id: str, schedule: str) -> None:
+    _add_job(campaign_id, schedule)
 
 
 def remove_campaign_job(campaign_id: str) -> None:
