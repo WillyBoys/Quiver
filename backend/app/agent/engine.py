@@ -330,9 +330,9 @@ async def _attempt_fix(campaign: Campaign, failed_run: Run, tool, provider: str)
         execute_run_background(run_id, command, session_id, tool_name)
     )
     try:
-        await asyncio.wait_for(_run_done_events[run_id].wait(), timeout=600.0)
+        await asyncio.wait_for(_run_done_events[run_id].wait(), timeout=2820.0)
     except asyncio.TimeoutError:
-        logger.error("AGENT RETRY | run %s timed out", run_id)
+        logger.error("AGENT RETRY | run %s timed out after 47min", run_id)
     await task
     return True
 
@@ -537,9 +537,9 @@ async def run_campaign_agent(campaign_id: str) -> str:
         execute_run_background(run_id, command, session_id, tool_name)
     )
     try:
-        await asyncio.wait_for(_run_done_events[run_id].wait(), timeout=600.0)
+        await asyncio.wait_for(_run_done_events[run_id].wait(), timeout=2820.0)
     except asyncio.TimeoutError:
-        logger.error("AGENT | run %s timed out after 600s", run_id)
+        logger.error("AGENT | run %s exceeded 47min hard limit", run_id)
     await task
 
     # If the run errored, give the LLM one chance to fix the command
@@ -567,9 +567,16 @@ async def run_campaign_loop(campaign_id: str) -> None:
       - agent returns "pending_approval" or "waiting_approval" (needs human input)
       - safety cap of 30 iterations is reached
     """
-    MAX_ITERATIONS = 30
+    DEFAULT_MAX_ITERATIONS = 50
     MAX_CONSECUTIVE_DUPES = 5
     STOP_STATUSES = {"completed", "not_found", "pending_approval", "waiting_approval", "auth_error"}
+
+    # Resolve per-campaign cap; None in DB means unlimited (use a safe ceiling of 500)
+    async with AsyncSessionLocal() as db:
+        _c = (await db.execute(select(Campaign).where(Campaign.id == campaign_id))).scalar_one_or_none()
+        MAX_ITERATIONS = (_c.max_iterations or DEFAULT_MAX_ITERATIONS) if _c else DEFAULT_MAX_ITERATIONS
+        if MAX_ITERATIONS <= 0:
+            MAX_ITERATIONS = 500  # "unlimited" sentinel
 
     consecutive_dupes = 0
 
@@ -611,14 +618,25 @@ async def run_campaign_loop(campaign_id: str) -> None:
         # loop straight into the next iteration — the LLM call is the natural
         # rate-limiter (~60-90 s on CPU), so no extra sleep is needed.
 
+    # Iteration cap reached — pause so the UI shows the correct state and
+    # the user can resume with another batch of iterations.
+    logger.warning("AGENT LOOP | campaign=%s iteration cap (%d) reached — pausing",
+                   campaign_id, MAX_ITERATIONS if MAX_ITERATIONS < 500 else 0)
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(Campaign).where(Campaign.id == campaign_id))
+        campaign = result.scalar_one_or_none()
+        if campaign and campaign.status == "active":
+            campaign.status = "paused"
+            await db.commit()
+
 
 async def _run_approved_then_resume(run_id: str, command: str, session_id: str,
                                     tool_name: str, campaign_id: str) -> None:
     """Background task: execute the approved run then resume the campaign loop."""
     try:
-        await asyncio.wait_for(_run_done_events[run_id].wait(), timeout=600.0)
+        await asyncio.wait_for(_run_done_events[run_id].wait(), timeout=2820.0)
     except asyncio.TimeoutError:
-        logger.error("AGENT | approved run %s timed out", run_id)
+        logger.error("AGENT | approved run %s exceeded 47min hard limit", run_id)
 
     # Restore campaign to active and resume the loop
     async with AsyncSessionLocal() as db:

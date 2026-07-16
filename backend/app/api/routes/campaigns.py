@@ -23,6 +23,7 @@ class CampaignCreate(BaseModel):
     risk_level: str = "notify"
     ai_provider: str = "local"
     session_id: Optional[str] = None
+    max_iterations: Optional[int] = None  # None = unlimited
 
 
 class CampaignUpdate(BaseModel):
@@ -33,6 +34,7 @@ class CampaignUpdate(BaseModel):
     risk_level: Optional[str] = None
     ai_provider: Optional[str] = None
     status: Optional[str] = None
+    max_iterations: Optional[int] = None
 
 
 @router.get("/")
@@ -57,6 +59,7 @@ async def create_campaign(body: CampaignCreate, db: AsyncSession = Depends(get_d
         risk_level=body.risk_level,
         ai_provider=body.ai_provider,
         session_id=body.session_id or None,
+        max_iterations=body.max_iterations if body.max_iterations and body.max_iterations > 0 else None,
     )
     db.add(campaign)
     await db.commit()
@@ -90,6 +93,8 @@ async def update_campaign(campaign_id: str, body: CampaignUpdate, db: AsyncSessi
             remove_campaign_job(campaign_id)
         elif body.status == "active" and campaign.schedule:
             add_campaign_job(campaign_id, campaign.schedule)
+    if body.max_iterations is not None:
+        campaign.max_iterations = body.max_iterations if body.max_iterations > 0 else None
 
     if campaign.schedule and campaign.schedule != old_schedule:
         add_campaign_job(campaign_id, campaign.schedule)
@@ -160,4 +165,5 @@ def _dict(c: Campaign) -> dict:
         "created_at": c.created_at.isoformat(),
         "updated_at": c.updated_at.isoformat(),
         "last_run_at": c.last_run_at.isoformat() if c.last_run_at else None,
+        "max_iterations": c.max_iterations,
     }

@@ -91,6 +91,11 @@ async def execute_run_background(
         run_id, session_id, tool_name, command[:300],
     )
 
+    IDLE_TIMEOUT = 600    # 10 min no output
+    HARD_TIMEOUT = 2700   # 45 min total
+
+    timed_out = None
+
     try:
         process = await asyncio.create_subprocess_shell(
             command,
@@ -101,13 +106,40 @@ async def execute_run_background(
         )
         _running_processes[run_id] = process
 
-        async for line_bytes in process.stdout:
-            line = line_bytes.decode("utf-8", errors="replace")
-            buf.append(line)
+        hard_deadline = _time.monotonic() + HARD_TIMEOUT
+        while True:
+            time_left_hard = hard_deadline - _time.monotonic()
+            if time_left_hard <= 0:
+                timed_out = "hard"
+                break
+            read_timeout = min(IDLE_TIMEOUT, time_left_hard)
+            try:
+                line_bytes = await asyncio.wait_for(
+                    process.stdout.readline(),
+                    timeout=read_timeout,
+                )
+            except asyncio.TimeoutError:
+                timed_out = "hard" if time_left_hard <= IDLE_TIMEOUT else "idle"
+                break
+            if not line_bytes:  # EOF — process exited
+                break
+            buf.append(line_bytes.decode("utf-8", errors="replace"))
+
+        if timed_out:
+            label = "10-minute idle" if timed_out == "idle" else "45-minute hard"
+            buf.append(f"\n[TIMEOUT] Process killed — {label} limit reached.\n")
+            logger.warning("RUN TIMEOUT | run_id=%s type=%s", run_id, timed_out)
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                try:
+                    process.kill()
+                except Exception:
+                    pass
 
         await process.wait()
         exit_code = process.returncode
-        run_status = "complete" if exit_code == 0 else "error"
+        run_status = "timeout" if timed_out else ("complete" if exit_code == 0 else "error")
 
     except Exception as e:
         buf.append(f"\n[ERROR] {str(e)}\n")

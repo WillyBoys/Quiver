@@ -46,6 +46,10 @@ async def init_db():
             await conn.execute(text("ALTER TABLE sessions ADD COLUMN campaign_id TEXT DEFAULT NULL"))
         except OperationalError:
             pass  # column already exists
+        try:
+            await conn.execute(text("ALTER TABLE campaigns ADD COLUMN max_iterations INTEGER DEFAULT NULL"))
+        except OperationalError:
+            pass  # column already exists
 
 
 async def get_db() -> AsyncSession:

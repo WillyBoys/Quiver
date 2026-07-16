@@ -50,7 +50,7 @@ export default function SessionDetailPage() {
   const [agentSidebarView, setAgentSidebarView] = useState("reasoning"); // "reasoning" | "tools" | "checklist"
   const connectedRunIds = useRef(new Set());
   const [showAgentSetup, setShowAgentSetup] = useState(false);
-  const [agentForm, setAgentForm] = useState({ ai_provider: "claude", risk_level: "notify" });
+  const [agentForm, setAgentForm] = useState({ ai_provider: "claude", risk_level: "notify", max_iterations: "50", unlimited: false });
   const [scheduleMode, setScheduleMode] = useState("now"); // "now" | "later"
   const [scheduledAt, setScheduledAt] = useState(""); // datetime-local value
   const [agentSubmitting, setAgentSubmitting] = useState(false);
@@ -156,6 +156,10 @@ export default function SessionDetailPage() {
     const interval = setInterval(() => {
       api.runs.listForSession(sessionId).then((r) => { setRuns(r); connectNewRunningRuns(r); });
       api.campaigns.get(campaignId).then(setCampaign);
+      // Merge only findings + checklist from the server so in-progress notes edits aren't clobbered
+      api.sessions.get(sessionId).then((fresh) => {
+        setSession((prev) => prev ? { ...prev, findings: fresh.findings, checklist_state: fresh.checklist_state } : prev);
+      });
     }, 4000);
     return () => clearInterval(interval);
   }, [session?.campaign_id, sessionId]);
@@ -472,13 +476,14 @@ export default function SessionDetailPage() {
       const scheduleIso = isScheduled ? new Date(scheduledAt).toISOString() : null;
 
       const newCampaign = await api.campaigns.create({
-        name:         `${session.name} — AI Agent`,
-        description:  "",
-        target_scope: targetScope.length ? targetScope : [session.target],
-        ai_provider:  agentForm.ai_provider,
-        risk_level:   agentForm.risk_level,
-        schedule:     scheduleIso,
-        session_id:   sessionId,
+        name:           `${session.name} — AI Agent`,
+        description:    "",
+        target_scope:   targetScope.length ? targetScope : [session.target],
+        ai_provider:    agentForm.ai_provider,
+        risk_level:     agentForm.risk_level,
+        schedule:       scheduleIso,
+        session_id:     sessionId,
+        max_iterations: agentForm.unlimited ? null : (parseInt(agentForm.max_iterations) || 50),
       });
       // Link back to session so the session knows its campaign
       await api.sessions.update(sessionId, { ...session, campaign_id: newCampaign.id });
@@ -609,6 +614,45 @@ export default function SessionDetailPage() {
                   <option value="approve">Full Auto — all actions without approval</option>
                 </select>
               </label>
+              {(() => {
+                const iterVal = parseInt(agentForm.max_iterations);
+                const iterError = !agentForm.unlimited && agentForm.max_iterations !== ""
+                  ? (isNaN(iterVal) ? "Enter a number" : iterVal < 1 ? "Minimum is 1" : iterVal > 500 ? "Maximum is 500" : null)
+                  : null;
+                return (
+                  <div className={styles.label}>
+                    Iteration limit
+                    <div className={styles.iterationRow}>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        className={`input ${iterError ? styles.inputError : ""}`}
+                        style={{ width: 72 }}
+                        value={agentForm.unlimited ? "" : agentForm.max_iterations}
+                        disabled={agentForm.unlimited}
+                        placeholder="50"
+                        onChange={(e) => setAgentForm({ ...agentForm, max_iterations: e.target.value.replace(/[^0-9]/g, "") })}
+                      />
+                      <label className={styles.unlimitedLabel}>
+                        <input
+                          type="checkbox"
+                          checked={agentForm.unlimited}
+                          onChange={(e) => setAgentForm({ ...agentForm, unlimited: e.target.checked })}
+                        />
+                        No limit — run until complete
+                      </label>
+                    </div>
+                    {iterError
+                      ? <span className={styles.iterationError}>{iterError}</span>
+                      : <span className={styles.iterationHint}>
+                          {agentForm.unlimited
+                            ? "Agent runs until it decides the engagement is complete."
+                            : `Agent pauses after ${iterVal || 50} steps — you can continue from where it left off.`}
+                        </span>
+                    }
+                  </div>
+                );
+              })()}
               <div className={styles.label}>
                 When to run
                 <div className={styles.scheduleToggle}>
@@ -644,7 +688,7 @@ export default function SessionDetailPage() {
                 <button
                   type="submit"
                   className="btn btn-primary"
-                  disabled={agentSubmitting || (scheduleMode === "later" && !scheduledAt)}
+                  disabled={agentSubmitting || (scheduleMode === "later" && !scheduledAt) || (() => { const v = parseInt(agentForm.max_iterations); return !agentForm.unlimited && (isNaN(v) || v < 1 || v > 500); })()}
                 >
                   {agentSubmitting
                     ? (scheduleMode === "later" ? "Scheduling…" : "Launching…")
@@ -697,7 +741,7 @@ export default function SessionDetailPage() {
                 if (campaign.status === "active")              return "Agent running";
                 if (campaign.status === "completed")           return "Agent completed";
                 if (campaign.status === "awaiting_approval")   return "⚠ Awaiting approval";
-                return "Agent paused";
+                return "Agent paused — click Continue to run more iterations";
               })()}
             </span>
             <span className={styles.agentStripProvider}>{campaign.ai_provider === "claude" ? "Claude" : "Local AI"}</span>
@@ -705,7 +749,7 @@ export default function SessionDetailPage() {
               <button className={styles.agentToggleBtn} onClick={handleAgentToggle}>
                 {campaign.status === "active"
                   ? <><Pause size={11} /> Pause</>
-                  : <><Play size={11} /> Resume</>}
+                  : <><Play size={11} /> Continue</>}
               </button>
             )}
           </>
