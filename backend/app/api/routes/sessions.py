@@ -178,75 +178,121 @@ def _build_ai_report_prompt(session, runs) -> str:
         key=lambda f: _SEVERITY_ORDER.index(f.get("severity", "info"))
         if f.get("severity") in _SEVERITY_ORDER else 99,
     )
+    findings_by_id = {f.get("id"): f for f in findings}
 
+    # Build per-finding evidence snippets from linked run IDs
+    runs_by_id = {r.id: r for r in runs}
     findings_text = ""
     if findings_sorted:
         for f in findings_sorted:
             sev = f.get("severity", "info")
+            ev_ids = f.get("evidence_run_ids") or []
+            ev_snippets = []
+            for rid in ev_ids[:3]:
+                r = runs_by_id.get(rid)
+                if r:
+                    out = _strip_ansi(r.output or "")[:400]
+                    ev_snippets.append(f"  [{r.tool_name}] {r.command}\n  {out[:400]}")
+            ev_text = "\n".join(ev_snippets) if ev_snippets else "  (no linked evidence runs)"
+            parent = findings_by_id.get(f.get("chains_from_id", ""))
+            chain_line = f"  Chains from: {parent['title']}\n" if parent else ""
             findings_text += (
-                f"Finding: {f.get('title', 'Untitled')}\n"
-                f"Severity: {sev.upper()} — {_SEVERITY_CVSS.get(sev, '')}\n"
-                f"Notes: {f.get('notes', '').strip() or '(no notes)'}\n\n"
+                f"---\n"
+                f"Title: {f.get('title', 'Untitled')}\n"
+                f"Severity: {sev.upper()} | CVSS: {_SEVERITY_CVSS.get(sev, '')}\n"
+                f"{chain_line}"
+                f"Notes: {f.get('notes', '').strip() or '(no notes)'}\n"
+                f"Evidence runs:\n{ev_text}\n\n"
             )
     else:
         findings_text = "(no findings logged)\n"
 
-    tool_outputs = ""
-    completed = [r for r in runs if r.status in ("complete", "error") and r.tool_name != "_summary"]
-    for run in completed[:15]:
-        out = _strip_ansi(run.output or "")[:600]
-        if len(run.output or "") > 600:
-            out += "..."
-        tool_outputs += (
-            f"Tool: {run.tool_name}\n"
-            f"Command: {run.command}\n"
-            f"Status: {run.status}\n"
-            f"Output:\n{out or '(no output)'}\n\n"
-        )
-    if not tool_outputs:
-        tool_outputs = "(no tool runs recorded)\n"
+    # Tool run summary for coverage section
+    completed = [r for r in runs if r.status in ("complete", "error", "timeout") and r.tool_name != "_summary"]
+    timed_out = [r for r in completed if r.status == "timeout"]
+    tools_used = sorted({r.tool_name for r in completed})
+    coverage_text = f"Tools used: {', '.join(tools_used) or 'none'}\nTotal runs: {len(completed)}"
+    if timed_out:
+        coverage_text += f"\nTimed-out runs ({len(timed_out)} — may need manual follow-up):\n"
+        for r in timed_out:
+            coverage_text += f"  - {r.tool_name}: {r.command[:120]}\n"
 
-    return f"""You are a professional penetration testing consultant writing a client deliverable report.
+    sev_counts = {}
+    for f in findings:
+        s = f.get("severity", "info")
+        sev_counts[s] = sev_counts.get(s, 0) + 1
+    count_str = ", ".join(f"{sev_counts[s]} {s}" for s in _SEVERITY_ORDER if s in sev_counts) or "0 findings"
+
+    return f"""You are a senior penetration tester writing an internal technical brief for a colleague who will review these findings and write the final client report.
+
+This is NOT a client deliverable. Write for a technical reviewer, not an executive. Be terse and precise.
 
 ENGAGEMENT DETAILS:
+- Session: {session.name}
 - Target: {session.target}
-- Scope: {session.scope or 'Not specified'}
 - Type: {session.engagement_type.title()} Assessment
-- Engagement notes: {(session.notes or '').strip() or '(none)'}
+- Scope: {session.scope or 'Not specified'}
+- Notes: {(session.notes or '').strip() or '(none)'}
+- Finding count: {count_str}
 
-CONFIRMED FINDINGS:
+CONFIRMED FINDINGS (sorted critical → info):
 {findings_text}
-TOOL OUTPUT EVIDENCE:
-{tool_outputs}
-Write a professional penetration testing report in Markdown. Structure it exactly as follows:
+COVERAGE SUMMARY:
+{coverage_text}
 
-# Penetration Testing Report — {session.target}
+Write a technical brief in Markdown using EXACTLY this structure. Do not add sections, do not write for executives, do not include remediation advice (the reviewer will add that):
 
-## Executive Summary
-[2-3 paragraphs. Write for a non-technical audience: what was tested, the overall risk posture, and the single most important thing to fix. Do not use jargon.]
+# Technical Brief — {session.target}
+> **Reviewer:** _______________  **Date reviewed:** _______________
 
-## Scope & Methodology
-[What was in scope, what testing techniques were used based on the tool output above.]
+## Engagement Summary
+- **Type:** {session.engagement_type.title()}
+- **Target:** {session.target}
+- **Scope:** [one line from scope notes]
+- **Tools run:** [count and tool names]
+- **Finding count:** {count_str}
+- **Overall risk:** [one word: Critical / High / Medium / Low / Informational — based on highest confirmed severity]
+
+## Attack Surface
+[Bullet list of what was discovered: open ports, exposed services, interesting endpoints. Pull from tool outputs. Be specific — include port numbers, versions, URLs.]
 
 ## Findings
 
-[For EACH confirmed finding above, write a section:]
-### [SEVERITY] Finding Title
-**Severity:** [severity level]
-**Description:** [What the vulnerability is and where it was found]
-**Impact:** [What an attacker could do if they exploited this]
-**Evidence:** [Specific output or observations that confirm this finding]
-**Remediation:** [Concrete, actionable steps to fix it. Be specific — not just "patch the system".]
+[For EACH finding, use this exact format:]
 
-## Conclusion
-[1 paragraph: overall risk level, what the most critical actions are, and a closing statement.]
+### [SEVERITY] Finding Title
+| Field | Value |
+|-------|-------|
+| **Severity** | SEVERITY — CVSS range |
+| **Location** | specific URL, port, or service |
+| **Chains from** | prior finding title OR — |
+
+**Reproduction steps:**
+1. [Exact step with specific values — commands, payloads, credentials]
+2. [Continue until exploited]
+
+**Key evidence:**
+```
+[paste the most relevant snippet from the evidence runs — the line(s) that prove it works]
+```
+
+**Reviewer notes:** [Flag anything the reviewer should manually verify or that needs more context. Be honest about uncertainty.]
+
+---
+
+## Attack Chains
+[If any findings chain together, describe the kill chain in 2-3 sentences per chain. E.g. "SQLi (Finding 1) yielded admin JWT → used to access /api/Users (Finding 2) → mass assignment on POST /api/Users escalated to admin role (Finding 3)."]
+[If no chains: write "No multi-step chains identified."]
+
+## Coverage Gaps
+[Bullet list of: what wasn't tested, what timed out, what was blocked by scope, what needs manual follow-up. Be specific about what a reviewer should check by hand.]
 
 RULES:
-- Write only what the evidence supports. Do not invent findings not present above.
-- If findings list is empty, write the report noting no significant vulnerabilities were found and describe what was tested.
-- Use professional, clear language. Avoid overly technical jargon in the Executive Summary.
-- Remediation steps must be actionable and specific.
-- Reply with the full report in Markdown only — no preamble, no "Here is the report:" intro."""
+- Write only what the evidence supports. Do not invent findings.
+- No executive summary, no remediation steps, no client-facing language.
+- Reproduction steps must use exact values from the evidence (real payloads, real endpoints, real commands).
+- Flag uncertainty explicitly in Reviewer notes rather than stating something confidently if unsure.
+- Reply with Markdown only — no preamble."""
 
 _SEVERITY_ORDER = ["critical", "high", "medium", "low", "info"]
 _ANSI_RE = re.compile(r'\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')

@@ -1373,3 +1373,28 @@
   margin: 0;
   word-break: break-word;
 }
+
+/* Findings header with view toggle */
+.findingsHeader {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 10px;
+}
+.findingsHeader .panelTitle { margin-bottom: 0; }
+.findingsViewToggle {
+  display: flex; gap: 2px;
+  background: var(--bg-base); border-radius: 6px; padding: 2px;
+  border: 1px solid var(--border);
+}
+.viewBtn {
+  font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 4px;
+  border: none; background: transparent; color: var(--text-muted); cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.viewBtnActive { background: var(--bg-card); color: var(--text-primary); }
+
+/* Chain-from label on a finding */
+.chainFromLabel {
+  font-size: 10px; color: var(--text-muted); margin: 2px 0 4px;
+  font-style: italic;
+}
+.chainFromLabel span { color: var(--accent); font-style: normal; }

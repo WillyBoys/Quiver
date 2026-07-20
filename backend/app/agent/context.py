@@ -238,6 +238,19 @@ async def build_agent_prompt(campaign: Campaign, db: AsyncSession) -> str:
     actions_str = "\n".join(action_lines) or "  (none yet)"
     already_run_str = "\n".join(already_run_commands) if already_run_commands else "  (none)"
 
+    # Build existing findings list so agent can update instead of duplicating
+    existing_findings = sess.findings if sess else []
+    if existing_findings:
+        findings_lines = []
+        for f in existing_findings:
+            fid = f.get("id", "")
+            ftitle = f.get("title", "")
+            fsev = f.get("severity", "info")
+            findings_lines.append(f'  [{fid}] ({fsev}) {ftitle}')
+        findings_str = "\n".join(findings_lines)
+    else:
+        findings_str = "  (none yet)"
+
     methodology_str = METHODOLOGY.get(engagement_type, METHODOLOGY["external"])
     eng_label = engagement_type.upper()
 
@@ -253,6 +266,9 @@ ENGAGEMENT METHODOLOGY ({eng_label} — follow phases in order):
 TOOLS AVAILABLE (use binary name as tool_name):
 {tools_str}
 
+FINDINGS ALREADY LOGGED (id | severity | title):
+{findings_str}
+
 HISTORY (oldest first — read this to understand what was found and which phase you are in):
 {actions_str}
 
@@ -262,8 +278,14 @@ COMMANDS ALREADY RUN — DO NOT REPEAT:
 Reply with a SINGLE LINE of compact JSON — no markdown, no newlines inside the JSON:
 {{"thought":"2-3 sentences: what the previous results show and why you are choosing this tool","reasoning":"one sentence summary","tool_name":"binary","target":"{primary}","parameters":{{}},"extra_flags":""}}
 
-Or if you have confirmed a vulnerability this step, add a finding alongside your action:
+To log a NEW finding confirmed by this step's output:
 {{"thought":"...","reasoning":"...","tool_name":"binary","target":"{primary}","parameters":{{}},"extra_flags":"","finding":{{"title":"Short descriptive title","severity":"critical|high|medium|low|info","notes":"What was found, where, why it matters, any evidence from output"}}}}
+
+To ADD DETAIL to an existing finding (use the id from FINDINGS ALREADY LOGGED):
+{{"thought":"...","reasoning":"...","tool_name":"binary","target":"{primary}","parameters":{{}},"extra_flags":"","finding":{{"id":"existing-finding-uuid","title":"same title","severity":"critical|high|medium|low|info","notes":"Additional evidence or context to append"}}}}
+
+To show this finding was made possible by a prior one, add chains_from with the prior finding's title:
+{{"...","finding":{{"title":"RCE via deserialization","severity":"critical","notes":"...","chains_from":"SQL Injection Authentication Bypass"}}}}
 
 Or if all useful enumeration is complete:
 {{"reasoning":"why done","done":true}}
@@ -272,9 +294,10 @@ RULES (follow all):
 - tool_name MUST be one of the binaries listed in TOOLS AVAILABLE above
 - target must be {primary!r} (or a specific discovered path/endpoint)
 - DO NOT use any command listed in COMMANDS ALREADY RUN
-- extra_flags: optional string of additional CLI flags to append (e.g. "-p 80,443" or "--timeout 10"); leave empty string if not needed
-- bash special rule: when tool_name is "bash", put the COMPLETE shell command in extra_flags (e.g. "curl -si 'http://juice-shop:3000/api/users' | head -50"). The bash tool requires human approval and is your escape hatch for custom probes, chained commands, or anything no other tool covers.
-- finding: ONLY include when the CURRENT step's output confirms a real vulnerability or significant issue. Do not duplicate findings you've already reported.
+- extra_flags: optional string of additional CLI flags to append; leave empty string if not needed
+- bash special rule: when tool_name is "bash", put the COMPLETE shell command in extra_flags. The bash tool requires human approval and is your escape hatch for custom probes, chained commands, or anything no other tool covers.
+- finding: ONLY include when the CURRENT step's output confirms a real vulnerability. Prefer updating an existing finding (with its id) over creating a near-duplicate.
+- chains_from: optional — only set when the current finding directly depended on a prior finding to be exploitable.
 - Reply with exactly one line of JSON, no line breaks inside"""
 
 

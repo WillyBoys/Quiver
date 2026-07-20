@@ -1,5 +1,6 @@
 import json
 import re
+import uuid as _uuid_mod
 import asyncio
 import logging
 from datetime import datetime, timezone
@@ -136,16 +137,40 @@ def _parse_json(text: str) -> dict:
 _VALID_SEVERITIES = {"critical", "high", "medium", "low", "info"}
 
 
-async def _save_inline_finding(session_id: str, finding: dict, reasoning: str) -> None:
-    """Persist an agent-discovered finding to the session immediately."""
-    import uuid as _uuid
+_SEV_RANK = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
+
+
+def _title_similar(a: str, b: str) -> bool:
+    """True when titles share the same first 60 chars (case-insensitive) or one contains the other."""
+    a, b = a.lower().strip(), b.lower().strip()
+    if a == b:
+        return True
+    prefix = 60
+    if a[:prefix] == b[:prefix]:
+        return True
+    return (a in b) or (b in a)
+
+
+async def _save_inline_finding(session_id: str, finding: dict, reasoning: str, run_id: str = "") -> None:
+    """Persist or update an agent-discovered finding.
+
+    If `finding` contains an `id` matching an existing finding the notes are
+    appended and the run is added to evidence_run_ids (update path).
+    Otherwise a new finding is created, skipping creation if the title is
+    sufficiently similar to one that already exists.
+    """
     title = (finding.get("title") or "Agent Finding").strip()[:200]
     severity = finding.get("severity", "info").lower()
     if severity not in _VALID_SEVERITIES:
         severity = "info"
-    notes = (finding.get("notes") or "").strip()
-    if reasoning:
-        notes = notes + (f"\n\n*Agent reasoning:* {reasoning}" if notes else f"*Agent reasoning:* {reasoning}")
+    new_notes = (finding.get("notes") or "").strip()
+    if reasoning and new_notes:
+        new_notes += f"\n\n*Agent reasoning:* {reasoning}"
+    elif reasoning:
+        new_notes = f"*Agent reasoning:* {reasoning}"
+
+    chains_from_title = (finding.get("chains_from") or "").strip()
+    target_id = (finding.get("id") or "").strip()
 
     async with AsyncSessionLocal() as db:
         sess = (await db.execute(
@@ -154,15 +179,68 @@ async def _save_inline_finding(session_id: str, finding: dict, reasoning: str) -
         if not sess:
             return
         existing = list(sess.findings or [])
-        if any(f.get("title", "").strip().lower() == title.lower() for f in existing):
-            logger.info("AGENT | session=%s inline finding skipped (duplicate): %s", session_id, title)
-            return
+
+        # Resolve chains_from title → id
+        chains_from_id = ""
+        if chains_from_title:
+            for f in existing:
+                if f.get("title", "").strip().lower() == chains_from_title.lower():
+                    chains_from_id = f.get("id", "")
+                    break
+
+        # UPDATE path: agent referenced an existing finding by id
+        if target_id:
+            updated = False
+            result = []
+            for f in existing:
+                if f.get("id") == target_id:
+                    ev = list(f.get("evidence_run_ids") or [])
+                    if run_id and run_id not in ev:
+                        ev.append(run_id)
+                    merged_notes = f.get("notes", "")
+                    if new_notes and new_notes not in merged_notes:
+                        merged_notes = (merged_notes + "\n\n" + new_notes).strip()
+                    # Escalate severity if new one is higher
+                    cur_rank = _SEV_RANK.get(f.get("severity", "info"), 0)
+                    new_rank = _SEV_RANK.get(severity, 0)
+                    final_sev = severity if new_rank > cur_rank else f.get("severity", "info")
+                    result.append({**f, "notes": merged_notes, "severity": final_sev,
+                                   "evidence_run_ids": ev, "updated_at": datetime.now(timezone.utc).isoformat()})
+                    updated = True
+                else:
+                    result.append(f)
+            if updated:
+                sess.findings = result
+                await db.commit()
+                logger.info("AGENT | session=%s inline finding updated: [%s] %s", session_id, severity, title)
+                return
+            # Fall through to create if id didn't match anything
+
+        # DEDUP check before creating
+        for f in existing:
+            if _title_similar(f.get("title", ""), title):
+                # Add run to evidence of the existing finding silently
+                if run_id:
+                    ev = list(f.get("evidence_run_ids") or [])
+                    if run_id not in ev:
+                        ev.append(run_id)
+                        result = [{**x, "evidence_run_ids": ev} if x.get("id") == f["id"] else x for x in existing]
+                        sess.findings = result
+                        await db.commit()
+                logger.info("AGENT | session=%s inline finding merged into existing: %s", session_id, f["title"])
+                return
+
+        # CREATE new finding
+        ev = [run_id] if run_id else []
         new_finding = {
-            "id": str(_uuid.uuid4()),
+            "id": str(_uuid_mod.uuid4()),
             "title": title,
             "severity": severity,
-            "notes": notes,
-            "evidence_run_ids": [],
+            "notes": new_notes,
+            "evidence_run_ids": ev,
+            "chains_from_id": chains_from_id,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
         }
         sess.findings = existing + [new_finding]
         await db.commit()
@@ -420,10 +498,15 @@ async def run_campaign_agent(campaign_id: str) -> str:
         reasoning = action.get("reasoning", "")
         thought = action.get("thought", "")
 
-        # If the agent flagged a finding, persist it immediately before running the tool
+        # Pre-generate run_id so the finding can reference it as evidence
+        pregenerated_run_id = str(_uuid_mod.uuid4())
+
+        # If the agent flagged a finding, persist it immediately (with the run as evidence)
         inline_finding = action.get("finding")
         if inline_finding and isinstance(inline_finding, dict) and campaign.session_id:
-            asyncio.create_task(_save_inline_finding(campaign.session_id, inline_finding, reasoning))
+            asyncio.create_task(
+                _save_inline_finding(campaign.session_id, inline_finding, reasoning, pregenerated_run_id)
+            )
 
         if not tool_name or not target:
             logger.error("AGENT | campaign=%s action missing tool_name or target", campaign_id)
@@ -510,6 +593,7 @@ async def run_campaign_agent(campaign_id: str) -> str:
 
         # Auto-execute
         run = Run(
+            id=pregenerated_run_id,
             session_id=campaign.session_id,
             tool_id=tool.id if tool else "agent",
             tool_name=tool_name,

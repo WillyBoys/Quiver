@@ -65,6 +65,7 @@ export default function SessionDetailPage() {
   const [customItems, setCustomItems] = useState([]);
   const [confirmDialog, setConfirmDialog] = useState(null); // { message, onConfirm }
   const [aiAnalysis, setAiAnalysis] = useState({});        // runId -> { status, text, model, error }
+  const [findingsView, setFindingsView] = useState("list"); // "list" | "chain"
 
   useEffect(() => {
     api.sessions.get(sessionId).then(async (s) => {
@@ -1232,55 +1233,61 @@ export default function SessionDetailPage() {
           </div>
 
           <div className={styles.panelSection}>
-            <h3 className={styles.panelTitle}>Findings ({session.findings?.length || 0})</h3>
-            <div className={styles.findingList}>
-              {(session.findings || []).map((f) => {
-                const evidenceIds = getEvidenceIds(f);
-                const evidenceRuns = evidenceIds.map((id) => runsById[id]).filter(Boolean);
-                return (
-                  <div key={f.id} className={styles.findingItem}>
-                    <div className={styles.findingTop}>
-                      <span className={`badge badge-${f.severity}`}>{f.severity}</span>
-                      <button className={styles.delBtn} onClick={() => withConfirm(`Delete finding "${f.title}"?`, () => removeFinding(f.id))}>
-                        <X size={11} />
-                      </button>
-                    </div>
-                    <div className={styles.findingTitle}>{f.title}</div>
-                    {f.notes && <p className={styles.findingNotes}>{f.notes}</p>}
-                    <div className={styles.evidenceRow}>
-                      {evidenceRuns.map((run) => (
-                        <div key={run.id} className={styles.evidenceChip}>
-                          <button
-                            className={styles.evidenceChipBtn}
-                            onClick={() => openTab(run.id)}
-                            title="Jump to run output"
-                          >
-                            <Link2 size={9} />
-                            <span>{run.tool_name}</span>
-                          </button>
-                          <button
-                            className={styles.evidenceUnlinkBtn}
-                            onClick={() => toggleRunEvidence(f.id, run.id)}
-                            title="Remove evidence link"
-                          >
-                            <X size={9} />
-                          </button>
-                        </div>
-                      ))}
-                      <button
-                        className={styles.linkEvidenceBtn}
-                        onClick={() => setLinkingFindingId(f.id)}
-                      >
-                        <Link2 size={9} /> {evidenceRuns.length > 0 ? "Add more" : "Link evidence"}
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-              {(!session.findings || session.findings.length === 0) && (
-                <p className={styles.empty}>No findings logged.</p>
-              )}
+            <div className={styles.findingsHeader}>
+              <h3 className={styles.panelTitle}>Findings ({session.findings?.length || 0})</h3>
+              <div className={styles.findingsViewToggle}>
+                <button className={`${styles.viewBtn} ${findingsView === "list" ? styles.viewBtnActive : ""}`} onClick={() => setFindingsView("list")}>List</button>
+                <button className={`${styles.viewBtn} ${findingsView === "chain" ? styles.viewBtnActive : ""}`} onClick={() => setFindingsView("chain")}>Chain</button>
+              </div>
             </div>
+
+            {findingsView === "list" ? (
+              <div className={styles.findingList}>
+                {(session.findings || []).map((f) => {
+                  const evidenceIds = getEvidenceIds(f);
+                  const evidenceRuns = evidenceIds.map((id) => runsById[id]).filter(Boolean);
+                  const parentFinding = f.chains_from_id ? session.findings?.find(p => p.id === f.chains_from_id) : null;
+                  return (
+                    <div key={f.id} className={styles.findingItem}>
+                      <div className={styles.findingTop}>
+                        <span className={`badge badge-${f.severity}`}>{f.severity}</span>
+                        <button className={styles.delBtn} onClick={() => withConfirm(`Delete finding "${f.title}"?`, () => removeFinding(f.id))}>
+                          <X size={11} />
+                        </button>
+                      </div>
+                      <div className={styles.findingTitle}>{f.title}</div>
+                      {parentFinding && (
+                        <div className={styles.chainFromLabel}>
+                          ↳ chains from: <span>{parentFinding.title}</span>
+                        </div>
+                      )}
+                      {f.notes && <p className={styles.findingNotes}>{f.notes}</p>}
+                      <div className={styles.evidenceRow}>
+                        {evidenceRuns.map((run) => (
+                          <div key={run.id} className={styles.evidenceChip}>
+                            <button className={styles.evidenceChipBtn} onClick={() => openTab(run.id)} title="Jump to run output">
+                              <Link2 size={9} />
+                              <span>{run.tool_name}</span>
+                            </button>
+                            <button className={styles.evidenceUnlinkBtn} onClick={() => toggleRunEvidence(f.id, run.id)} title="Remove evidence link">
+                              <X size={9} />
+                            </button>
+                          </div>
+                        ))}
+                        <button className={styles.linkEvidenceBtn} onClick={() => setLinkingFindingId(f.id)}>
+                          <Link2 size={9} /> {evidenceRuns.length > 0 ? "Add more" : "Link evidence"}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+                {(!session.findings || session.findings.length === 0) && (
+                  <p className={styles.empty}>No findings logged.</p>
+                )}
+              </div>
+            ) : (
+              <AttackChainView findings={session.findings || []} onNodeClick={(f) => setFindingsView("list")} />
+            )}
           </div>
         </aside>
       </div>
@@ -1440,10 +1447,10 @@ export default function SessionDetailPage() {
       {/* AI Report modal */}
       {showAiReport && (
         <div className={styles.modal} onClick={() => setShowAiReport(false)}>
-          <div className={styles.modalBox} style={{ maxWidth: 760, width: "90vw", maxHeight: "85vh", display: "flex", flexDirection: "column" }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+          <div className={styles.modalBox} style={{ maxWidth: 820, width: "92vw", maxHeight: "88vh", display: "flex", flexDirection: "column" }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, flexShrink: 0 }}>
               <h2 className={styles.modalTitle} style={{ margin: 0, display: "flex", alignItems: "center", gap: 8 }}>
-                <Sparkles size={16} style={{ color: "var(--accent)" }} /> AI-Generated Report
+                <Sparkles size={16} style={{ color: "var(--accent)" }} /> Technical Brief
               </h2>
               <div style={{ display: "flex", gap: 8 }}>
                 {aiReport && !isGeneratingReport && (
@@ -1456,19 +1463,346 @@ export default function SessionDetailPage() {
                 </button>
               </div>
             </div>
-            <div style={{ flex: 1, overflow: "auto", background: "var(--bg-base)", borderRadius: 6, padding: "12px 16px", fontFamily: "var(--font-mono)", fontSize: 12, lineHeight: 1.7, whiteSpace: "pre-wrap", wordBreak: "break-word", border: "1px solid var(--border)" }}>
+            <div style={{ flex: 1, overflow: "auto", background: "var(--bg-base)", borderRadius: 6, border: "1px solid var(--border)" }}>
               {isGeneratingReport ? (
-                <div style={{ color: "var(--accent)", display: "flex", alignItems: "center", gap: 8, padding: 16 }}>
+                <div style={{ color: "var(--accent)", display: "flex", alignItems: "center", gap: 8, padding: 24 }}>
                   <Sparkles size={14} style={{ animation: "spin 1.5s linear infinite" }} />
-                  Generating report with Claude… this may take 15–30 seconds.
+                  Generating brief with Claude… this may take some time.
                 </div>
+              ) : aiReport ? (
+                <ReportRenderer markdown={aiReport} />
               ) : (
-                aiReport || "No report generated."
+                <p style={{ padding: 24, color: "var(--text-muted)", fontSize: 13 }}>No report generated.</p>
               )}
             </div>
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Report renderer ──────────────────────────────────────────────────────────
+
+const SEV_PALETTE = {
+  critical: { bg: "rgba(239,68,68,0.12)", border: "#ef4444", text: "#ef4444" },
+  high:     { bg: "rgba(249,115,22,0.12)", border: "#f97316", text: "#f97316" },
+  medium:   { bg: "rgba(234,179,8,0.12)",  border: "#eab308", text: "#eab308" },
+  low:      { bg: "rgba(59,130,246,0.12)", border: "#3b82f6", text: "#3b82f6" },
+  info:     { bg: "rgba(107,114,128,0.12)",border: "#6b7280", text: "#6b7280" },
+};
+
+const SECTION_COLORS = {
+  "Engagement Summary": "#60a5fa",
+  "Attack Surface":     "#34d399",
+  "Findings":           "#f87171",
+  "Attack Chains":      "#f97316",
+  "Coverage Gaps":      "#a78bfa",
+};
+
+function inlineStyle(text) {
+  // Returns spans for **bold**, `code`, and severity keywords
+  const parts = [];
+  const re = /(\*\*[^*]+\*\*)|(`[^`]+`)/g;
+  let last = 0, m;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) parts.push(<span key={last}>{text.slice(last, m.index)}</span>);
+    if (m[0].startsWith("**")) {
+      parts.push(<strong key={m.index}>{m[0].slice(2, -2)}</strong>);
+    } else {
+      parts.push(
+        <code key={m.index} style={{ background: "var(--bg-card)", padding: "1px 5px", borderRadius: 3, fontFamily: "var(--font-mono)", fontSize: "0.9em" }}>
+          {m[0].slice(1, -1)}
+        </code>
+      );
+    }
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) parts.push(<span key={last}>{text.slice(last)}</span>);
+  return parts.length ? parts : text;
+}
+
+function colorSeverityBadge(line) {
+  const sevMatch = line.match(/^###\s+(CRITICAL|HIGH|MEDIUM|LOW|INFO)\s+(.*)/i);
+  if (!sevMatch) return null;
+  const sev = sevMatch[1].toLowerCase();
+  const title = sevMatch[2];
+  const pal = SEV_PALETTE[sev] || SEV_PALETTE.info;
+  return (
+    <div style={{ display: "flex", alignItems: "baseline", gap: 10, margin: "20px 0 6px" }}>
+      <span style={{ background: pal.bg, border: `1px solid ${pal.border}`, color: pal.text, borderRadius: 4, padding: "2px 8px", fontSize: 10, fontWeight: 700, fontFamily: "var(--font-mono)", letterSpacing: "0.08em", flexShrink: 0 }}>
+        {sev.toUpperCase()}
+      </span>
+      <span style={{ fontWeight: 700, fontSize: 14, color: "var(--text-primary)" }}>{title}</span>
+    </div>
+  );
+}
+
+function ReportRenderer({ markdown }) {
+  const lines = markdown.split("\n");
+  const elements = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+
+    // Code block
+    if (line.trimStart().startsWith("```")) {
+      const lang = line.trim().slice(3);
+      const codeLines = [];
+      i++;
+      while (i < lines.length && !lines[i].trimStart().startsWith("```")) {
+        codeLines.push(lines[i]);
+        i++;
+      }
+      elements.push(
+        <pre key={i} style={{ background: "#0d1117", border: "1px solid var(--border)", borderRadius: 6, padding: "10px 14px", margin: "8px 0", overflowX: "auto", fontFamily: "var(--font-mono)", fontSize: 11, lineHeight: 1.6, color: "#e2e8f0" }}>
+          {codeLines.join("\n")}
+        </pre>
+      );
+      i++;
+      continue;
+    }
+
+    // H1
+    if (line.startsWith("# ")) {
+      elements.push(
+        <h1 key={i} style={{ fontSize: 18, fontWeight: 700, color: "var(--accent)", borderBottom: "2px solid var(--accent)", paddingBottom: 8, marginBottom: 4 }}>
+          {line.slice(2)}
+        </h1>
+      );
+      i++; continue;
+    }
+
+    // Blockquote (reviewer line)
+    if (line.startsWith("> ")) {
+      elements.push(
+        <div key={i} style={{ borderLeft: "3px solid var(--border)", paddingLeft: 12, margin: "4px 0 16px", color: "var(--text-muted)", fontSize: 12 }}>
+          {inlineStyle(line.slice(2))}
+        </div>
+      );
+      i++; continue;
+    }
+
+    // H2 — section headers with color coding
+    if (line.startsWith("## ")) {
+      const title = line.slice(3);
+      const color = Object.entries(SECTION_COLORS).find(([k]) => title.includes(k))?.[1] || "var(--text-secondary)";
+      elements.push(
+        <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, margin: "24px 0 10px", borderBottom: `1px solid ${color}40` }}>
+          <span style={{ width: 4, height: 18, borderRadius: 2, background: color, flexShrink: 0 }} />
+          <h2 style={{ fontSize: 14, fontWeight: 700, color, margin: 0, letterSpacing: "0.04em", textTransform: "uppercase" }}>{title}</h2>
+        </div>
+      );
+      i++; continue;
+    }
+
+    // H3 with severity badge detection
+    if (line.startsWith("### ")) {
+      const badge = colorSeverityBadge(line);
+      elements.push(badge || (
+        <h3 key={i} style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)", margin: "16px 0 4px" }}>
+          {line.slice(4)}
+        </h3>
+      ));
+      i++; continue;
+    }
+
+    // HR
+    if (/^---+$/.test(line.trim())) {
+      elements.push(<hr key={i} style={{ border: "none", borderTop: "1px solid var(--border)", margin: "16px 0" }} />);
+      i++; continue;
+    }
+
+    // Table
+    if (line.startsWith("|")) {
+      const tableLines = [];
+      while (i < lines.length && lines[i].startsWith("|")) {
+        tableLines.push(lines[i]);
+        i++;
+      }
+      const rows = tableLines.filter(l => !/^\|[-| :]+\|$/.test(l.trim()));
+      elements.push(
+        <table key={i} style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, margin: "8px 0" }}>
+          <tbody>
+            {rows.map((r, ri) => {
+              const cells = r.split("|").filter((_, ci) => ci > 0 && ci < r.split("|").length - 1);
+              return (
+                <tr key={ri} style={{ background: ri % 2 === 0 ? "var(--bg-card)" : "transparent" }}>
+                  {cells.map((c, ci) => (
+                    <td key={ci} style={{ padding: "5px 10px", borderBottom: "1px solid var(--border)", color: ci === 0 ? "var(--text-muted)" : "var(--text-primary)", fontWeight: ci === 0 ? 600 : 400 }}>
+                      {inlineStyle(c.trim())}
+                    </td>
+                  ))}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      );
+      continue;
+    }
+
+    // Numbered list
+    if (/^\d+\.\s/.test(line)) {
+      const listLines = [];
+      while (i < lines.length && /^\d+\.\s/.test(lines[i])) {
+        listLines.push(lines[i].replace(/^\d+\.\s/, ""));
+        i++;
+      }
+      elements.push(
+        <ol key={i} style={{ paddingLeft: 20, margin: "4px 0 8px", fontSize: 12, lineHeight: 1.7 }}>
+          {listLines.map((l, li) => <li key={li} style={{ color: "var(--text-primary)" }}>{inlineStyle(l)}</li>)}
+        </ol>
+      );
+      continue;
+    }
+
+    // Bullet list
+    if (line.startsWith("- ") || line.startsWith("* ")) {
+      const listLines = [];
+      while (i < lines.length && (lines[i].startsWith("- ") || lines[i].startsWith("* "))) {
+        listLines.push(lines[i].slice(2));
+        i++;
+      }
+      elements.push(
+        <ul key={i} style={{ paddingLeft: 18, margin: "4px 0 8px", fontSize: 12, lineHeight: 1.7 }}>
+          {listLines.map((l, li) => <li key={li} style={{ color: "var(--text-primary)" }}>{inlineStyle(l)}</li>)}
+        </ul>
+      );
+      continue;
+    }
+
+    // Empty line
+    if (!line.trim()) {
+      elements.push(<div key={i} style={{ height: 6 }} />);
+      i++; continue;
+    }
+
+    // Normal paragraph
+    elements.push(
+      <p key={i} style={{ fontSize: 12, lineHeight: 1.7, margin: "2px 0", color: "var(--text-primary)" }}>
+        {inlineStyle(line)}
+      </p>
+    );
+    i++;
+  }
+
+  return (
+    <div style={{ padding: "20px 24px", fontFamily: "var(--font-sans, system-ui)" }}>
+      {elements}
+    </div>
+  );
+}
+
+// ── Attack chain SVG ──────────────────────────────────────────────────────────
+
+const SEV_COLOR_CHAIN = {
+  critical: "#ef4444",
+  high: "#f97316",
+  medium: "#eab308",
+  low: "#3b82f6",
+  info: "#6b7280",
+};
+
+function AttackChainView({ findings, onNodeClick }) {
+  if (!findings.length) {
+    return <p style={{ color: "var(--text-muted)", fontSize: 12, padding: "12px 0" }}>No findings logged.</p>;
+  }
+
+  // Build tree: depth-first layout
+  const byId = Object.fromEntries(findings.map(f => [f.id, f]));
+  const childrenOf = {};
+  const roots = [];
+  for (const f of findings) {
+    if (f.chains_from_id && byId[f.chains_from_id]) {
+      (childrenOf[f.chains_from_id] = childrenOf[f.chains_from_id] || []).push(f.id);
+    } else {
+      roots.push(f.id);
+    }
+  }
+
+  // Assign (col, row) positions via DFS
+  const positions = {};
+  let globalRow = 0;
+  function place(id, col) {
+    const kids = childrenOf[id] || [];
+    if (!kids.length) {
+      positions[id] = { col, row: globalRow++ };
+      return;
+    }
+    const startRow = globalRow;
+    for (const kid of kids) place(kid, col + 1);
+    // center parent vertically over its children
+    const endRow = globalRow - 1;
+    positions[id] = { col, row: (startRow + endRow) / 2 };
+  }
+  for (const r of roots) place(r, 0);
+
+  const NODE_W = 160, NODE_H = 52, COL_GAP = 48, ROW_GAP = 16;
+  const maxCol = Math.max(...Object.values(positions).map(p => p.col));
+  const maxRow = Math.max(...Object.values(positions).map(p => p.row));
+  const svgW = (maxCol + 1) * (NODE_W + COL_GAP);
+  const svgH = (maxRow + 1) * (NODE_H + ROW_GAP) + ROW_GAP;
+
+  function cx(pos) { return pos.col * (NODE_W + COL_GAP) + NODE_W / 2; }
+  function cy(pos) { return pos.row * (NODE_H + ROW_GAP) + NODE_H / 2; }
+
+  const edges = [];
+  for (const f of findings) {
+    if (f.chains_from_id && positions[f.chains_from_id] && positions[f.id]) {
+      const p = positions[f.chains_from_id];
+      const c = positions[f.id];
+      const x1 = cx(p) + NODE_W / 2, y1 = cy(p);
+      const x2 = cx(c) - NODE_W / 2, y2 = cy(c);
+      const mx = (x1 + x2) / 2;
+      edges.push({ key: f.id, d: `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}` });
+    }
+  }
+
+  return (
+    <div style={{ overflowX: "auto", overflowY: "auto", maxHeight: 420 }}>
+      {!edges.length && (
+        <p style={{ color: "var(--text-muted)", fontSize: 11, marginBottom: 8 }}>
+          No chains mapped yet — the agent will link findings as it discovers exploitable chains.
+        </p>
+      )}
+      <svg width={svgW} height={svgH} style={{ display: "block", minWidth: svgW }}>
+        <defs>
+          <marker id="arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L6,3 z" fill="var(--text-muted)" />
+          </marker>
+        </defs>
+        {edges.map(e => (
+          <path key={e.key} d={e.d} fill="none" stroke="var(--text-muted)" strokeWidth="1.5"
+            strokeDasharray="4 3" markerEnd="url(#arrow)" />
+        ))}
+        {findings.map(f => {
+          const pos = positions[f.id];
+          if (!pos) return null;
+          const x = pos.col * (NODE_W + COL_GAP);
+          const y = pos.row * (NODE_H + ROW_GAP);
+          const color = SEV_COLOR_CHAIN[f.severity] || "#6b7280";
+          return (
+            <g key={f.id} style={{ cursor: "pointer" }} onClick={() => onNodeClick(f)}>
+              <rect x={x} y={y} width={NODE_W} height={NODE_H} rx={6}
+                fill="var(--bg-card)" stroke={color} strokeWidth="1.5" />
+              <rect x={x} y={y} width={NODE_W} height={4} rx={3} fill={color} />
+              <text x={x + NODE_W / 2} y={y + 18} textAnchor="middle"
+                fill={color} fontSize="9" fontWeight="600" fontFamily="monospace">
+                {f.severity.toUpperCase()}
+              </text>
+              <foreignObject x={x + 6} y={y + 22} width={NODE_W - 12} height={NODE_H - 26}>
+                <div xmlns="http://www.w3.org/1999/xhtml"
+                  style={{ fontSize: 10, color: "var(--text-primary)", lineHeight: 1.3,
+                    overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2,
+                    WebkitBoxOrient: "vertical" }}>
+                  {f.title}
+                </div>
+              </foreignObject>
+            </g>
+          );
+        })}
+      </svg>
     </div>
   );
 }

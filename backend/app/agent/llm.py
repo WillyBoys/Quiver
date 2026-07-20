@@ -140,7 +140,7 @@ async def _call_claude_bridge(prompt: str) -> str:
     side always receives the bridge's error response rather than timing out first.
     """
     try:
-        async with httpx.AsyncClient(timeout=150.0) as client:
+        async with httpx.AsyncClient(timeout=330.0) as client:  # 30s above bridge's 300s
             resp = await client.post(
                 f"{CLAUDE_BRIDGE_URL}/generate",
                 json={"prompt": prompt},

@@ -376,29 +376,26 @@ export default function ToolsPage() {
                       <div className={styles.toolInfo}>
                         <div className={styles.toolNameRow}>
                           <span className={styles.toolName}>{tool.name}</span>
-                          {tool.is_builtin && <span className={styles.builtinBadge}>built-in</span>}
-                          <span className={styles.agentModeBadge} data-mode={tool.agent_mode || "auto"}>
-                            {AGENT_MODE_LABELS[tool.agent_mode || "auto"]?.label || tool.agent_mode}
+                          {tool.is_builtin && <span className={styles.builtinLabel}>built-in</span>}
+                          <span
+                            className={styles.agentModeIcon}
+                            data-mode={tool.agent_mode || "auto"}
+                            title={AGENT_MODE_LABELS[tool.agent_mode || "auto"]?.desc}
+                          >
+                            {tool.agent_mode === "never" ? "⊘" : tool.agent_mode === "approve" ? "⏸" : "▶"}
                           </span>
-                          {(tool.workflow_tags || []).map((tag) => (
-                            <span key={tag} className={`${styles.tagChip} ${styles[`tag_${tag}`]}`}>{tag}</span>
-                          ))}
-                          {(tool.parameters || []).length > 0 && (
-                            <span className={styles.paramBadge}>
-                              {tool.parameters.length} param{tool.parameters.length !== 1 ? "s" : ""}
-                            </span>
-                          )}
-                        </div>
-                        <div className={styles.toolScopeBadges}>
-                          {(tool.scope_types && tool.scope_types.length > 0
-                            ? tool.scope_types
-                            : ["web", "ip", "domain"]
-                          ).map(s => (
-                            <span key={s} className={styles.scopeBadge} data-scope={s}>{s}</span>
-                          ))}
                         </div>
                         <code className={styles.toolCmd}>{tool.binary} {tool.default_flags}</code>
-                        {tool.description && <p className={styles.toolDesc}>{tool.description}</p>}
+                        {(tool.description || (tool.workflow_tags || []).length > 0) && (
+                          <p className={styles.toolDesc}>
+                            {tool.description}
+                            {(tool.workflow_tags || []).length > 0 && (
+                              <span className={styles.toolTags}>
+                                {tool.description ? " " : ""}{(tool.workflow_tags).map(t => `#${t}`).join(" ")}
+                              </span>
+                            )}
+                          </p>
+                        )}
                       </div>
                       <div className={styles.toolActions}>
                         <button className={styles.iconBtn} title={tool.enabled ? "Disable" : "Enable"}

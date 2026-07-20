@@ -3,7 +3,7 @@ import http from 'http';
 
 const PORT = parseInt(process.env.PORT || '3001', 10);
 const MODEL = process.env.CLAUDE_MODEL || 'claude-haiku-4-5-20251001';
-const TIMEOUT_MS = 120_000;
+const TIMEOUT_MS = 300_000; // 5 min — long enough for large report generation
 
 function callClaude(prompt) {
     return new Promise((resolve, reject) => {

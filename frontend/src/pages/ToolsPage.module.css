@@ -70,29 +70,20 @@
 }
 .toolName { font-size: 13px; font-weight: 600; }
 
-.builtinBadge {
-  font-size: 10px; font-family: var(--font-mono);
-  background: var(--accent-glow); color: var(--accent);
-  border: 1px solid var(--accent-dim);
-  padding: 1px 6px; border-radius: 3px; font-weight: 500;
+.builtinLabel {
+  font-size: 11px; color: var(--text-muted); font-style: italic;
 }
 
-/* Workflow tag chips */
-.tagChip {
-  font-size: 10px; font-family: var(--font-mono);
-  padding: 1px 6px; border-radius: 3px; font-weight: 500;
-  border: 1px solid;
+/* Agent mode icon (▶ / ⏸ / ⊘) — icon only, tooltip carries the label */
+.agentModeIcon {
+  font-size: 10px; color: var(--accent); cursor: default; flex-shrink: 0; line-height: 1;
 }
-.tag_external { color: #4fc3f7; background: rgba(79,195,247,0.1); border-color: rgba(79,195,247,0.25); }
-.tag_internal { color: #ffb74d; background: rgba(255,183,77,0.1); border-color: rgba(255,183,77,0.25); }
-.tag_web      { color: #ce93d8; background: rgba(206,147,216,0.1); border-color: rgba(206,147,216,0.25); }
+.agentModeIcon[data-mode="approve"] { color: var(--warning); }
+.agentModeIcon[data-mode="never"]   { color: var(--text-muted); }
 
-/* Param count */
-.paramBadge {
-  font-size: 10px; font-family: var(--font-mono);
-  color: var(--text-muted); background: var(--bg-elevated);
-  border: 1px solid var(--border-subtle);
-  padding: 1px 6px; border-radius: 3px;
+/* Workflow tags — inline subdued text in description line */
+.toolTags {
+  font-family: var(--font-mono); font-size: 11px; color: var(--text-muted);
 }
 
 .toolCmd {
@@ -179,22 +170,6 @@
 .agentModeLabel { font-size: 12px; font-weight: 600; color: var(--text-primary); text-transform: none; letter-spacing: 0; }
 .agentModeDesc { font-size: 11px; color: var(--text-muted); text-transform: none; letter-spacing: 0; font-weight: 400; }
 
-/* Agent mode badge on tool list rows */
-.agentModeBadge {
-  font-size: 10px; font-weight: 600; padding: 1px 6px;
-  border-radius: 3px; text-transform: uppercase; letter-spacing: 0.04em;
-  background: color-mix(in srgb, var(--accent) 15%, transparent);
-  color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
-}
-.agentModeBadge[data-mode="approve"] {
-  background: color-mix(in srgb, var(--warning) 15%, transparent);
-  color: var(--warning); border-color: color-mix(in srgb, var(--warning) 30%, transparent);
-}
-.agentModeBadge[data-mode="never"] {
-  background: color-mix(in srgb, var(--text-muted) 15%, transparent);
-  color: var(--text-muted); border-color: color-mix(in srgb, var(--text-muted) 30%, transparent);
-}
-
 /* Scope type checkboxes in edit form */
 .scopeCheckboxRow { display: flex; gap: 8px; }
 .scopeCheckbox {
@@ -213,15 +188,3 @@
 .scopeCheckbox[data-active="true"] .scopeCheckboxMark { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 20%, transparent); }
 .scopeCheckboxLabel { display: block; font-size: 12px; font-weight: 600; color: var(--text-primary); text-transform: none; letter-spacing: 0; }
 .scopeCheckboxDesc  { display: block; font-size: 11px; color: var(--text-muted); text-transform: none; letter-spacing: 0; font-weight: 400; }
-
-/* Scope badges on tool list rows */
-.toolScopeBadges { display: flex; gap: 4px; margin-bottom: 3px; }
-.scopeBadge {
-  font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 3px;
-  text-transform: uppercase; letter-spacing: 0.04em;
-  background: color-mix(in srgb, var(--text-muted) 12%, transparent);
-  color: var(--text-muted); border: 1px solid color-mix(in srgb, var(--text-muted) 25%, transparent);
-}
-.scopeBadge[data-scope="web"]    { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); border-color: color-mix(in srgb, var(--accent) 25%, transparent); }
-.scopeBadge[data-scope="ip"]     { color: #60a5fa; background: color-mix(in srgb, #60a5fa 12%, transparent); border-color: color-mix(in srgb, #60a5fa 25%, transparent); }
-.scopeBadge[data-scope="domain"] { color: #c084fc; background: color-mix(in srgb, #c084fc 12%, transparent); border-color: color-mix(in srgb, #c084fc 25%, transparent); }
