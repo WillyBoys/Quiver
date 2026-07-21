@@ -1,7 +1,7 @@
 import logging
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, update as sa_update
 from datetime import datetime, timezone
 from app.db.database import get_db
 from app.models.campaign import ApprovalRequest, Campaign
@@ -33,9 +33,17 @@ async def pending_count(db: AsyncSession = Depends(get_db)):
 
 @router.post("/{approval_id}/approve")
 async def approve(approval_id: str, db: AsyncSession = Depends(get_db)):
-    approval = await _get_or_404(approval_id, db)
-    if approval.status != "pending":
-        raise HTTPException(status_code=400, detail=f"Request is already {approval.status}")
+    # Atomic compare-and-swap: only update status if it's still "pending"
+    result = await db.execute(
+        sa_update(ApprovalRequest)
+        .where(ApprovalRequest.id == approval_id, ApprovalRequest.status == "pending")
+        .values(status="processing")
+    )
+    await db.commit()
+    if result.rowcount == 0:
+        # Either not found or already processed — distinguish for a clean error
+        approval = await _get_or_404(approval_id, db)
+        raise HTTPException(status_code=409, detail=f"Approval already processed (status: {approval.status})")
     success = await execute_approval(approval_id)
     if not success:
         raise HTTPException(status_code=500, detail="Failed to execute approved action")

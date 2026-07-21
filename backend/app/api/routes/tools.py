@@ -1,3 +1,4 @@
+import re
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -9,6 +10,17 @@ from typing import Optional
 import shutil
 
 router = APIRouter()
+
+_SAFE_BINARY_RE = re.compile(r'^[\w./\-]+$')
+
+
+def _validate_binary(binary: str) -> str:
+    if not _SAFE_BINARY_RE.match(binary):
+        raise HTTPException(
+            status_code=422,
+            detail="binary may only contain alphanumeric characters, dashes, underscores, slashes, and dots"
+        )
+    return binary
 
 
 def _normalize_param(p: dict) -> dict:
@@ -67,6 +79,7 @@ async def get_tool(tool_id: str, db: AsyncSession = Depends(get_db)):
 
 @router.post("/", status_code=201)
 async def create_tool(body: ToolCreate, db: AsyncSession = Depends(get_db)):
+    _validate_binary(body.binary)
     tool = Tool(
         name=body.name,
         description=body.description,
@@ -87,6 +100,7 @@ async def create_tool(body: ToolCreate, db: AsyncSession = Depends(get_db)):
 
 @router.put("/{tool_id}")
 async def update_tool(tool_id: str, body: ToolUpdate, db: AsyncSession = Depends(get_db)):
+    _validate_binary(body.binary)
     tool = await _get_or_404(tool_id, db)
     tool.name = body.name
     tool.description = body.description

@@ -19,14 +19,14 @@ services:
       - WORDLISTS_DIR=/wordlists
       - OLLAMA_URL=http://ai:11434
       - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:7b}
-      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      # Signal only — backend checks if truthy to route to bridge; actual token lives in claude-bridge only
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:+configured}
       - CLAUDE_MODEL=${CLAUDE_MODEL:-claude-haiku-4-5-20251001}
       - CLAUDE_BRIDGE_URL=http://claude-bridge:3001
       - SHANNON_URL=http://shannon-web:4000
       - SHANNON_ADMIN_EMAIL=${SHANNON_ADMIN_EMAIL:-admin@localhost}
       - SHANNON_ADMIN_PASSWORD=${SHANNON_ADMIN_PASSWORD:-admin}
-    privileged: true
     networks:
       - quiver_net
     restart: unless-stopped

@@ -33,7 +33,7 @@ async def generate(prompt: str, provider: str = "local") -> tuple[str, str]:
 
 async def generate_report(prompt: str, provider: str = "claude") -> str:
     """Generate a long-form narrative report. Prefers Claude for quality."""
-    if provider == "claude" or CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY:
+    if provider == "claude" and (CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY):
         if CLAUDE_CODE_OAUTH_TOKEN:
             return await _call_claude_bridge(prompt)
         if ANTHROPIC_API_KEY:

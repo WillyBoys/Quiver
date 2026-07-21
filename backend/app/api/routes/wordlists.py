@@ -1,3 +1,4 @@
+import asyncio
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 import os
@@ -21,34 +22,43 @@ class WordlistCreate(BaseModel):
     content: str
 
 
+async def _walk_wordlists(well_known_paths: list, custom_dir: str) -> list:
+    """Walk wordlist directories off the event loop to avoid blocking on large SecLists installs."""
+    loop = asyncio.get_event_loop()
+
+    def _sync_walk() -> list:
+        wordlists = []
+        seen = set()
+        for base_dir in well_known_paths:
+            if not os.path.isdir(base_dir):
+                continue
+            for root, dirs, files in os.walk(base_dir):
+                # Skip hidden dirs
+                dirs[:] = [d for d in dirs if not d.startswith(".")]
+                for fname in files:
+                    if fname.endswith((".txt", ".lst", ".dict")):
+                        full_path = os.path.join(root, fname)
+                        if full_path not in seen:
+                            seen.add(full_path)
+                            size = os.path.getsize(full_path)
+                            wordlists.append({
+                                "path": full_path,
+                                "name": fname,
+                                "directory": os.path.relpath(root, base_dir),
+                                "base": base_dir,
+                                "size_bytes": size,
+                                "size_human": _human_size(size),
+                                "custom": base_dir == custom_dir,
+                            })
+        return wordlists
+
+    return await loop.run_in_executor(None, _sync_walk)
+
+
 @router.get("/")
 async def list_wordlists():
     """Return all wordlist files found across known locations."""
-    wordlists = []
-    seen = set()
-
-    for base_dir in WELL_KNOWN_PATHS:
-        if not os.path.isdir(base_dir):
-            continue
-        for root, dirs, files in os.walk(base_dir):
-            # Skip hidden dirs
-            dirs[:] = [d for d in dirs if not d.startswith(".")]
-            for fname in files:
-                if fname.endswith((".txt", ".lst", ".dict")):
-                    full_path = os.path.join(root, fname)
-                    if full_path not in seen:
-                        seen.add(full_path)
-                        size = os.path.getsize(full_path)
-                        wordlists.append({
-                            "path": full_path,
-                            "name": fname,
-                            "directory": os.path.relpath(root, base_dir),
-                            "base": base_dir,
-                            "size_bytes": size,
-                            "size_human": _human_size(size),
-                            "custom": base_dir == CUSTOM_WORDLISTS_DIR,
-                        })
-
+    wordlists = await _walk_wordlists(WELL_KNOWN_PATHS, CUSTOM_WORDLISTS_DIR)
     return sorted(wordlists, key=lambda w: w["path"])
 
 

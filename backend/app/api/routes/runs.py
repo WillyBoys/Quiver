@@ -1,5 +1,6 @@
 import logging
-from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
+import shlex
+from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.db.database import get_db, AsyncSessionLocal
@@ -42,7 +43,7 @@ async def list_runs(session_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/all")
-async def list_all_runs(limit: int = 500, db: AsyncSession = Depends(get_db)):
+async def list_all_runs(limit: int = Query(default=500, ge=1, le=10000), db: AsyncSession = Depends(get_db)):
     """All runs across every session, newest first, with session name included."""
     stmt = (
         select(Run, EngagementSession.name.label("session_name"))
@@ -71,7 +72,8 @@ async def create_run(body: RunCreate, db: AsyncSession = Depends(get_db)):
         tool = result.scalar_one_or_none()
         if not tool:
             raise HTTPException(status_code=404, detail="Tool not found")
-        command = build_command(tool, body.param_values, body.extra_flags or "")
+        cmd_list = build_command(tool, body.param_values, body.extra_flags or "")
+        command = " ".join(cmd_list)
         tool_id = tool.id
         tool_name = tool.name
     elif body.command:
@@ -147,7 +149,16 @@ async def execute_run(websocket: WebSocket, run_id: str):
             await db.commit()
             _run_buffers[run_id] = []
             _run_done_events[run_id] = asyncio.Event()
-            asyncio.create_task(execute_run_background(run_id, run.command, run.session_id, run.tool_name))
+            # Reconstruct a safe argument list. Shell/manual runs wrap in bash -c to
+            # preserve pipes/redirects; tool runs re-split the stored command string.
+            if run.tool_id == "shell":
+                run_cmd_list = ["bash", "-c", run.command]
+            else:
+                try:
+                    run_cmd_list = shlex.split(run.command)
+                except ValueError:
+                    run_cmd_list = run.command.split()
+            asyncio.create_task(execute_run_background(run_id, run_cmd_list, run.session_id, run.tool_name))
             await websocket.send_json({"type": "command", "data": run.command})
             await websocket.send_json({
                 "type": "start",

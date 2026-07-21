@@ -49,6 +49,7 @@ export default function SessionDetailPage() {
   const [campaign, setCampaign] = useState(null);
   const [agentSidebarView, setAgentSidebarView] = useState("reasoning"); // "reasoning" | "tools" | "checklist"
   const connectedRunIds = useRef(new Set());
+  const openSocketsRef = useRef([]);
   const [showAgentSetup, setShowAgentSetup] = useState(false);
   const [agentForm, setAgentForm] = useState({ ai_provider: "claude", risk_level: "notify", max_iterations: "50", unlimited: false });
   const [scheduleMode, setScheduleMode] = useState("now"); // "now" | "later"
@@ -107,7 +108,7 @@ export default function SessionDetailPage() {
         setLiveOutput((o) => ({ ...o, [run.id]: "" }));
         setStreaming((s) => ({ ...s, [run.id]: true }));
         setOpenTabs((t) => (t.includes(run.id) ? t : [...t, run.id]));
-        createRunSocket(run.id, {
+        const ws1 = createRunSocket(run.id, {
           onOutput: (line) => setLiveOutput((o) => ({ ...o, [run.id]: (o[run.id] || "") + line })),
           onDone: (msg) => {
             setStreaming((s) => ({ ...s, [run.id]: false }));
@@ -118,6 +119,7 @@ export default function SessionDetailPage() {
             setLiveOutput((o) => ({ ...o, [run.id]: (o[run.id] || "") + `\n[ERROR] ${err}` }));
           },
         });
+        openSocketsRef.current.push(ws1);
       }
     });
   }, [sessionId]);
@@ -137,7 +139,7 @@ export default function SessionDetailPage() {
         setStreaming((s) => ({ ...s, [run.id]: true }));
         setOpenTabs((t) => (t.includes(run.id) ? t : [...t, run.id]));
         setActiveRunId(run.id);
-        createRunSocket(run.id, {
+        const ws2 = createRunSocket(run.id, {
           onOutput: (line) => setLiveOutput((o) => ({ ...o, [run.id]: (o[run.id] || "") + line })),
           onDone: (msg) => {
             setStreaming((s) => ({ ...s, [run.id]: false }));
@@ -148,6 +150,7 @@ export default function SessionDetailPage() {
             setLiveOutput((o) => ({ ...o, [run.id]: (o[run.id] || "") + `\n[ERROR] ${err}` }));
           },
         });
+        openSocketsRef.current.push(ws2);
       }
     }
 
@@ -162,7 +165,11 @@ export default function SessionDetailPage() {
         setSession((prev) => prev ? { ...prev, findings: fresh.findings, checklist_state: fresh.checklist_state } : prev);
       });
     }, 4000);
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      openSocketsRef.current.forEach(ws => { try { ws.close(); } catch {} });
+      openSocketsRef.current = [];
+    };
   }, [session?.campaign_id, sessionId]);
 
 
@@ -198,7 +205,7 @@ export default function SessionDetailPage() {
     setLiveOutput((o) => ({ ...o, [run.id]: "" }));
     setStreaming((s) => ({ ...s, [run.id]: true }));
 
-    createRunSocket(run.id, {
+    const ws3 = createRunSocket(run.id, {
       onOutput: (line) => setLiveOutput((o) => ({ ...o, [run.id]: (o[run.id] || "") + line })),
       onDone: (msg) => {
         setStreaming((s) => ({ ...s, [run.id]: false }));
@@ -211,6 +218,7 @@ export default function SessionDetailPage() {
         setLiveOutput((o) => ({ ...o, [run.id]: (o[run.id] || "") + `\n[ERROR] ${err}` }));
       },
     });
+    openSocketsRef.current.push(ws3);
   }
 
   function stageTool(tool) {
@@ -239,7 +247,7 @@ export default function SessionDetailPage() {
     setActiveRunId(run.id);
     setLiveOutput((o) => ({ ...o, [run.id]: "" }));
     setStreaming((s) => ({ ...s, [run.id]: true }));
-    createRunSocket(run.id, {
+    const ws4 = createRunSocket(run.id, {
       onOutput: (line) => setLiveOutput((o) => ({ ...o, [run.id]: (o[run.id] || "") + line })),
       onDone: (msg) => {
         setStreaming((s) => ({ ...s, [run.id]: false }));
@@ -250,6 +258,7 @@ export default function SessionDetailPage() {
         setLiveOutput((o) => ({ ...o, [run.id]: (o[run.id] || "") + `\n[ERROR] ${err}` }));
       },
     });
+    openSocketsRef.current.push(ws4);
   }
 
   async function killActiveRun() {
@@ -325,7 +334,7 @@ export default function SessionDetailPage() {
     setNotesSaved(false);
     clearTimeout(notesTimerRef.current);
     notesTimerRef.current = setTimeout(async () => {
-      await api.sessions.update(sessionId, { ...session, notes: val });
+      await api.sessions.patchNotes(sessionId, val);
       setNotesSaved(true);
     }, 800);
   }
@@ -612,7 +621,7 @@ export default function SessionDetailPage() {
                   onChange={(e) => setAgentForm({ ...agentForm, risk_level: e.target.value })}>
                   <option value="auto">Auto Only — passive recon runs freely</option>
                   <option value="notify">Moderate — active scanning runs freely</option>
-                  <option value="approve">Full Auto — all actions without approval</option>
+                  <option value="approve">Approve All — every action requires human sign-off before execution</option>
                 </select>
               </label>
               {(() => {
@@ -704,7 +713,7 @@ export default function SessionDetailPage() {
       {/* Top bar */}
       <div className={styles.topBar}>
         <button className="btn btn-ghost" style={{ padding: "4px 10px" }} onClick={() => navigate(trackPath)}>
-          <ArrowLeft size={14} /> {session.engagement_type === "internal" ? "Internal" : "External"}
+          <ArrowLeft size={14} /> {session.engagement_type === "internal" ? "Internal" : session.engagement_type === "web" ? "Web App" : "External"}
         </button>
         <div className={styles.sessionInfo}>
           <div className={styles.sessionNameRow}>
@@ -866,7 +875,7 @@ export default function SessionDetailPage() {
                 const isRunStreaming = streaming[run.id] || false;
                 const displayStatus = isRunStreaming ? "running" : run.status;
                 const regularRuns = arr.filter(r => r.tool_name !== "_summary");
-                const stepNum = regularRuns.length - regularRuns.indexOf(run);
+                const stepNum = regularRuns.indexOf(run) + 1;
                 return (
                   <div key={run.id} className={styles.reasoningBlock}>
                     <div className={styles.reasoningEntry}>
@@ -1294,8 +1303,8 @@ export default function SessionDetailPage() {
 
       {/* Wordlist picker modal */}
       {wordlistPicker && (
-        <div className={styles.modal}>
-          <div className={styles.pickerBox}>
+        <div className={styles.modal} onClick={() => setWordlistPicker(null)}>
+          <div className={styles.pickerBox} onClick={(e) => e.stopPropagation()}>
             <div className={styles.pickerHeader}>
               <h2 className={styles.modalTitle}>Select Wordlist</h2>
               <button className={styles.delBtn} onClick={() => setWordlistPicker(null)}>

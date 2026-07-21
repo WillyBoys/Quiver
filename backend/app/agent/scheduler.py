@@ -41,6 +41,10 @@ async def start_scheduler() -> None:
 
 def _is_datetime_schedule(s: str) -> bool:
     """True when s looks like an ISO 8601 datetime rather than a cron expression."""
+    # A cron expression has exactly 5 space-separated tokens
+    if len(s.strip().split()) == 5:
+        return False
+    # ISO 8601 datetimes contain "T" and multiple dashes
     return "T" in s or (s.count("-") >= 2 and s.count(" ") < 4)
 
 

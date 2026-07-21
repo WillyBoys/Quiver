@@ -54,7 +54,7 @@ Deep authenticated web application testing via Shannon — a purpose-built multi
 - Comprehensive markdown deliverables per agent
 - Optional source code analysis when repo access is available
 
-**Status:** Integration planned. Shannon runs as a Docker container per scan. Quiver will trigger Shannon scans, track progress, and import findings into the session/findings layer.
+**Status:** Integration built. Shannon runs as Docker services in the same compose stack. Quiver triggers Shannon scans, tracks their progress, and provides a UI for viewing deliverables. Structured finding import into the Quiver session layer is in progress.
 
 ---
 
@@ -63,22 +63,26 @@ Deep authenticated web application testing via Shannon — a purpose-built multi
 This is what differentiates Quiver from running Shannon and a network scanner in separate terminals. It makes Quiver a platform rather than a collection of tools.
 
 ### Built
-- **Campaigns** — scoped AI agent runs with configurable providers (Claude, local LLM)
-- **Human approval gates** — agent pauses for dangerous commands; resume on approval
+- **Campaigns** — scoped AI agent runs with configurable providers (Claude API, Claude Code OAuth, local LLM)
+- **Human approval gates** — agent pauses for dangerous commands; resume on approval; full approval history
 - **Session management** — one session per engagement; tracks target, scope, notes, status
-- **Findings tracker** — log findings with severity; attach tool runs as evidence
+- **Findings tracker** — log findings with severity; attach tool runs as evidence; agent deduplicates and updates existing findings; attack chain step numbering
 - **Engagement checklists** — phase-based checklist per engagement type
-- **Tool registry** — 30+ built-in tools; add custom tools via UI or config
-- **Activity log** — full audit trail of every command run, timestamped
-- **Scheduled campaigns** — cron-based recurring assessments
+- **Tool registry** — 33 built-in tools; add custom tools via UI or config; per-tool agent mode (Auto/Approve/Never)
+- **Activity log** — full audit trail of every command run, timestamped; searchable, exportable
+- **Scheduled campaigns** — cron-based recurring assessments and one-shot datetime triggers
+- **Shannon integration** — Shannon runs as Docker services in the same compose stack; Quiver UI exposes scan management, progress tracking, and deliverable viewing
+- **Report generation** — one-click Markdown export; AI-assisted client-ready report draft via Claude
+- **claude-bridge** — Node.js sidecar enabling Claude Code OAuth auth path without exposing the token to the backend
 
 ### In Progress / Planned
-- **Shannon integration** — trigger a Shannon web app scan from a Quiver campaign; import findings
-- **Internal campaign tuning** — prompt and context improvements for AD/lateral movement reasoning
-- **Finding management** — review, edit, severity rating, evidence attachment, consultant notes
-- **Report generation** — auto-draft a client-ready report from structured findings (Shannon deliverables + Quiver network findings)
+- **Internal campaign tuning** — prompt and context improvements for AD/lateral movement reasoning; tools are present but agent prompting needs refinement for post-compromise context
+- **Shannon finding import** — structured import of Shannon deliverables into Quiver session findings layer
 - **Client/project management** — track multiple clients and engagements, status at a glance
 - **Remediation retesting** — store original PoC; rerun to verify fix after client remediation
+
+### Longer-Term
+- **Web app scanner replacement** — Shannon is the current web application testing integration but is externally managed and not open source. The plan is to replace it with an open-source alternative when a suitable one is identified. The integration boundary is clean (isolated Docker services, a single backend route file, one frontend page) so the swap will not touch the rest of the platform.
 
 ---
 

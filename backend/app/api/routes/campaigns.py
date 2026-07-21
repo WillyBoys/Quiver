@@ -121,6 +121,8 @@ async def trigger_campaign(
     campaign = await _get_or_404(campaign_id, db)
     if campaign.status == "completed":
         raise HTTPException(status_code=400, detail="Campaign has already completed")
+    if campaign.status == "active":
+        raise HTTPException(status_code=409, detail="Campaign is already running")
     # Ensure campaign is active before running (handles paused campaigns resumed manually)
     if campaign.status not in ("active", "awaiting_approval"):
         campaign.status = "active"

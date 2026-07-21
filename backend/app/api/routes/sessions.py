@@ -34,9 +34,13 @@ class SessionCreate(BaseModel):
 
 class SessionUpdate(SessionCreate):
     status: Optional[str] = "active"
-    findings: Optional[list[Finding]] = []
+    findings: Optional[list[Finding]] = None
     targets: Optional[list] = None
     campaign_id: Optional[str] = None
+
+
+class NotesUpdate(BaseModel):
+    notes: str
 
 
 class ChecklistUpdate(BaseModel):
@@ -101,6 +105,14 @@ async def update_session(session_id: str, body: SessionUpdate, db: AsyncSession 
         session.targets = body.targets
     await db.commit()
     return _session_dict(session)
+
+
+@router.patch("/{session_id}/notes")
+async def update_notes(session_id: str, body: NotesUpdate, db: AsyncSession = Depends(get_db)):
+    session = await _get_or_404(session_id, db)
+    session.notes = body.notes
+    await db.commit()
+    return {"notes": session.notes}
 
 
 @router.patch("/{session_id}/targets")

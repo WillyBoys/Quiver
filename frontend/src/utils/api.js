@@ -29,6 +29,10 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ targets }),
     }),
+    patchNotes: (id, notes) => req(`/sessions/${id}/notes`, {
+      method: "PATCH",
+      body: JSON.stringify({ notes }),
+    }),
     exportReport: async (id, sessionName) => {
       const res = await fetch(`${BASE}/sessions/${id}/report.md`);
       if (!res.ok) throw new Error("Export failed");
@@ -118,6 +122,15 @@ export function createRunSocket(runId, { onCommand, onOutput, onDone, onError })
   };
 
   ws.onerror = () => onError?.("WebSocket connection failed");
+
+  // If the server closes the socket without sending a "done" event (restart,
+  // crash, network drop), synthesise a terminal event so the caller doesn't
+  // leave the run stuck in a "streaming" state forever.
+  ws.onclose = (e) => {
+    if (e.code !== 1000) {
+      onError?.(`Connection closed unexpectedly (code ${e.code})`);
+    }
+  };
 
   return ws;
 }

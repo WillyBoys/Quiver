@@ -1,9 +1,13 @@
+import logging
+
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.pool import NullPool
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 import os
+
+logger = logging.getLogger(__name__)
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:////data/pentest.db")
 # Convert sqlite:// to sqlite+aiosqlite://
@@ -30,32 +34,44 @@ async def init_db():
         # Migrate: add checklist_state to existing sessions tables that pre-date this column
         try:
             await conn.execute(text("ALTER TABLE sessions ADD COLUMN checklist_state JSON DEFAULT '{}'"))
-        except OperationalError:
-            pass  # column already exists
+        except OperationalError as e:
+            if "duplicate column" not in str(e).lower() and "already exists" not in str(e).lower():
+                logger.warning("Migration warning: %s", e)
         try:
             await conn.execute(text("ALTER TABLE sessions ADD COLUMN targets JSON DEFAULT '[]'"))
-        except OperationalError:
-            pass  # column already exists
+        except OperationalError as e:
+            if "duplicate column" not in str(e).lower() and "already exists" not in str(e).lower():
+                logger.warning("Migration warning: %s", e)
         try:
             await conn.execute(text("ALTER TABLE runs ADD COLUMN reasoning TEXT DEFAULT ''"))
-        except OperationalError:
-            pass  # column already exists
+        except OperationalError as e:
+            if "duplicate column" not in str(e).lower() and "already exists" not in str(e).lower():
+                logger.warning("Migration warning: %s", e)
         try:
             await conn.execute(text("ALTER TABLE campaigns ADD COLUMN last_agent_reasoning TEXT DEFAULT ''"))
-        except OperationalError:
-            pass  # column already exists
+        except OperationalError as e:
+            if "duplicate column" not in str(e).lower() and "already exists" not in str(e).lower():
+                logger.warning("Migration warning: %s", e)
         try:
             await conn.execute(text("ALTER TABLE campaigns ADD COLUMN ai_provider TEXT DEFAULT 'local'"))
-        except OperationalError:
-            pass  # column already exists
+        except OperationalError as e:
+            if "duplicate column" not in str(e).lower() and "already exists" not in str(e).lower():
+                logger.warning("Migration warning: %s", e)
         try:
             await conn.execute(text("ALTER TABLE sessions ADD COLUMN campaign_id TEXT DEFAULT NULL"))
-        except OperationalError:
-            pass  # column already exists
+        except OperationalError as e:
+            if "duplicate column" not in str(e).lower() and "already exists" not in str(e).lower():
+                logger.warning("Migration warning: %s", e)
         try:
             await conn.execute(text("ALTER TABLE campaigns ADD COLUMN max_iterations INTEGER DEFAULT NULL"))
-        except OperationalError:
-            pass  # column already exists
+        except OperationalError as e:
+            if "duplicate column" not in str(e).lower() and "already exists" not in str(e).lower():
+                logger.warning("Migration warning: %s", e)
+        try:
+            await conn.execute(text("ALTER TABLE campaigns ADD COLUMN iteration_count INTEGER NOT NULL DEFAULT 0"))
+        except OperationalError as e:
+            if "duplicate column" not in str(e).lower() and "already exists" not in str(e).lower():
+                logger.warning("Migration warning: %s", e)
 
 
 async def get_db() -> AsyncSession:

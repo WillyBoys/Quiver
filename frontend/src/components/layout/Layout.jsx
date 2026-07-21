@@ -1,6 +1,6 @@
 import { NavLink } from "react-router-dom";
 import { useEffect, useState } from "react";
-import { Shield, Github, Clock, ShieldAlert, Globe, Network, Building2, Wrench } from "lucide-react";
+import { Github, Clock, ShieldAlert, Globe, Network, Building2, Wrench } from "lucide-react";
 import { api } from "../../utils/api.js";
 import styles from "./Layout.module.css";
 

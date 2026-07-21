@@ -162,6 +162,7 @@ async def build_agent_prompt(campaign: Campaign, db: AsyncSession) -> str:
 
     # Resolve engagement type from the linked session
     engagement_type = "external"
+    sess = None
     if campaign.session_id:
         sess_res = await db.execute(
             select(EngagementSession).where(EngagementSession.id == campaign.session_id)
@@ -175,6 +176,9 @@ async def build_agent_prompt(campaign: Campaign, db: AsyncSession) -> str:
 
     scope = campaign.target_scope or []
     kind = _classify_scope(scope)
+    # If engagement is explicitly web but scope has no scheme, trust the engagement type
+    if engagement_type == "web" and kind == "domain":
+        kind = "web"
     primary = _primary_target(scope, kind)
 
     scope_str = "\n".join(f"  - {s}" for s in scope)

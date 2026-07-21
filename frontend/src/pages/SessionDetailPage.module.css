@@ -13,26 +13,7 @@
 .sessionNameRow { display: flex; align-items: center; gap: 8px; }
 .sessionName { font-size: 15px; font-weight: 600; }
 
-.agentStatusTag {
-  display: inline-flex; align-items: center; gap: 5px;
-  font-size: 10px; font-weight: 700; letter-spacing: 0.05em;
-  text-transform: uppercase; padding: 2px 8px; border-radius: 20px;
-  border: 1px solid currentColor;
-}
-.agentStatus_active  { color: #4ade80; background: rgba(74,222,128,0.10); }
-.agentStatus_paused  { color: #94a3b8; background: rgba(148,163,184,0.10); }
-.agentStatus_completed { color: #60a5fa; background: rgba(96,165,250,0.10); }
-.agentStatus_awaiting_approval { color: #fbbf24; background: rgba(251,191,36,0.10); }
 
-.agentStatusDot {
-  width: 6px; height: 6px; border-radius: 50%;
-  background: #4ade80;
-  animation: agentPulse 1.4s ease-in-out infinite;
-}
-@keyframes agentPulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.3; }
-}
 .target { font-family: var(--font-mono); font-size: 12px; color: var(--accent); margin-left: 10px; }
 
 /* AI agent strip — sits between top bar and target bar */
@@ -375,29 +356,7 @@
   background: var(--bg-surface);
 }
 
-/* ── Agent session: reasoning terminal (left panel) ── */
-.reasoningTerminal {
-  display: flex; flex-direction: column; flex: 1; overflow: hidden;
-  background: var(--bg-panel);
-}
-
-.reasoningHeader {
-  display: flex; align-items: center; gap: 6px;
-  padding: 8px 12px;
-  background: var(--bg-elevated);
-  border-bottom: 1px solid var(--border);
-  font-size: 10px; font-weight: 700; text-transform: uppercase;
-  letter-spacing: 0.08em; color: var(--accent);
-  font-family: var(--font-mono); flex-shrink: 0;
-}
-
-.reasoningLive {
-  margin-left: auto; color: #22c55e; font-size: 10px;
-  animation: pulse 1.2s ease-in-out infinite;
-}
-
-@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
-
+/* ── Agent session: reasoning feed (left panel) ── */
 .reasoningFeed {
   flex: 1; overflow-y: auto; padding: 10px 0;
   display: flex; flex-direction: column; gap: 0;
@@ -532,14 +491,6 @@
   display: block; margin-bottom: 4px;
 }
 
-.reasoningRaw {
-  font-family: var(--font-mono); font-size: 9px;
-  color: var(--text-muted); white-space: pre-wrap; word-break: break-all;
-  background: var(--bg-base); padding: 5px 7px;
-  border-radius: 3px; border: 1px dashed var(--border);
-  margin: 2px 0; max-height: 120px; overflow-y: auto;
-  line-height: 1.45;
-}
 
 .reasoningCmd {
   font-family: var(--font-mono); font-size: 10px;
@@ -549,22 +500,6 @@
   border: 1px solid var(--border);
 }
 
-/* ── Campaign banner in right panel ── */
-.campaignBanner {
-  display: flex; align-items: center; gap: 6px;
-  padding: 8px 12px;
-  background: var(--accent-glow);
-  border-bottom: 1px solid var(--accent-dim);
-  font-size: 11px; color: var(--accent); font-weight: 600;
-  flex-shrink: 0;
-}
-
-.campaignBannerLink {
-  margin-left: auto; font-size: 10px; color: var(--text-muted);
-  background: none; border: none; cursor: pointer;
-  text-decoration: underline;
-}
-.campaignBannerLink:hover { color: var(--text-primary); }
 
 /* Notes section */
 .notesSection {

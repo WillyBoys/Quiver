@@ -7,6 +7,9 @@ const TIMEOUT_MS = 300_000; // 5 min — long enough for large report generation
 
 function callClaude(prompt) {
     return new Promise((resolve, reject) => {
+        let settled = false;
+        const finish = (fn) => (...args) => { if (!settled) { settled = true; fn(...args); } };
+
         const proc = spawn(
             'claude',
             ['--print', '--model', MODEL, '--output-format', 'text'],
@@ -25,18 +28,18 @@ function callClaude(prompt) {
 
         const timer = setTimeout(() => {
             proc.kill('SIGTERM');
-            reject(new Error(`Claude CLI timed out after ${TIMEOUT_MS / 1000}s`));
+            finish(reject)(new Error(`Claude CLI timed out after ${TIMEOUT_MS / 1000}s`));
         }, TIMEOUT_MS);
 
         proc.on('close', code => {
             clearTimeout(timer);
             if (code === 0) {
-                resolve(stdout.trim());
+                finish(resolve)(stdout.trim());
             } else {
                 const detail = stderr.trim().slice(0, 400) || `exit code ${code}`;
                 const err = new Error(detail);
                 err.isAuth = /auth|oauth|token|401|403|unauthorized|credential|login/i.test(detail);
-                reject(err);
+                finish(reject)(err);
             }
         });
 
@@ -45,7 +48,7 @@ function callClaude(prompt) {
             if (err.code === 'ENOENT') {
                 err.message = '`claude` binary not found — was @anthropic-ai/claude-code installed correctly?';
             }
-            reject(err);
+            finish(reject)(err);
         });
     });
 }
@@ -61,11 +64,17 @@ const server = http.createServer(async (req, res) => {
         return res.end(JSON.stringify({ error: 'Not found' }));
     }
 
+    const MAX_BODY_BYTES = 4 * 1024 * 1024; // 4 MB — prompts can be large but not unbounded
     let body;
     try {
         const raw = await new Promise((resolve, reject) => {
             let buf = '';
-            req.on('data', c => { buf += c; });
+            let size = 0;
+            req.on('data', c => {
+                size += c.length;
+                if (size > MAX_BODY_BYTES) { req.destroy(); reject(new Error('Request body too large')); return; }
+                buf += c;
+            });
             req.on('end', () => resolve(buf));
             req.on('error', reject);
         });

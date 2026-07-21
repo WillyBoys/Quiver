@@ -1,5 +1,6 @@
 import json
 import re
+import shlex
 import uuid as _uuid_mod
 import asyncio
 import logging
@@ -22,6 +23,8 @@ from app.execution import (
 )
 
 logger = logging.getLogger(__name__)
+
+_finding_locks: dict[str, asyncio.Lock] = {}
 
 
 def _normalize_host(target: str) -> str:
@@ -172,79 +175,82 @@ async def _save_inline_finding(session_id: str, finding: dict, reasoning: str, r
     chains_from_title = (finding.get("chains_from") or "").strip()
     target_id = (finding.get("id") or "").strip()
 
-    async with AsyncSessionLocal() as db:
-        sess = (await db.execute(
-            select(EngagementSession).where(EngagementSession.id == session_id)
-        )).scalar_one_or_none()
-        if not sess:
-            return
-        existing = list(sess.findings or [])
-
-        # Resolve chains_from title → id
-        chains_from_id = ""
-        if chains_from_title:
-            for f in existing:
-                if f.get("title", "").strip().lower() == chains_from_title.lower():
-                    chains_from_id = f.get("id", "")
-                    break
-
-        # UPDATE path: agent referenced an existing finding by id
-        if target_id:
-            updated = False
-            result = []
-            for f in existing:
-                if f.get("id") == target_id:
-                    ev = list(f.get("evidence_run_ids") or [])
-                    if run_id and run_id not in ev:
-                        ev.append(run_id)
-                    merged_notes = f.get("notes", "")
-                    if new_notes and new_notes not in merged_notes:
-                        merged_notes = (merged_notes + "\n\n" + new_notes).strip()
-                    # Escalate severity if new one is higher
-                    cur_rank = _SEV_RANK.get(f.get("severity", "info"), 0)
-                    new_rank = _SEV_RANK.get(severity, 0)
-                    final_sev = severity if new_rank > cur_rank else f.get("severity", "info")
-                    result.append({**f, "notes": merged_notes, "severity": final_sev,
-                                   "evidence_run_ids": ev, "updated_at": datetime.now(timezone.utc).isoformat()})
-                    updated = True
-                else:
-                    result.append(f)
-            if updated:
-                sess.findings = result
-                await db.commit()
-                logger.info("AGENT | session=%s inline finding updated: [%s] %s", session_id, severity, title)
+    if session_id not in _finding_locks:
+        _finding_locks[session_id] = asyncio.Lock()
+    async with _finding_locks[session_id]:
+        async with AsyncSessionLocal() as db:
+            sess = (await db.execute(
+                select(EngagementSession).where(EngagementSession.id == session_id)
+            )).scalar_one_or_none()
+            if not sess:
                 return
-            # Fall through to create if id didn't match anything
+            existing = list(sess.findings or [])
 
-        # DEDUP check before creating
-        for f in existing:
-            if _title_similar(f.get("title", ""), title):
-                # Add run to evidence of the existing finding silently
-                if run_id:
-                    ev = list(f.get("evidence_run_ids") or [])
-                    if run_id not in ev:
-                        ev.append(run_id)
-                        result = [{**x, "evidence_run_ids": ev} if x.get("id") == f["id"] else x for x in existing]
-                        sess.findings = result
-                        await db.commit()
-                logger.info("AGENT | session=%s inline finding merged into existing: %s", session_id, f["title"])
-                return
+            # Resolve chains_from title → id
+            chains_from_id = ""
+            if chains_from_title:
+                for f in existing:
+                    if f.get("title", "").strip().lower() == chains_from_title.lower():
+                        chains_from_id = f.get("id", "")
+                        break
 
-        # CREATE new finding
-        ev = [run_id] if run_id else []
-        new_finding = {
-            "id": str(_uuid_mod.uuid4()),
-            "title": title,
-            "severity": severity,
-            "notes": new_notes,
-            "evidence_run_ids": ev,
-            "chains_from_id": chains_from_id,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        }
-        sess.findings = existing + [new_finding]
-        await db.commit()
-        logger.info("AGENT | session=%s inline finding saved: [%s] %s", session_id, severity, title)
+            # UPDATE path: agent referenced an existing finding by id
+            if target_id:
+                updated = False
+                result = []
+                for f in existing:
+                    if f.get("id") == target_id:
+                        ev = list(f.get("evidence_run_ids") or [])
+                        if run_id and run_id not in ev:
+                            ev.append(run_id)
+                        merged_notes = f.get("notes", "")
+                        if new_notes and new_notes not in merged_notes:
+                            merged_notes = (merged_notes + "\n\n" + new_notes).strip()
+                        # Escalate severity if new one is higher
+                        cur_rank = _SEV_RANK.get(f.get("severity", "info"), 0)
+                        new_rank = _SEV_RANK.get(severity, 0)
+                        final_sev = severity if new_rank > cur_rank else f.get("severity", "info")
+                        result.append({**f, "notes": merged_notes, "severity": final_sev,
+                                       "evidence_run_ids": ev, "updated_at": datetime.now(timezone.utc).isoformat()})
+                        updated = True
+                    else:
+                        result.append(f)
+                if updated:
+                    sess.findings = result
+                    await db.commit()
+                    logger.info("AGENT | session=%s inline finding updated: [%s] %s", session_id, severity, title)
+                    return
+                # Fall through to create if id didn't match anything
+
+            # DEDUP check before creating
+            for f in existing:
+                if _title_similar(f.get("title", ""), title):
+                    # Add run to evidence of the existing finding silently
+                    if run_id:
+                        ev = list(f.get("evidence_run_ids") or [])
+                        if run_id not in ev:
+                            ev.append(run_id)
+                            result = [{**x, "evidence_run_ids": ev} if x.get("id") == f["id"] else x for x in existing]
+                            sess.findings = result
+                            await db.commit()
+                    logger.info("AGENT | session=%s inline finding merged into existing: %s", session_id, f["title"])
+                    return
+
+            # CREATE new finding
+            ev = [run_id] if run_id else []
+            new_finding = {
+                "id": str(_uuid_mod.uuid4()),
+                "title": title,
+                "severity": severity,
+                "notes": new_notes,
+                "evidence_run_ids": ev,
+                "chains_from_id": chains_from_id,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+            sess.findings = existing + [new_finding]
+            await db.commit()
+            logger.info("AGENT | session=%s inline finding saved: [%s] %s", session_id, severity, title)
 
 
 async def _generate_and_save_summary(campaign_id: str, session_id: str, provider: str) -> None:
@@ -368,15 +374,19 @@ async def _attempt_fix(campaign: Campaign, failed_run: Run, tool, provider: str)
         retry_tool = tool_result.scalars().first() or tool
 
         if retry_tool and retry_tool.binary == "bash":
-            command = extra_flags or failed_run.command
+            bash_cmd = extra_flags or failed_run.command
+            cmd_list = ["bash", "-c", bash_cmd]
+            command = bash_cmd
         elif retry_tool:
             param_values = _build_param_values(retry_tool, target, parameters)
-            command = build_command(retry_tool, param_values, extra_flags=extra_flags)
+            cmd_list = build_command(retry_tool, param_values, extra_flags=extra_flags)
+            command = " ".join(cmd_list)
         else:
             cmd_parts = [tool_name, _normalize_host(target)]
             if extra_flags:
                 cmd_parts.append(extra_flags)
-            command = " ".join(cmd_parts)
+            cmd_list = cmd_parts
+            command = " ".join(cmd_list)
 
         # Don't retry with the exact same command — that would just fail again
         if command == failed_run.command:
@@ -405,7 +415,7 @@ async def _attempt_fix(campaign: Campaign, failed_run: Run, tool, provider: str)
 
     logger.info("AGENT RETRY | campaign=%s executing fix: %s", campaign.id, command)
     task = asyncio.create_task(
-        execute_run_background(run_id, command, session_id, tool_name)
+        execute_run_background(run_id, cmd_list, session_id, tool_name)
     )
     try:
         await asyncio.wait_for(_run_done_events[run_id].wait(), timeout=2820.0)
@@ -501,12 +511,8 @@ async def run_campaign_agent(campaign_id: str) -> str:
         # Pre-generate run_id so the finding can reference it as evidence
         pregenerated_run_id = str(_uuid_mod.uuid4())
 
-        # If the agent flagged a finding, persist it immediately (with the run as evidence)
+        # If the agent flagged a finding, persist it after scope/target validation
         inline_finding = action.get("finding")
-        if inline_finding and isinstance(inline_finding, dict) and campaign.session_id:
-            asyncio.create_task(
-                _save_inline_finding(campaign.session_id, inline_finding, reasoning, pregenerated_run_id)
-            )
 
         if not tool_name or not target:
             logger.error("AGENT | campaign=%s action missing tool_name or target", campaign_id)
@@ -515,6 +521,11 @@ async def run_campaign_agent(campaign_id: str) -> str:
         if not is_in_scope(target, campaign.target_scope or []):
             logger.warning("AGENT | campaign=%s scope violation: %s", campaign_id, target)
             return "scope_violation"
+
+        if inline_finding and isinstance(inline_finding, dict) and campaign.session_id:
+            asyncio.create_task(
+                _save_inline_finding(campaign.session_id, inline_finding, reasoning, pregenerated_run_id)
+            )
 
         # Look up tool — binary name first (LLM is told to use binary names),
         # then fall back to full name match
@@ -538,16 +549,19 @@ async def run_campaign_agent(campaign_id: str) -> str:
             if not extra_flags:
                 logger.error("AGENT | campaign=%s bash tool chosen but extra_flags is empty", campaign_id)
                 return "invalid_action"
+            cmd_list = ["bash", "-c", extra_flags]
             command = extra_flags
         elif tool:
             param_values = _build_param_values(tool, target, parameters)
-            command = build_command(tool, param_values, extra_flags=extra_flags)
+            cmd_list = build_command(tool, param_values, extra_flags=extra_flags)
+            command = " ".join(cmd_list)
         else:
             # Unknown tool — run binary directly against a clean target
             cmd_parts = [tool_name, _normalize_host(target)]
             if extra_flags:
                 cmd_parts.append(extra_flags)
-            command = " ".join(cmd_parts)
+            cmd_list = cmd_parts
+            command = " ".join(cmd_list)
 
         # Hard duplicate guard: block re-running a command that already completed successfully.
         # Failed/errored runs are allowed to be retried.
@@ -618,7 +632,7 @@ async def run_campaign_agent(campaign_id: str) -> str:
 
     logger.info("AGENT | campaign=%s executing: %s", campaign_id, command)
     task = asyncio.create_task(
-        execute_run_background(run_id, command, session_id, tool_name)
+        execute_run_background(run_id, cmd_list, session_id, tool_name)
     )
     try:
         await asyncio.wait_for(_run_done_events[run_id].wait(), timeout=2820.0)
@@ -669,6 +683,9 @@ async def run_campaign_loop(campaign_id: str) -> None:
         async with AsyncSessionLocal() as db:
             result = await db.execute(select(Campaign).where(Campaign.id == campaign_id))
             campaign = result.scalar_one_or_none()
+            if campaign and campaign.status == "active":
+                campaign.iteration_count = (campaign.iteration_count or 0) + 1
+                await db.commit()
         if not campaign or campaign.status != "active":
             logger.info("AGENT LOOP | campaign=%s stopped (status=%s)", campaign_id,
                         campaign.status if campaign else "gone")
@@ -786,8 +803,18 @@ async def execute_approval(approval_id: str) -> bool:
     _run_buffers[run_id] = []
     _run_done_events[run_id] = asyncio.Event()
 
+    # Reconstruct a safe argument list from the stored command string.
+    # bash commands are re-wrapped; everything else is re-split with shlex.
+    if approval.tool_name == "bash":
+        approval_cmd_list = ["bash", "-c", approval.command]
+    else:
+        try:
+            approval_cmd_list = shlex.split(approval.command)
+        except ValueError:
+            approval_cmd_list = approval.command.split()
+
     asyncio.create_task(
-        execute_run_background(run_id, approval.command, session_id, approval.tool_name)
+        execute_run_background(run_id, approval_cmd_list, session_id, approval.tool_name)
     )
     asyncio.create_task(
         _run_approved_then_resume(run_id, approval.command, session_id, approval.tool_name, campaign_id)

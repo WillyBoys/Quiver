@@ -121,6 +121,8 @@ export default function ToolsPage() {
       name: tool.name, description: tool.description, category: tool.category,
       binary: tool.binary, default_flags: tool.default_flags,
       parameters: tool.parameters, workflow_tags: tool.workflow_tags,
+      agent_mode: tool.agent_mode || "auto",
+      scope_types: tool.scope_types || [],
       enabled: !tool.enabled,
     });
     setTools((t) => t.map((x) => (x.id === tool.id ? updated : x)));

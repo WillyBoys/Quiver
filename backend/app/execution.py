@@ -14,11 +14,19 @@ _run_buffers: dict[str, list[str]] = {}
 _run_done_events: dict[str, asyncio.Event] = {}
 
 
-def build_command(tool, param_values: dict, extra_flags: str = "") -> str:
+def build_command(tool, param_values: dict, extra_flags: str = "") -> list[str]:
     import shlex
+
+    # Special case: bash is an explicit shell-execution escape hatch — wrap in bash -c.
+    if tool.binary == "bash":
+        return ["bash", "-c", extra_flags]
+
     parts = [tool.binary]
     if tool.default_flags:
-        parts.append(tool.default_flags)
+        try:
+            parts.extend(shlex.split(tool.default_flags))
+        except ValueError:
+            parts.append(tool.default_flags)
 
     # Collect flags already present in extra_flags so we don't emit them twice.
     # extra_flags represents an explicit override and always wins.
@@ -40,13 +48,18 @@ def build_command(tool, param_values: dict, extra_flags: str = "") -> str:
         if flag and flag in extra_flag_tokens:
             continue  # already supplied in extra_flags
         if flag:
-            parts.append(f"{flag} {value}")
+            parts.append(flag)
+            parts.append(value)
         else:
             parts.append(value)
 
     if extra_flags:
-        parts.append(extra_flags)
-    return " ".join(parts)
+        try:
+            parts.extend(shlex.split(extra_flags))
+        except ValueError:
+            parts.append(extra_flags)
+
+    return parts
 
 
 def kill_process(run_id: str) -> None:
@@ -64,15 +77,17 @@ def kill_process(run_id: str) -> None:
 
 async def execute_run_background(
     run_id: str,
-    command: str,
+    cmd_list: list[str],
     session_id: str = "",
     tool_name: str = "",
 ) -> None:
-    """Run a shell command as a subprocess, stream output into the shared buffer,
+    """Run a command as a subprocess, stream output into the shared buffer,
     and persist the final result to the Run DB record.
 
-    Survives WebSocket disconnects — the WebSocket handler just stops reading from
-    the buffer, but this task keeps the process alive and writing.
+    Uses create_subprocess_exec (not shell) to prevent shell injection from
+    parameter values. Survives WebSocket disconnects — the WebSocket handler
+    just stops reading from the buffer, but this task keeps the process alive
+    and writing.
     """
     from app.db.database import AsyncSessionLocal
     from app.models.run import Run
@@ -81,6 +96,9 @@ async def execute_run_background(
     _run_buffers.setdefault(run_id, [])
     _run_done_events.setdefault(run_id, asyncio.Event())
     buf = _run_buffers[run_id]
+
+    # Build display/log string from the list; never used for execution.
+    command = " ".join(cmd_list)
 
     exit_code = -1
     run_status = "error"
@@ -97,8 +115,8 @@ async def execute_run_background(
     timed_out = None
 
     try:
-        process = await asyncio.create_subprocess_shell(
-            command,
+        process = await asyncio.create_subprocess_exec(
+            *cmd_list,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
             limit=1024 * 1024,
