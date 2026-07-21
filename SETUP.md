@@ -67,13 +67,22 @@ docker-compose down && docker-compose up
 
 ## Shannon Setup (Web App Track)
 
-Shannon is a parallel multi-agent web application pentesting pipeline. It runs as Docker services in the same compose stack and is available automatically after `docker-compose up --build`.
+Shannon is a parallel multi-agent web application pentesting pipeline. Shannon is **optional** — the rest of the platform (external/internal sessions, AI campaigns, findings, reporting) works without it.
 
-**Required configuration:**
+Shannon's services require the `shannon/` source directory, which is not included in the public repo. If you don't have it, omit the `--profile shannon` flag and the Shannon services are skipped entirely:
+
+```bash
+# Without Shannon (default for most users)
+docker-compose up --build
+
+# With Shannon
+docker-compose --profile shannon up --build
+```
+
+**Required configuration (Shannon only):**
 
 Set `SHANNON_HOST_DIR` to the absolute path of the `shannon/` directory on your host machine. Shannon's web server passes this path to `docker run -v` when spawning worker containers via the Docker socket — it must be the real host path, not the container path.
 
-Example:
 ```bash
 SHANNON_HOST_DIR=/home/yourname/Quiver/pentest-platform/shannon
 ```

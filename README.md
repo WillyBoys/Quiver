@@ -15,7 +15,7 @@ Quiver's agent handles network and infrastructure testing. For web application d
                ▼                          ▼                      ▼
  ┌─────────────────────┐   ┌──────────────────────┐   ┌──────────────────────┐
  │      EXTERNAL       │   │       INTERNAL       │   │       WEB APP        │
- │    Quiver Agent     │   │    Quiver Agent       │   │ Shannon (integrated) │
+ │    Quiver Agent     │   │    Quiver Agent      │   │ Shannon (integrated) │
  │─────────────────────│   │  (prompt tuning WIP) │   │──────────────────────│
  │ nmap · nuclei       │   │──────────────────────│   │ 19 parallel vuln     │
  │ gobuster · ffuf     │   │ AD enumeration       │   │ agents (SQLi, XSS,   │

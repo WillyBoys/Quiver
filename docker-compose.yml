@@ -100,9 +100,14 @@ services:
 
   # ── Shannon: Web App Scanning ──────────────────────────────────────────────
   # Shannon is a multi-agent web application pentesting pipeline.
-  # The web server manages scans; workers are spawned per scan via Docker API.
+  # These services require the shannon/ source directory (not included in the
+  # public repo). Start with --profile shannon only if you have that directory.
+  #
+  #   With Shannon:    docker-compose --profile shannon up --build
+  #   Without Shannon: docker-compose up --build
 
   shannon-postgres:
+    profiles: [shannon]
     image: postgres:16-alpine
     container_name: quiver_shannon_postgres
     environment:
@@ -121,6 +126,7 @@ services:
       retries: 10
 
   shannon-web:
+    profiles: [shannon]
     build:
       context: ./shannon
       dockerfile: Dockerfile.web
@@ -161,6 +167,7 @@ services:
   # Pre-build the Shannon worker image so it is available when scans start.
   # Runs once (no restart) — the image is cached after the first build.
   shannon-worker:
+    profiles: [shannon]
     build:
       context: ./shannon
       dockerfile: Dockerfile
@@ -174,6 +181,7 @@ services:
   # One-shot init: creates the Claude token in Shannon's DB from env vars.
   # Runs after shannon-web is healthy; safe to re-run (idempotent).
   shannon-init:
+    profiles: [shannon]
     build:
       context: ./shannon-init
     container_name: quiver_shannon_init
