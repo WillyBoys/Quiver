@@ -1,13 +1,33 @@
+import re
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete
+from sqlalchemy import select
 from app.db.database import get_db
 from app.models.tool import Tool
+from app.constants import TARGET_PARAM_NAMES
 from pydantic import BaseModel
 from typing import Optional
 import shutil
 
 router = APIRouter()
+
+_SAFE_BINARY_RE = re.compile(r'^[\w./\-]+$')
+
+
+def _validate_binary(binary: str) -> str:
+    if not _SAFE_BINARY_RE.match(binary):
+        raise HTTPException(
+            status_code=422,
+            detail="binary may only contain alphanumeric characters, dashes, underscores, slashes, and dots"
+        )
+    return binary
+
+
+def _normalize_param(p: dict) -> dict:
+    """Lowercase the parameter name so target injection works regardless of how the user typed it."""
+    p = dict(p)
+    p["name"] = p.get("name", "").lower()
+    return p
 
 
 class ToolParam(BaseModel):
@@ -26,6 +46,8 @@ class ToolCreate(BaseModel):
     default_flags: Optional[str] = ""
     parameters: list[ToolParam] = []
     workflow_tags: list[str] = []
+    agent_mode: Optional[str] = "auto"
+    scope_types: list[str] = []  # ["web", "ip", "domain"]; empty = all types
 
 
 class ToolUpdate(ToolCreate):
@@ -57,14 +79,17 @@ async def get_tool(tool_id: str, db: AsyncSession = Depends(get_db)):
 
 @router.post("/", status_code=201)
 async def create_tool(body: ToolCreate, db: AsyncSession = Depends(get_db)):
+    _validate_binary(body.binary)
     tool = Tool(
         name=body.name,
         description=body.description,
         category=body.category,
         binary=body.binary,
         default_flags=body.default_flags,
-        parameters=[p.model_dump() for p in body.parameters],
+        parameters=[_normalize_param(p.model_dump()) for p in body.parameters],
         workflow_tags=body.workflow_tags,
+        agent_mode=body.agent_mode or "auto",
+        scope_types=body.scope_types,
         is_builtin=False,
     )
     db.add(tool)
@@ -75,14 +100,17 @@ async def create_tool(body: ToolCreate, db: AsyncSession = Depends(get_db)):
 
 @router.put("/{tool_id}")
 async def update_tool(tool_id: str, body: ToolUpdate, db: AsyncSession = Depends(get_db)):
+    _validate_binary(body.binary)
     tool = await _get_or_404(tool_id, db)
     tool.name = body.name
     tool.description = body.description
     tool.category = body.category
     tool.binary = body.binary
     tool.default_flags = body.default_flags
-    tool.parameters = [p.model_dump() for p in body.parameters]
+    tool.parameters = [_normalize_param(p.model_dump()) for p in body.parameters]
     tool.workflow_tags = body.workflow_tags
+    tool.agent_mode = body.agent_mode or "auto"
+    tool.scope_types = body.scope_types
     tool.enabled = body.enabled
     await db.commit()
     return _tool_dict(tool)
@@ -117,4 +145,6 @@ def _tool_dict(t: Tool) -> dict:
         "workflow_tags": t.workflow_tags,
         "is_builtin": t.is_builtin,
         "enabled": t.enabled,
+        "agent_mode": t.agent_mode or "auto",
+        "scope_types": t.scope_types or [],
     }

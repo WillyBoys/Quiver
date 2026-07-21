@@ -17,6 +17,7 @@ class Run(Base):
     status: Mapped[str] = mapped_column(String, default="pending")   # pending/running/complete/error
     exit_code: Mapped[int | None] = mapped_column(nullable=True)
     param_values: Mapped[dict] = mapped_column(JSON, default=dict)   # {param_name: value}
+    reasoning: Mapped[str] = mapped_column(Text, default="")         # agent reasoning (empty for manual runs)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))

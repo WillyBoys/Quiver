@@ -19,3 +19,8 @@ class Tool(Base):
     workflow_tags: Mapped[list] = mapped_column(JSON, default=list)
     is_builtin: Mapped[bool] = mapped_column(Boolean, default=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    # How the agent may use this tool: "auto" | "approve" | "never"
+    agent_mode: Mapped[str] = mapped_column(String, default="auto")
+    # Which target scope types this tool is offered for: ["web", "ip", "domain"]
+    # Empty list = all types (safe default for new tools)
+    scope_types: Mapped[list] = mapped_column(JSON, default=list)

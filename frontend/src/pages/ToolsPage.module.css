@@ -70,29 +70,20 @@
 }
 .toolName { font-size: 13px; font-weight: 600; }
 
-.builtinBadge {
-  font-size: 10px; font-family: var(--font-mono);
-  background: var(--accent-glow); color: var(--accent);
-  border: 1px solid var(--accent-dim);
-  padding: 1px 6px; border-radius: 3px; font-weight: 500;
+.builtinLabel {
+  font-size: 11px; color: var(--text-muted); font-style: italic;
 }
 
-/* Workflow tag chips */
-.tagChip {
-  font-size: 10px; font-family: var(--font-mono);
-  padding: 1px 6px; border-radius: 3px; font-weight: 500;
-  border: 1px solid;
+/* Agent mode icon (▶ / ⏸ / ⊘) — icon only, tooltip carries the label */
+.agentModeIcon {
+  font-size: 10px; color: var(--accent); cursor: default; flex-shrink: 0; line-height: 1;
 }
-.tag_external { color: #4fc3f7; background: rgba(79,195,247,0.1); border-color: rgba(79,195,247,0.25); }
-.tag_internal { color: #ffb74d; background: rgba(255,183,77,0.1); border-color: rgba(255,183,77,0.25); }
-.tag_web      { color: #ce93d8; background: rgba(206,147,216,0.1); border-color: rgba(206,147,216,0.25); }
+.agentModeIcon[data-mode="approve"] { color: var(--warning); }
+.agentModeIcon[data-mode="never"]   { color: var(--text-muted); }
 
-/* Param count */
-.paramBadge {
-  font-size: 10px; font-family: var(--font-mono);
-  color: var(--text-muted); background: var(--bg-elevated);
-  border: 1px solid var(--border-subtle);
-  padding: 1px 6px; border-radius: 3px;
+/* Workflow tags — inline subdued text in description line */
+.toolTags {
+  font-family: var(--font-mono); font-size: 11px; color: var(--text-muted);
 }
 
 .toolCmd {
@@ -144,6 +135,10 @@
 
 .paramRow { display: flex; gap: 8px; align-items: center; }
 .noParams { font-size: 12px; color: var(--text-muted); text-align: center; padding: 8px; }
+.paramsHint {
+  font-size: 11px; color: var(--text-muted); line-height: 1.5; margin-bottom: 4px;
+}
+.paramsHint code { font-family: var(--font-mono); color: var(--text-secondary); }
 
 .formActions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 6px; }
 
@@ -158,3 +153,38 @@
 
 @keyframes spin { to { transform: rotate(360deg); } }
 .spinIcon { animation: spin 1s linear infinite; color: var(--text-muted); }
+
+/* Agent mode selector in edit form */
+.agentModeRow {
+  display: flex; gap: 8px;
+}
+.agentModeOption {
+  flex: 1; display: flex; flex-direction: column; gap: 3px;
+  padding: 8px 10px; border-radius: 6px; cursor: pointer; text-align: left;
+  background: var(--bg-base); border: 1px solid var(--border);
+  transition: border-color 0.15s, background 0.15s;
+}
+.agentModeOption[data-active="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.agentModeOption[data-mode="never"][data-active="true"] { border-color: var(--critical); background: color-mix(in srgb, var(--critical) 10%, transparent); }
+.agentModeOption[data-mode="approve"][data-active="true"] { border-color: var(--warning); background: color-mix(in srgb, var(--warning) 10%, transparent); }
+.agentModeLabel { font-size: 12px; font-weight: 600; color: var(--text-primary); text-transform: none; letter-spacing: 0; }
+.agentModeDesc { font-size: 11px; color: var(--text-muted); text-transform: none; letter-spacing: 0; font-weight: 400; }
+
+/* Scope type checkboxes in edit form */
+.scopeCheckboxRow { display: flex; gap: 8px; }
+.scopeCheckbox {
+  flex: 1; display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; border-radius: 6px; cursor: pointer; text-align: left;
+  background: var(--bg-base); border: 1px solid var(--border);
+  transition: border-color 0.15s, background 0.15s;
+}
+.scopeCheckbox[data-active="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.scopeCheckboxMark {
+  width: 16px; height: 16px; border-radius: 3px; border: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700; color: var(--accent); flex-shrink: 0;
+  background: var(--bg-surface);
+}
+.scopeCheckbox[data-active="true"] .scopeCheckboxMark { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 20%, transparent); }
+.scopeCheckboxLabel { display: block; font-size: 12px; font-weight: 600; color: var(--text-primary); text-transform: none; letter-spacing: 0; }
+.scopeCheckboxDesc  { display: block; font-size: 11px; color: var(--text-muted); text-transform: none; letter-spacing: 0; font-weight: 400; }

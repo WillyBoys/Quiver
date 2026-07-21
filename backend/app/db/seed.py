@@ -123,7 +123,7 @@ DEFAULT_TOOLS = [
         "default_flags": "dir -t 50 -x php,html,txt",
         "parameters": [
             {"name": "url", "flag": "-u", "placeholder": "http://10.10.10.1", "required": True, "description": "Target URL"},
-            {"name": "wordlist", "flag": "-w", "placeholder": "/wordlists/common.txt", "required": True, "description": "Wordlist path"},
+            {"name": "wordlist", "flag": "-w", "placeholder": "/wordlists/Discovery/Web-Content/common.txt", "required": True, "description": "Wordlist path"},
         ],
         "workflow_tags": ["web"],
         "is_builtin": True,
@@ -137,7 +137,7 @@ DEFAULT_TOOLS = [
         "parameters": [
             {"name": "url", "flag": "-u", "placeholder": "http://10.10.10.1", "required": True, "description": "Base URL"},
             {"name": "domain", "flag": "-d", "placeholder": "target.htb", "required": True, "description": "Base domain"},
-            {"name": "wordlist", "flag": "-w", "placeholder": "/wordlists/subdomains.txt", "required": True, "description": "Wordlist path"},
+            {"name": "wordlist", "flag": "-w", "placeholder": "/wordlists/Discovery/DNS/subdomains-top1million-5000.txt", "required": True, "description": "Wordlist path"},
         ],
         "workflow_tags": ["web"],
         "is_builtin": True,
@@ -150,7 +150,7 @@ DEFAULT_TOOLS = [
         "default_flags": "-c -mc 200,301,302,403",
         "parameters": [
             {"name": "url", "flag": "-u", "placeholder": "http://10.10.10.1/FUZZ", "required": True, "description": "URL with FUZZ keyword"},
-            {"name": "wordlist", "flag": "-w", "placeholder": "/wordlists/common.txt", "required": True, "description": "Wordlist path"},
+            {"name": "wordlist", "flag": "-w", "placeholder": "/wordlists/Discovery/Web-Content/common.txt", "required": True, "description": "Wordlist path"},
         ],
         "workflow_tags": ["web"],
         "is_builtin": True,
@@ -163,7 +163,7 @@ DEFAULT_TOOLS = [
         "default_flags": "--auto-tune",
         "parameters": [
             {"name": "url", "flag": "-u", "placeholder": "http://10.10.10.1", "required": True, "description": "Target URL"},
-            {"name": "wordlist", "flag": "-w", "placeholder": "/wordlists/common.txt", "required": True, "description": "Wordlist path"},
+            {"name": "wordlist", "flag": "-w", "placeholder": "/wordlists/Discovery/Web-Content/common.txt", "required": True, "description": "Wordlist path"},
         ],
         "workflow_tags": ["web"],
         "is_builtin": True,
@@ -298,7 +298,7 @@ DEFAULT_TOOLS = [
         "parameters": [
             {"name": "domain", "flag": "-d", "placeholder": "domain.local", "required": True, "description": "Target domain"},
             {"name": "dc", "flag": "--dc", "placeholder": "10.10.10.1", "required": True, "description": "Domain controller IP"},
-            {"name": "wordlist", "placeholder": "/wordlists/users.txt", "required": True, "description": "Username wordlist"},
+            {"name": "wordlist", "placeholder": "/wordlists/Usernames/top-usernames-shortlist.txt", "required": True, "description": "Username wordlist"},
         ],
         "workflow_tags": ["internal"],
         "is_builtin": True,
@@ -379,6 +379,107 @@ DEFAULT_TOOLS = [
         "workflow_tags": ["external"],
         "is_builtin": True,
     },
+    # ── HTTP PROBES ───────────────────────────────────────────────────────────
+    # These thin wrappers around curl each get their own binary name so the agent
+    # can pick the right one without needing extra_flags for every variant.
+    {
+        "name": "curl-probe",
+        "description": "HTTP GET — returns status line, response headers, and body. Good first probe of any endpoint to see what it returns.",
+        "category": "web",
+        "binary": "curl-probe",
+        "default_flags": "",
+        "parameters": [
+            {"name": "url", "placeholder": "http://target.com/api/endpoint", "required": True, "description": "Full URL to probe"},
+        ],
+        "agent_mode": "auto",
+        "scope_types": ["web"],
+        "workflow_tags": ["web", "external"],
+        "is_builtin": True,
+    },
+    {
+        "name": "curl-headers",
+        "description": "Fetch HTTP response headers only (HEAD request). Use to check security headers: HSTS, CSP, X-Frame-Options, X-Content-Type-Options, CORS, cookies.",
+        "category": "web",
+        "binary": "curl-headers",
+        "default_flags": "",
+        "parameters": [
+            {"name": "url", "placeholder": "http://target.com", "required": True, "description": "Target URL"},
+        ],
+        "agent_mode": "auto",
+        "scope_types": ["web"],
+        "workflow_tags": ["web", "external"],
+        "is_builtin": True,
+    },
+    {
+        "name": "curl-cors",
+        "description": "Test CORS policy — sends a preflight OPTIONS request with Origin: evil.com. Look for Access-Control-Allow-Origin: * or reflection of the attacker origin.",
+        "category": "web",
+        "binary": "curl-cors",
+        "default_flags": "",
+        "parameters": [
+            {"name": "url", "placeholder": "http://target.com/api/endpoint", "required": True, "description": "Endpoint to test"},
+        ],
+        "agent_mode": "auto",
+        "scope_types": ["web"],
+        "workflow_tags": ["web", "external"],
+        "is_builtin": True,
+    },
+    {
+        "name": "curl-json",
+        "description": "HTTP GET with Accept: application/json — probes API endpoints and returns the JSON response. Good for unauthenticated API enumeration.",
+        "category": "web",
+        "binary": "curl-json",
+        "default_flags": "",
+        "parameters": [
+            {"name": "url", "placeholder": "http://target.com/api/v1/users", "required": True, "description": "API endpoint URL"},
+        ],
+        "agent_mode": "auto",
+        "scope_types": ["web"],
+        "workflow_tags": ["web", "external"],
+        "is_builtin": True,
+    },
+    {
+        "name": "curl-redirect",
+        "description": "HTTP GET following all redirects (-L), showing the final destination and each hop. Useful to map redirect chains or detect open redirects.",
+        "category": "web",
+        "binary": "curl-redirect",
+        "default_flags": "",
+        "parameters": [
+            {"name": "url", "placeholder": "http://target.com/redirect?url=http://evil.com", "required": True, "description": "URL to follow"},
+        ],
+        "agent_mode": "auto",
+        "scope_types": ["web"],
+        "workflow_tags": ["web", "external"],
+        "is_builtin": True,
+    },
+    {
+        "name": "nc-banner",
+        "description": "TCP banner grab — connects to host:port and captures the service banner. Useful for identifying services on non-standard ports.",
+        "category": "recon",
+        "binary": "nc-banner",
+        "default_flags": "",
+        "parameters": [
+            {"name": "host", "placeholder": "10.10.10.1", "required": True, "description": "Target host or IP"},
+            {"name": "port", "placeholder": "8080", "required": True, "description": "TCP port"},
+        ],
+        "agent_mode": "auto",
+        "scope_types": [],
+        "workflow_tags": ["external", "internal", "web"],
+        "is_builtin": True,
+    },
+    # ── BASH ──────────────────────────────────────────────────────────────────
+    {
+        "name": "bash - Free-form Command",
+        "description": "Run any arbitrary shell command when no specific tool fits. Put the COMPLETE command in extra_flags (e.g. \"curl -s 'http://target/api/users' | jq .\"). Requires human approval before execution.",
+        "category": "util",
+        "binary": "bash",
+        "default_flags": "",
+        "parameters": [],
+        "agent_mode": "approve",
+        "scope_types": [],
+        "workflow_tags": ["web", "external", "internal"],
+        "is_builtin": True,
+    },
     # ── UTIL ──────────────────────────────────────────────────────────────────
     {
         "name": "Hydra - SSH",
@@ -387,8 +488,8 @@ DEFAULT_TOOLS = [
         "binary": "hydra",
         "default_flags": "-t 4",
         "parameters": [
-            {"name": "userlist", "flag": "-L", "placeholder": "/wordlists/users.txt", "required": True, "description": "Username list"},
-            {"name": "passlist", "flag": "-P", "placeholder": "/wordlists/passwords.txt", "required": True, "description": "Password list"},
+            {"name": "userlist", "flag": "-L", "placeholder": "/wordlists/Usernames/top-usernames-shortlist.txt", "required": True, "description": "Username list"},
+            {"name": "passlist", "flag": "-P", "placeholder": "/wordlists/Passwords/Common-Credentials/10-million-password-list-top-1000.txt", "required": True, "description": "Password list"},
             {"name": "target", "placeholder": "10.10.10.1", "required": True, "description": "Target IP"},
             {"name": "protocol", "placeholder": "ssh", "required": True, "description": "Service (ssh, ftp, rdp, etc.)"},
         ],
@@ -433,7 +534,11 @@ async def seed_default_tools():
             else:
                 # Keep builtin tool definitions in sync with seed data
                 existing.category = tool_data["category"]
+                existing.binary = tool_data["binary"]
                 existing.default_flags = tool_data["default_flags"]
                 existing.parameters = tool_data["parameters"]
                 existing.description = tool_data["description"]
+                existing.workflow_tags = tool_data.get("workflow_tags", [])
+                existing.agent_mode = tool_data.get("agent_mode", existing.agent_mode or "auto")
+                existing.scope_types = tool_data.get("scope_types", existing.scope_types or [])
         await db.commit()

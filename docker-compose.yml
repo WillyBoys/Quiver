@@ -1,3 +1,7 @@
+networks:
+  quiver_net:
+    name: quiver_net
+
 services:
   backend:
     build:
@@ -13,7 +17,18 @@ services:
     environment:
       - DATABASE_URL=sqlite:////data/pentest.db
       - WORDLISTS_DIR=/wordlists
-    privileged: true
+      - OLLAMA_URL=http://ai:11434
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:7b}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      # Signal only — backend checks if truthy to route to bridge; actual token lives in claude-bridge only
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:+configured}
+      - CLAUDE_MODEL=${CLAUDE_MODEL:-claude-haiku-4-5-20251001}
+      - CLAUDE_BRIDGE_URL=http://claude-bridge:3001
+      - SHANNON_URL=http://shannon-web:4000
+      - SHANNON_ADMIN_EMAIL=${SHANNON_ADMIN_EMAIL:-admin@localhost}
+      - SHANNON_ADMIN_PASSWORD=${SHANNON_ADMIN_PASSWORD:-admin}
+    networks:
+      - quiver_net
     restart: unless-stopped
 
   frontend:
@@ -27,9 +42,21 @@ services:
       - ./frontend/src:/app/src
     environment:
       - VITE_API_URL=http://localhost:8000
-      - VITE_WS_URL=ws://localhost:8000
     depends_on:
       - backend
+    networks:
+      - quiver_net
+    restart: unless-stopped
+
+  claude-bridge:
+    build:
+      context: ./claude-bridge
+    container_name: quiver_claude_bridge
+    environment:
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
+      - CLAUDE_MODEL=${CLAUDE_MODEL:-claude-haiku-4-5-20251001}
+    networks:
+      - quiver_net
     restart: unless-stopped
 
   juice-shop:
@@ -37,6 +64,8 @@ services:
     container_name: quiver_juiceshop
     ports:
       - "3001:3000"
+    networks:
+      - quiver_net
     restart: unless-stopped
 
   ai:
@@ -44,6 +73,8 @@ services:
     container_name: quiver_ai
     volumes:
       - ollama_data:/root/.ollama
+    networks:
+      - quiver_net
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "ollama", "list"]
@@ -62,9 +93,103 @@ services:
     depends_on:
       ai:
         condition: service_healthy
-    entrypoint: ["ollama", "pull", "phi3:mini"]
+    entrypoint: ["ollama", "pull", "${OLLAMA_MODEL:-qwen2.5:7b}"]
+    networks:
+      - quiver_net
+    restart: "no"
+
+  # ── Shannon: Web App Scanning ──────────────────────────────────────────────
+  # Shannon is a multi-agent web application pentesting pipeline.
+  # The web server manages scans; workers are spawned per scan via Docker API.
+
+  shannon-postgres:
+    image: postgres:16-alpine
+    container_name: quiver_shannon_postgres
+    environment:
+      - POSTGRES_DB=shannon
+      - POSTGRES_USER=shannon
+      - POSTGRES_PASSWORD=${SHANNON_DB_PASSWORD:-shannon_db_pass}
+    volumes:
+      - shannon_postgres_data:/var/lib/postgresql/data
+    networks:
+      - quiver_net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shannon"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  shannon-web:
+    build:
+      context: ./shannon
+      dockerfile: Dockerfile.web
+      target: runtime
+    image: shannon-web:latest
+    container_name: quiver_shannon_web
+    ports:
+      - "4000:4000"
+    environment:
+      - DATABASE_URL=postgresql://shannon:${SHANNON_DB_PASSWORD:-shannon_db_pass}@shannon-postgres:5432/shannon
+      - JWT_SECRET=${SHANNON_JWT_SECRET:-quiver-shannon-jwt-secret-changeme}
+      - ENCRYPTION_KEY=${SHANNON_ENCRYPTION_KEY:-quiver-shannon-enc-key32-changeme!}
+      - WORKER_IMAGE=shannon-worker:latest
+      - DOCKER_NETWORK=quiver_net
+      # HOST_PROJECT_DIR must be the absolute HOST path to the shannon/ directory.
+      # Shannon's web server passes this to `docker run -v` when spawning worker containers.
+      # Set SHANNON_HOST_DIR in your .env to your pentest-platform/shannon/ absolute path.
+      - HOST_PROJECT_DIR=${SHANNON_HOST_DIR:-}
+      - NODE_ENV=production
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./shannon/configs:/app/configs
+      - ./shannon/prompts:/app/prompts
+      - ./shannon/workspaces:/app/workspaces
+    depends_on:
+      shannon-postgres:
+        condition: service_healthy
+    networks:
+      - quiver_net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4000/api/system/status"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  # Pre-build the Shannon worker image so it is available when scans start.
+  # Runs once (no restart) — the image is cached after the first build.
+  shannon-worker:
+    build:
+      context: ./shannon
+      dockerfile: Dockerfile
+    image: shannon-worker:latest
+    container_name: quiver_shannon_worker_build
+    entrypoint: ["true"]
+    networks:
+      - quiver_net
+    restart: "no"
+
+  # One-shot init: creates the Claude token in Shannon's DB from env vars.
+  # Runs after shannon-web is healthy; safe to re-run (idempotent).
+  shannon-init:
+    build:
+      context: ./shannon-init
+    container_name: quiver_shannon_init
+    environment:
+      - SHANNON_URL=http://shannon-web:4000
+      - SHANNON_ADMIN_EMAIL=${SHANNON_ADMIN_EMAIL:-admin@localhost}
+      - SHANNON_ADMIN_PASSWORD=${SHANNON_ADMIN_PASSWORD:-admin}
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+    depends_on:
+      shannon-web:
+        condition: service_healthy
+    networks:
+      - quiver_net
     restart: "no"
 
 volumes:
   ollama_data:
-
+  shannon_postgres_data:

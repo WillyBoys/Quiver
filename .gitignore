@@ -20,3 +20,7 @@ build/
 *.key
 *.p12
 *.pfx
+# Shannon source — kept local only, never pushed to GitHub
+shannon/
+# Internal AI development context — not for public repo
+CLAUDE_CODE_CONTEXT.md

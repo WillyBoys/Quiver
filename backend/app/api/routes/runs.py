@@ -1,29 +1,28 @@
 import logging
-import time as _time
-from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
+import shlex
+from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.db.database import get_db, AsyncSessionLocal
 from app.models.run import Run
 from app.models.tool import Tool
 from app.models.session import Session as EngagementSession
+from app.execution import (
+    _running_processes,
+    _run_buffers,
+    _run_done_events,
+    build_command,
+    kill_process,
+    execute_run_background,
+)
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime, timezone
 import asyncio
-import os
-import signal
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-# run_id → asyncio Process (for kill endpoint)
-_running_processes: dict = {}
-# run_id → accumulated output lines (survives WebSocket disconnects)
-_run_buffers: dict[str, list[str]] = {}
-# run_id → Event set when the background task has finished its DB write
-_run_done_events: dict[str, asyncio.Event] = {}
 
 
 class RunCreate(BaseModel):
@@ -32,101 +31,6 @@ class RunCreate(BaseModel):
     command: Optional[str] = None   # free-form shell run (no tool lookup)
     param_values: dict = {}
     extra_flags: Optional[str] = ""
-
-
-def build_command(tool: Tool, param_values: dict, extra_flags: str = "") -> str:
-    parts = [tool.binary]
-
-    if tool.default_flags:
-        parts.append(tool.default_flags)
-
-    for param in tool.parameters:
-        name = param.get("name")
-        flag = param.get("flag", "")
-        value = param_values.get(name, "")
-        if value:
-            if flag:
-                parts.append(f"{flag} {value}")
-            else:
-                parts.append(value)
-
-    if extra_flags:
-        parts.append(extra_flags)
-
-    return " ".join(parts)
-
-
-async def _execute_tool(
-    run_id: str,
-    command: str,
-    session_id: str = "",
-    tool_name: str = "",
-) -> None:
-    """Background task: runs the subprocess and accumulates output.
-
-    Survives WebSocket disconnects — the caller just stops reading from the
-    buffer, but this task keeps the process alive and writing.
-    """
-    _run_buffers.setdefault(run_id, [])
-    _run_done_events.setdefault(run_id, asyncio.Event())
-    buf = _run_buffers[run_id]
-
-    exit_code = -1
-    run_status = "error"
-    t_start = _time.monotonic()
-
-    logger.info(
-        "RUN START | run_id=%s session_id=%s tool=%s | %s",
-        run_id, session_id, tool_name, command[:300],
-    )
-
-    try:
-        process = await asyncio.create_subprocess_shell(
-            command,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-            limit=1024 * 1024,
-            start_new_session=True,
-        )
-        _running_processes[run_id] = process
-
-        async for line_bytes in process.stdout:
-            line = line_bytes.decode("utf-8", errors="replace")
-            buf.append(line)
-
-        await process.wait()
-        exit_code = process.returncode
-        run_status = "complete" if exit_code == 0 else "error"
-
-    except Exception as e:
-        buf.append(f"\n[ERROR] {str(e)}\n")
-        logger.error("RUN ERROR | run_id=%s | %s", run_id, str(e))
-    finally:
-        _running_processes.pop(run_id, None)
-
-    duration = _time.monotonic() - t_start
-    logger.info(
-        "RUN END   | run_id=%s session_id=%s tool=%s | status=%s exit_code=%s duration=%.1fs",
-        run_id, session_id, tool_name, run_status, exit_code, duration,
-    )
-
-    async with AsyncSessionLocal() as db:
-        result = await db.execute(select(Run).where(Run.id == run_id))
-        run = result.scalar_one_or_none()
-        if run:
-            run.output = "".join(buf)
-            run.status = run_status
-            run.exit_code = exit_code
-            run.finished_at = datetime.now(timezone.utc)
-            await db.commit()
-
-    _run_done_events[run_id].set()
-
-    # Keep buffer alive briefly so a reconnect that arrives just after
-    # completion can still get a replay without hitting the DB
-    await asyncio.sleep(60)
-    _run_buffers.pop(run_id, None)
-    _run_done_events.pop(run_id, None)
 
 
 @router.get("/session/{session_id}")
@@ -139,7 +43,7 @@ async def list_runs(session_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/all")
-async def list_all_runs(limit: int = 500, db: AsyncSession = Depends(get_db)):
+async def list_all_runs(limit: int = Query(default=500, ge=1, le=10000), db: AsyncSession = Depends(get_db)):
     """All runs across every session, newest first, with session name included."""
     stmt = (
         select(Run, EngagementSession.name.label("session_name"))
@@ -168,7 +72,8 @@ async def create_run(body: RunCreate, db: AsyncSession = Depends(get_db)):
         tool = result.scalar_one_or_none()
         if not tool:
             raise HTTPException(status_code=404, detail="Tool not found")
-        command = build_command(tool, body.param_values, body.extra_flags or "")
+        cmd_list = build_command(tool, body.param_values, body.extra_flags or "")
+        command = " ".join(cmd_list)
         tool_id = tool.id
         tool_name = tool.name
     elif body.command:
@@ -197,17 +102,7 @@ async def create_run(body: RunCreate, db: AsyncSession = Depends(get_db)):
 
 @router.post("/{run_id}/kill", status_code=204)
 async def kill_run(run_id: str, db: AsyncSession = Depends(get_db)):
-    """Send SIGTERM to a running tool process and its entire process group."""
-    process = _running_processes.get(run_id)
-    if process is not None:
-        logger.info("RUN KILL  | run_id=%s", run_id)
-        try:
-            os.killpg(process.pid, signal.SIGTERM)
-        except (ProcessLookupError, PermissionError):
-            try:
-                process.terminate()
-            except Exception:
-                pass
+    kill_process(run_id)
 
 
 @router.delete("/{run_id}", status_code=204)
@@ -254,7 +149,16 @@ async def execute_run(websocket: WebSocket, run_id: str):
             await db.commit()
             _run_buffers[run_id] = []
             _run_done_events[run_id] = asyncio.Event()
-            asyncio.create_task(_execute_tool(run_id, run.command, run.session_id, run.tool_name))
+            # Reconstruct a safe argument list. Shell/manual runs wrap in bash -c to
+            # preserve pipes/redirects; tool runs re-split the stored command string.
+            if run.tool_id == "shell":
+                run_cmd_list = ["bash", "-c", run.command]
+            else:
+                try:
+                    run_cmd_list = shlex.split(run.command)
+                except ValueError:
+                    run_cmd_list = run.command.split()
+            asyncio.create_task(execute_run_background(run_id, run_cmd_list, run.session_id, run.tool_name))
             await websocket.send_json({"type": "command", "data": run.command})
             await websocket.send_json({
                 "type": "start",
@@ -363,6 +267,7 @@ def _run_dict(r: Run) -> dict:
         "status": r.status,
         "exit_code": r.exit_code,
         "param_values": r.param_values,
+        "reasoning": r.reasoning or "",
         "started_at": r.started_at.isoformat() if r.started_at else None,
         "finished_at": r.finished_at.isoformat() if r.finished_at else None,
         "created_at": r.created_at.isoformat(),

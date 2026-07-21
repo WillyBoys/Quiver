@@ -34,13 +34,22 @@ class SessionCreate(BaseModel):
 
 class SessionUpdate(SessionCreate):
     status: Optional[str] = "active"
-    findings: Optional[list[Finding]] = []
+    findings: Optional[list[Finding]] = None
     targets: Optional[list] = None
+    campaign_id: Optional[str] = None
+
+
+class NotesUpdate(BaseModel):
+    notes: str
 
 
 class ChecklistUpdate(BaseModel):
     phase_checks: dict = {}
     custom_items: list = []
+
+
+class ReportGenerateRequest(BaseModel):
+    provider: Optional[str] = "claude"
 
 
 class TargetsUpdate(BaseModel):
@@ -88,12 +97,22 @@ async def update_session(session_id: str, body: SessionUpdate, db: AsyncSession 
     session.engagement_type = body.engagement_type
     session.notes = body.notes
     session.status = body.status
+    if body.campaign_id is not None:
+        session.campaign_id = body.campaign_id
     if body.findings is not None:
         session.findings = [f.model_dump() for f in body.findings]
     if body.targets is not None:
         session.targets = body.targets
     await db.commit()
     return _session_dict(session)
+
+
+@router.patch("/{session_id}/notes")
+async def update_notes(session_id: str, body: NotesUpdate, db: AsyncSession = Depends(get_db)):
+    session = await _get_or_404(session_id, db)
+    session.notes = body.notes
+    await db.commit()
+    return {"notes": session.notes}
 
 
 @router.patch("/{session_id}/targets")
@@ -119,6 +138,24 @@ async def delete_session(session_id: str, db: AsyncSession = Depends(get_db)):
     await db.commit()
 
 
+@router.post("/{session_id}/report/generate")
+async def generate_ai_report(session_id: str, body: ReportGenerateRequest, db: AsyncSession = Depends(get_db)):
+    from app.agent.llm import generate_report as llm_generate_report, AuthError
+    session = await _get_or_404(session_id, db)
+    result = await db.execute(
+        select(Run).where(Run.session_id == session_id).order_by(Run.created_at)
+    )
+    runs = result.scalars().all()
+    prompt = _build_ai_report_prompt(session, runs)
+    try:
+        markdown = await llm_generate_report(prompt, provider=body.provider or "claude")
+        return {"markdown": markdown}
+    except AuthError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Report generation failed: {e}")
+
+
 @router.get("/{session_id}/report.md")
 async def export_report(session_id: str, db: AsyncSession = Depends(get_db)):
     session = await _get_or_404(session_id, db)
@@ -136,6 +173,138 @@ async def export_report(session_id: str, db: AsyncSession = Depends(get_db)):
 
 
 # ── Report helpers ────────────────────────────────────────────────────────────
+
+_SEVERITY_CVSS = {
+    "critical": "9.0–10.0 (Critical)",
+    "high": "7.0–8.9 (High)",
+    "medium": "4.0–6.9 (Medium)",
+    "low": "0.1–3.9 (Low)",
+    "info": "0.0 (Informational)",
+}
+
+
+def _build_ai_report_prompt(session, runs) -> str:
+    findings = session.findings or []
+    findings_sorted = sorted(
+        findings,
+        key=lambda f: _SEVERITY_ORDER.index(f.get("severity", "info"))
+        if f.get("severity") in _SEVERITY_ORDER else 99,
+    )
+    findings_by_id = {f.get("id"): f for f in findings}
+
+    # Build per-finding evidence snippets from linked run IDs
+    runs_by_id = {r.id: r for r in runs}
+    findings_text = ""
+    if findings_sorted:
+        for f in findings_sorted:
+            sev = f.get("severity", "info")
+            ev_ids = f.get("evidence_run_ids") or []
+            ev_snippets = []
+            for rid in ev_ids[:3]:
+                r = runs_by_id.get(rid)
+                if r:
+                    out = _strip_ansi(r.output or "")[:400]
+                    ev_snippets.append(f"  [{r.tool_name}] {r.command}\n  {out[:400]}")
+            ev_text = "\n".join(ev_snippets) if ev_snippets else "  (no linked evidence runs)"
+            parent = findings_by_id.get(f.get("chains_from_id", ""))
+            chain_line = f"  Chains from: {parent['title']}\n" if parent else ""
+            findings_text += (
+                f"---\n"
+                f"Title: {f.get('title', 'Untitled')}\n"
+                f"Severity: {sev.upper()} | CVSS: {_SEVERITY_CVSS.get(sev, '')}\n"
+                f"{chain_line}"
+                f"Notes: {f.get('notes', '').strip() or '(no notes)'}\n"
+                f"Evidence runs:\n{ev_text}\n\n"
+            )
+    else:
+        findings_text = "(no findings logged)\n"
+
+    # Tool run summary for coverage section
+    completed = [r for r in runs if r.status in ("complete", "error", "timeout") and r.tool_name != "_summary"]
+    timed_out = [r for r in completed if r.status == "timeout"]
+    tools_used = sorted({r.tool_name for r in completed})
+    coverage_text = f"Tools used: {', '.join(tools_used) or 'none'}\nTotal runs: {len(completed)}"
+    if timed_out:
+        coverage_text += f"\nTimed-out runs ({len(timed_out)} — may need manual follow-up):\n"
+        for r in timed_out:
+            coverage_text += f"  - {r.tool_name}: {r.command[:120]}\n"
+
+    sev_counts = {}
+    for f in findings:
+        s = f.get("severity", "info")
+        sev_counts[s] = sev_counts.get(s, 0) + 1
+    count_str = ", ".join(f"{sev_counts[s]} {s}" for s in _SEVERITY_ORDER if s in sev_counts) or "0 findings"
+
+    return f"""You are a senior penetration tester writing an internal technical brief for a colleague who will review these findings and write the final client report.
+
+This is NOT a client deliverable. Write for a technical reviewer, not an executive. Be terse and precise.
+
+ENGAGEMENT DETAILS:
+- Session: {session.name}
+- Target: {session.target}
+- Type: {session.engagement_type.title()} Assessment
+- Scope: {session.scope or 'Not specified'}
+- Notes: {(session.notes or '').strip() or '(none)'}
+- Finding count: {count_str}
+
+CONFIRMED FINDINGS (sorted critical → info):
+{findings_text}
+COVERAGE SUMMARY:
+{coverage_text}
+
+Write a technical brief in Markdown using EXACTLY this structure. Do not add sections, do not write for executives, do not include remediation advice (the reviewer will add that):
+
+# Technical Brief — {session.target}
+> **Reviewer:** _______________  **Date reviewed:** _______________
+
+## Engagement Summary
+- **Type:** {session.engagement_type.title()}
+- **Target:** {session.target}
+- **Scope:** [one line from scope notes]
+- **Tools run:** [count and tool names]
+- **Finding count:** {count_str}
+- **Overall risk:** [one word: Critical / High / Medium / Low / Informational — based on highest confirmed severity]
+
+## Attack Surface
+[Bullet list of what was discovered: open ports, exposed services, interesting endpoints. Pull from tool outputs. Be specific — include port numbers, versions, URLs.]
+
+## Findings
+
+[For EACH finding, use this exact format:]
+
+### [SEVERITY] Finding Title
+| Field | Value |
+|-------|-------|
+| **Severity** | SEVERITY — CVSS range |
+| **Location** | specific URL, port, or service |
+| **Chains from** | prior finding title OR — |
+
+**Reproduction steps:**
+1. [Exact step with specific values — commands, payloads, credentials]
+2. [Continue until exploited]
+
+**Key evidence:**
+```
+[paste the most relevant snippet from the evidence runs — the line(s) that prove it works]
+```
+
+**Reviewer notes:** [Flag anything the reviewer should manually verify or that needs more context. Be honest about uncertainty.]
+
+---
+
+## Attack Chains
+[If any findings chain together, describe the kill chain in 2-3 sentences per chain. E.g. "SQLi (Finding 1) yielded admin JWT → used to access /api/Users (Finding 2) → mass assignment on POST /api/Users escalated to admin role (Finding 3)."]
+[If no chains: write "No multi-step chains identified."]
+
+## Coverage Gaps
+[Bullet list of: what wasn't tested, what timed out, what was blocked by scope, what needs manual follow-up. Be specific about what a reviewer should check by hand.]
+
+RULES:
+- Write only what the evidence supports. Do not invent findings.
+- No executive summary, no remediation steps, no client-facing language.
+- Reproduction steps must use exact values from the evidence (real payloads, real endpoints, real commands).
+- Flag uncertainty explicitly in Reviewer notes rather than stating something confidently if unsure.
+- Reply with Markdown only — no preamble."""
 
 _SEVERITY_ORDER = ["critical", "high", "medium", "low", "info"]
 _ANSI_RE = re.compile(r'\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
@@ -254,6 +423,7 @@ def _session_dict(s: Session) -> dict:
         "findings": s.findings or [],
         "checklist_state": s.checklist_state or {},
         "targets": s.targets or [],
+        "campaign_id": s.campaign_id or None,
         "created_at": s.created_at.isoformat(),
         "updated_at": s.updated_at.isoformat(),
     }

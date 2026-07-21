@@ -210,19 +210,58 @@ Fill in:
 | **Category** | Recon / Web / Enumeration / Vuln Scan / Utilities | `recon` |
 | **Default Flags** | Flags always appended to the command | `--rate=1000` |
 | **Workflow Tags** | Comma-separated engagement types | `external, internal` |
+| **Agent Mode** | How the AI agent treats this tool | see below |
+| **Scope Types** | Which target types the tool works against | see below |
 | **Parameters** | Named inputs filled in at run time | see below |
 
 **Binary check indicator:** When you type the binary name, a live indicator checks whether that binary exists in the container. A green checkmark means it's installed and ready. A red X means it's not found — don't save until this is resolved.
 
-**Adding parameters:**
+---
 
-Each parameter becomes an input field when you run the tool in a session.
+### Agent Mode
+
+Controls whether the AI agent in Campaigns can run this tool autonomously:
+
+| Mode | Behaviour |
+|---|---|
+| **Auto** | Agent runs the tool immediately without asking |
+| **Approve** | Agent pauses the campaign, queues an approval request, and resumes automatically after you approve or reject |
+| **Never** | Tool is hidden from the AI entirely — only available for manual use in Sessions |
+
+Use **Approve** for destructive or noisy tools (sqlmap, hydra, exploitation frameworks). Use **Never** for tools that require interactive input or sensitive credentials that should never be automated.
+
+---
+
+### Scope Types
+
+Tells the AI agent which target types this tool is compatible with. Check all that apply:
+
+| Scope | When it appears |
+|---|---|
+| **Web** | Campaign target is an HTTP/HTTPS URL |
+| **IP Network** | Campaign target is an IP address or CIDR range |
+| **Domain** | Campaign target is a bare domain name |
+
+Leave all boxes unchecked to make the tool available for **all** target types — the safe default for multi-purpose tools.
+
+The AI agent filters the tool list based on the campaign's actual target before building its prompt. A web-only tool (gobuster, feroxbuster) is never offered when the target is a raw IP; an IP-only tool (nmap) is deprioritised for web targets.
+
+---
+
+### Adding Parameters
+
+Each parameter becomes an input field when you run the tool in a session. The AI agent fills in target parameters automatically.
 
 | Field | Description | Example |
 |---|---|---|
-| Name | Label shown in the UI | `Target CIDR` |
+| Name | Machine name used to build the command | `target` |
 | Flag | CLI flag prepended to the value | `--range` |
-| Placeholder | Hint text in the input field | `192.168.1.0/24` |
+| Placeholder | Hint text; also the AI's fallback value | `192.168.1.0/24` |
+| Required | Whether the field must be filled before running | ✓ |
+
+**Parameter names are always stored lowercase.** Quiver normalises them automatically on save.
+
+**Target auto-fill:** If a parameter name is one of `target`, `host`, `url`, or `domain`, the AI agent fills it in automatically from the campaign's scope. Set the placeholder to the expected format (`http://10.10.10.1` for URL params, `10.10.10.1` for host/IP params) — this tells the agent which format the tool expects.
 
 At run time, Quiver builds the command as:
 ```

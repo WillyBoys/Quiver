@@ -15,6 +15,7 @@ class Session(Base):
     engagement_type: Mapped[str] = mapped_column(String, default="external")  # external/internal/web
     notes: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[str] = mapped_column(String, default="active")    # active / archived
+    campaign_id: Mapped[str | None] = mapped_column(String, nullable=True)  # set for agent-created sessions
     findings: Mapped[list] = mapped_column(JSON, default=list)        # [{title, severity, notes}]
     checklist_state: Mapped[dict] = mapped_column(JSON, default=dict) # {phase_checks: {key: bool}}
     targets: Mapped[list] = mapped_column(JSON, default=list)         # [{id, value}]

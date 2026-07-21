@@ -1,0 +1,293 @@
+.page {
+  padding: 28px 32px;
+  max-width: 860px;
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+
+.title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  background: var(--critical);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 10px;
+}
+
+.subtitle {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* Tabs */
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0;
+}
+
+.tab {
+  padding: 8px 16px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: capitalize;
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+  margin-bottom: -1px;
+}
+
+.tab[data-active="true"] {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+/* Card list */
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.card {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.card[data-status="pending"] {
+  border-left: 3px solid var(--warning, #f59e0b);
+}
+
+.card[data-status="approved"] {
+  border-left: 3px solid var(--accent);
+}
+
+.card[data-status="rejected"] {
+  border-left: 3px solid var(--critical);
+}
+
+.cardHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.cardMeta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.campaignName {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.sep {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.toolName {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--accent);
+  padding: 1px 6px;
+  background: var(--accent-glow);
+  border: 1px solid var(--accent-dim);
+  border-radius: 3px;
+}
+
+.time {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+/* Command block */
+.commandBlock {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 10px 12px;
+}
+
+.command {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-primary);
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+
+/* Reasoning */
+.reasoning {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.reasoningLabel {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  font-weight: 700;
+}
+
+.reasoningText {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.targetRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.targetVal {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+/* Action buttons */
+.actions {
+  display: flex;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.approveBtn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  background: rgba(57, 211, 83, 0.12);
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.approveBtn:hover:not(:disabled) {
+  background: rgba(57, 211, 83, 0.22);
+}
+
+.approveBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.rejectBtn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  background: rgba(255, 80, 80, 0.08);
+  border: 1px solid var(--critical);
+  color: var(--critical);
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.rejectBtn:hover:not(:disabled) {
+  background: rgba(255, 80, 80, 0.16);
+}
+
+.rejectBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Resolved state */
+.resolvedRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.resolvedBadge {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 3px 8px;
+  border-radius: 3px;
+}
+
+.resolvedBadge[data-status="approved"] {
+  background: rgba(57, 211, 83, 0.12);
+  color: var(--accent);
+  border: 1px solid var(--accent-dim);
+}
+
+.resolvedBadge[data-status="rejected"] {
+  background: rgba(255, 80, 80, 0.08);
+  color: var(--critical);
+  border: 1px solid rgba(255, 80, 80, 0.25);
+}
+
+/* Empty states */
+.empty {
+  color: var(--text-muted);
+  font-size: 13px;
+  padding: 24px 0;
+}
+
+.emptyState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 60px 0;
+  color: var(--text-secondary);
+  font-size: 14px;
+  gap: 4px;
+}

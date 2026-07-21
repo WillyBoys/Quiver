@@ -8,7 +8,19 @@ const CAT_LABELS = { recon: "Recon", web: "Web", enum: "Enumeration", vuln: "Vul
 
 const EMPTY_FORM = {
   name: "", description: "", category: "recon", binary: "", default_flags: "",
-  parameters: [], workflow_tags: [],
+  parameters: [], workflow_tags: [], agent_mode: "auto", scope_types: [],
+};
+
+const SCOPE_OPTIONS = [
+  { value: "web",    label: "Web",        desc: "HTTP/HTTPS targets" },
+  { value: "ip",     label: "IP/Network", desc: "IPs and CIDRs" },
+  { value: "domain", label: "Domain",     desc: "Hostnames and domains" },
+];
+
+const AGENT_MODE_LABELS = {
+  auto:    { label: "Auto",    desc: "LLM can run without approval" },
+  approve: { label: "Approve", desc: "LLM must get human sign-off first" },
+  never:   { label: "Never",   desc: "Hidden from LLM — manual use only" },
 };
 
 export default function ToolsPage() {
@@ -71,6 +83,8 @@ export default function ToolsPage() {
       binary: tool.binary, default_flags: tool.default_flags,
       parameters: tool.parameters || [],
       workflow_tags: tool.workflow_tags || [],
+      agent_mode: tool.agent_mode || "auto",
+      scope_types: tool.scope_types || [],
       enabled: tool.enabled,
     });
     setBinaryCheck(null);
@@ -107,9 +121,20 @@ export default function ToolsPage() {
       name: tool.name, description: tool.description, category: tool.category,
       binary: tool.binary, default_flags: tool.default_flags,
       parameters: tool.parameters, workflow_tags: tool.workflow_tags,
+      agent_mode: tool.agent_mode || "auto",
+      scope_types: tool.scope_types || [],
       enabled: !tool.enabled,
     });
     setTools((t) => t.map((x) => (x.id === tool.id ? updated : x)));
+  }
+
+  function toggleScope(value) {
+    setForm(f => ({
+      ...f,
+      scope_types: f.scope_types.includes(value)
+        ? f.scope_types.filter(s => s !== value)
+        : [...f.scope_types, value],
+    }));
   }
 
   function addParam() {
@@ -234,6 +259,47 @@ export default function ToolsPage() {
                 </label>
               </div>
 
+              <label className={styles.label}>
+                Target Scope
+                <span className={styles.labelHint}>Which target types the LLM can use this tool against. Leave all unchecked to allow any type.</span>
+                <div className={styles.scopeCheckboxRow}>
+                  {SCOPE_OPTIONS.map(({ value, label, desc }) => (
+                    <button
+                      key={value}
+                      type="button"
+                      className={styles.scopeCheckbox}
+                      data-active={form.scope_types.includes(value)}
+                      onClick={() => toggleScope(value)}
+                    >
+                      <span className={styles.scopeCheckboxMark}>{form.scope_types.includes(value) ? "✓" : ""}</span>
+                      <span>
+                        <span className={styles.scopeCheckboxLabel}>{label}</span>
+                        <span className={styles.scopeCheckboxDesc}>{desc}</span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </label>
+
+              <label className={styles.label}>
+                Agent Access
+                <div className={styles.agentModeRow}>
+                  {Object.entries(AGENT_MODE_LABELS).map(([val, { label, desc }]) => (
+                    <button
+                      key={val}
+                      type="button"
+                      className={styles.agentModeOption}
+                      data-active={form.agent_mode === val}
+                      data-mode={val}
+                      onClick={() => setForm(f => ({ ...f, agent_mode: val }))}
+                    >
+                      <span className={styles.agentModeLabel}>{label}</span>
+                      <span className={styles.agentModeDesc}>{desc}</span>
+                    </button>
+                  ))}
+                </div>
+              </label>
+
               <label className={styles.label}>Workflow Tags (comma separated)
                 <input className="input" value={Array.isArray(form.workflow_tags) ? form.workflow_tags.join(", ") : form.workflow_tags}
                   placeholder="external, web, internal"
@@ -248,13 +314,28 @@ export default function ToolsPage() {
                     <Plus size={12} /> Add Param
                   </button>
                 </div>
+                <p className={styles.paramsHint}>
+                  Names <code>url</code>, <code>target</code>, <code>host</code>, <code>domain</code> are auto-filled with the campaign target.
+                  Wordlist placeholders should use <code>/wordlists/Discovery/…</code> paths.
+                </p>
+                <datalist id="param-name-suggestions">
+                  <option value="url" />
+                  <option value="target" />
+                  <option value="host" />
+                  <option value="domain" />
+                  <option value="wordlist" />
+                  <option value="port" />
+                  <option value="userlist" />
+                  <option value="passlist" />
+                </datalist>
                 {form.parameters.map((p, i) => (
                   <div key={i} className={styles.paramRow}>
                     <input className="input input-mono" placeholder="name" value={p.name}
-                      onChange={(e) => updateParam(i, "name", e.target.value)} style={{ flex: 1 }} />
+                      list="param-name-suggestions"
+                      onChange={(e) => updateParam(i, "name", e.target.value.toLowerCase())} style={{ flex: 1 }} />
                     <input className="input input-mono" placeholder="--flag" value={p.flag}
                       onChange={(e) => updateParam(i, "flag", e.target.value)} style={{ flex: 1 }} />
-                    <input className="input" placeholder="placeholder / hint" value={p.placeholder}
+                    <input className="input" placeholder="placeholder / default value" value={p.placeholder}
                       onChange={(e) => updateParam(i, "placeholder", e.target.value)} style={{ flex: 2 }} />
                     <button type="button" className="btn btn-danger" style={{ padding: "6px 8px" }}
                       onClick={() => removeParam(i)}><Trash2 size={12} /></button>
@@ -297,18 +378,26 @@ export default function ToolsPage() {
                       <div className={styles.toolInfo}>
                         <div className={styles.toolNameRow}>
                           <span className={styles.toolName}>{tool.name}</span>
-                          {tool.is_builtin && <span className={styles.builtinBadge}>built-in</span>}
-                          {(tool.workflow_tags || []).map((tag) => (
-                            <span key={tag} className={`${styles.tagChip} ${styles[`tag_${tag}`]}`}>{tag}</span>
-                          ))}
-                          {(tool.parameters || []).length > 0 && (
-                            <span className={styles.paramBadge}>
-                              {tool.parameters.length} param{tool.parameters.length !== 1 ? "s" : ""}
-                            </span>
-                          )}
+                          {tool.is_builtin && <span className={styles.builtinLabel}>built-in</span>}
+                          <span
+                            className={styles.agentModeIcon}
+                            data-mode={tool.agent_mode || "auto"}
+                            title={AGENT_MODE_LABELS[tool.agent_mode || "auto"]?.desc}
+                          >
+                            {tool.agent_mode === "never" ? "⊘" : tool.agent_mode === "approve" ? "⏸" : "▶"}
+                          </span>
                         </div>
                         <code className={styles.toolCmd}>{tool.binary} {tool.default_flags}</code>
-                        {tool.description && <p className={styles.toolDesc}>{tool.description}</p>}
+                        {(tool.description || (tool.workflow_tags || []).length > 0) && (
+                          <p className={styles.toolDesc}>
+                            {tool.description}
+                            {(tool.workflow_tags || []).length > 0 && (
+                              <span className={styles.toolTags}>
+                                {tool.description ? " " : ""}{(tool.workflow_tags).map(t => `#${t}`).join(" ")}
+                              </span>
+                            )}
+                          </p>
+                        )}
                       </div>
                       <div className={styles.toolActions}>
                         <button className={styles.iconBtn} title={tool.enabled ? "Disable" : "Enable"}

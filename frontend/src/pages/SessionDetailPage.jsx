@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Play, Plus, Trash2, Flag, X, FolderOpen, Search, Download, ListOrdered, Link2, SlidersHorizontal, Cpu } from "lucide-react";
+import { ArrowLeft, Play, Plus, Trash2, Flag, X, FolderOpen, Search, Download, Link2, Cpu, Pause, Settings, Sparkles } from "lucide-react";
 import { api, createRunSocket } from "../utils/api.js";
 import TerminalPane from "../components/terminal/TerminalPane.jsx";
 import ChecklistPane from "../components/checklist/ChecklistPane.jsx";
@@ -46,12 +46,19 @@ export default function SessionDetailPage() {
   const [addingTarget, setAddingTarget] = useState(false);
   const [newTargetValue, setNewTargetValue] = useState("");
 
+  const [campaign, setCampaign] = useState(null);
+  const [agentSidebarView, setAgentSidebarView] = useState("reasoning"); // "reasoning" | "tools" | "checklist"
+  const connectedRunIds = useRef(new Set());
+  const openSocketsRef = useRef([]);
+  const [showAgentSetup, setShowAgentSetup] = useState(false);
+  const [agentForm, setAgentForm] = useState({ ai_provider: "claude", risk_level: "notify", max_iterations: "50", unlimited: false });
+  const [scheduleMode, setScheduleMode] = useState("now"); // "now" | "later"
+  const [scheduledAt, setScheduledAt] = useState(""); // datetime-local value
+  const [agentSubmitting, setAgentSubmitting] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
-  const [suitePickerOpen, setSuitePickerOpen] = useState(false);
-  const [suites, setSuites] = useState(null);           // null = not loaded yet
-  const [selectedSuite, setSelectedSuite] = useState(null);
-  const [suiteParams, setSuiteParams] = useState({});   // stepIdx -> {paramName: value}
-  const [runningSuite, setRunningSuite] = useState(false);
+  const [showAiReport, setShowAiReport] = useState(false);
+  const [aiReport, setAiReport] = useState(null);
+  const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const [sidebarView, setSidebarView] = useState("tools");   // "tools" | "checklist"
   const [shellCmd, setShellCmd] = useState("");
   const [workflowFilter, setWorkflowFilter] = useState("all"); // "all" | "external" | "internal" | "web"
@@ -59,9 +66,10 @@ export default function SessionDetailPage() {
   const [customItems, setCustomItems] = useState([]);
   const [confirmDialog, setConfirmDialog] = useState(null); // { message, onConfirm }
   const [aiAnalysis, setAiAnalysis] = useState({});        // runId -> { status, text, model, error }
+  const [findingsView, setFindingsView] = useState("list"); // "list" | "chain"
 
   useEffect(() => {
-    api.sessions.get(sessionId).then((s) => {
+    api.sessions.get(sessionId).then(async (s) => {
       setSession(s);
       setNotesValue(s.notes || "");
       setPhaseChecks(s.checklist_state?.phase_checks || {});
@@ -76,6 +84,19 @@ export default function SessionDetailPage() {
       setTargets(initTargets);
       setActiveTarget(initTargets[0] || null);
       if (s.engagement_type) setWorkflowFilter(s.engagement_type);
+
+      // Backfill campaign_id if missing — handles the case where the session update
+      // failed mid-flight (e.g. backend reloading when the agent was launched).
+      if (!s.campaign_id) {
+        try {
+          const allCampaigns = await api.campaigns.list();
+          const linked = allCampaigns.find((c) => c.session_id === sessionId);
+          if (linked) {
+            setSession((prev) => ({ ...prev, campaign_id: linked.id }));
+            api.sessions.update(sessionId, { ...s, campaign_id: linked.id }).catch(() => {});
+          }
+        } catch { /* ignore */ }
+      }
     });
     api.tools.list().then(setTools);
     api.runs.listForSession(sessionId).then((fetchedRuns) => {
@@ -84,10 +105,11 @@ export default function SessionDetailPage() {
       // Reconnect to any runs that were still in progress when we left
       const runningRuns = fetchedRuns.filter((r) => r.status === "running");
       for (const run of runningRuns) {
+        connectedRunIds.current.add(run.id);
         setLiveOutput((o) => ({ ...o, [run.id]: "" }));
         setStreaming((s) => ({ ...s, [run.id]: true }));
         setOpenTabs((t) => (t.includes(run.id) ? t : [...t, run.id]));
-        createRunSocket(run.id, {
+        const ws1 = createRunSocket(run.id, {
           onOutput: (line) => setLiveOutput((o) => ({ ...o, [run.id]: (o[run.id] || "") + line })),
           onDone: (msg) => {
             setStreaming((s) => ({ ...s, [run.id]: false }));
@@ -98,9 +120,59 @@ export default function SessionDetailPage() {
             setLiveOutput((o) => ({ ...o, [run.id]: (o[run.id] || "") + `\n[ERROR] ${err}` }));
           },
         });
+        openSocketsRef.current.push(ws1);
       }
     });
   }, [sessionId]);
+
+  // Poll for new agent-created runs + campaign status; auto-connect streaming for new running runs
+  useEffect(() => {
+    if (!session?.campaign_id) return;
+    const campaignId = session.campaign_id;
+
+    function connectNewRunningRuns(fetchedRuns) {
+      const running = fetchedRuns.filter(
+        (r) => r.status === "running" && !connectedRunIds.current.has(r.id)
+      );
+      for (const run of running) {
+        connectedRunIds.current.add(run.id);
+        setLiveOutput((o) => ({ ...o, [run.id]: o[run.id] || "" }));
+        setStreaming((s) => ({ ...s, [run.id]: true }));
+        setOpenTabs((t) => (t.includes(run.id) ? t : [...t, run.id]));
+        setActiveRunId(run.id);
+        const ws2 = createRunSocket(run.id, {
+          onOutput: (line) => setLiveOutput((o) => ({ ...o, [run.id]: (o[run.id] || "") + line })),
+          onDone: (msg) => {
+            setStreaming((s) => ({ ...s, [run.id]: false }));
+            setRuns((prev) => prev.map((r) => r.id === run.id ? { ...r, status: msg.status } : r));
+          },
+          onError: (err) => {
+            setStreaming((s) => ({ ...s, [run.id]: false }));
+            setLiveOutput((o) => ({ ...o, [run.id]: (o[run.id] || "") + `\n[ERROR] ${err}` }));
+          },
+        });
+        openSocketsRef.current.push(ws2);
+      }
+    }
+
+    api.campaigns.get(campaignId).then(setCampaign);
+    api.runs.listForSession(sessionId).then((r) => { setRuns(r); connectNewRunningRuns(r); });
+
+    const interval = setInterval(() => {
+      api.runs.listForSession(sessionId).then((r) => { setRuns(r); connectNewRunningRuns(r); });
+      api.campaigns.get(campaignId).then(setCampaign);
+      // Merge only findings + checklist from the server so in-progress notes edits aren't clobbered
+      api.sessions.get(sessionId).then((fresh) => {
+        setSession((prev) => prev ? { ...prev, findings: fresh.findings, checklist_state: fresh.checklist_state } : prev);
+      });
+    }, 4000);
+    return () => {
+      clearInterval(interval);
+      openSocketsRef.current.forEach(ws => { try { ws.close(); } catch {} });
+      openSocketsRef.current = [];
+    };
+  }, [session?.campaign_id, sessionId]);
+
 
   const enabledTools = useMemo(() => tools.filter((t) => t.enabled), [tools]);
   const filteredTools = useMemo(() => {
@@ -134,7 +206,8 @@ export default function SessionDetailPage() {
     setLiveOutput((o) => ({ ...o, [run.id]: "" }));
     setStreaming((s) => ({ ...s, [run.id]: true }));
 
-    createRunSocket(run.id, {
+    connectedRunIds.current.add(run.id);
+    const ws3 = createRunSocket(run.id, {
       onOutput: (line) => setLiveOutput((o) => ({ ...o, [run.id]: (o[run.id] || "") + line })),
       onDone: (msg) => {
         setStreaming((s) => ({ ...s, [run.id]: false }));
@@ -147,6 +220,7 @@ export default function SessionDetailPage() {
         setLiveOutput((o) => ({ ...o, [run.id]: (o[run.id] || "") + `\n[ERROR] ${err}` }));
       },
     });
+    openSocketsRef.current.push(ws3);
   }
 
   function stageTool(tool) {
@@ -175,7 +249,7 @@ export default function SessionDetailPage() {
     setActiveRunId(run.id);
     setLiveOutput((o) => ({ ...o, [run.id]: "" }));
     setStreaming((s) => ({ ...s, [run.id]: true }));
-    createRunSocket(run.id, {
+    const ws4 = createRunSocket(run.id, {
       onOutput: (line) => setLiveOutput((o) => ({ ...o, [run.id]: (o[run.id] || "") + line })),
       onDone: (msg) => {
         setStreaming((s) => ({ ...s, [run.id]: false }));
@@ -186,6 +260,7 @@ export default function SessionDetailPage() {
         setLiveOutput((o) => ({ ...o, [run.id]: (o[run.id] || "") + `\n[ERROR] ${err}` }));
       },
     });
+    openSocketsRef.current.push(ws4);
   }
 
   async function killActiveRun() {
@@ -261,7 +336,7 @@ export default function SessionDetailPage() {
     setNotesSaved(false);
     clearTimeout(notesTimerRef.current);
     notesTimerRef.current = setTimeout(async () => {
-      await api.sessions.update(sessionId, { ...session, notes: val });
+      await api.sessions.patchNotes(sessionId, val);
       setNotesSaved(true);
     }, 800);
   }
@@ -307,6 +382,31 @@ export default function SessionDetailPage() {
     } finally {
       setIsExporting(false);
     }
+  }
+
+  async function handleGenerateAiReport() {
+    setIsGeneratingReport(true);
+    setAiReport(null);
+    setShowAiReport(true);
+    try {
+      const data = await api.sessions.generateAiReport(sessionId, campaign?.ai_provider || "claude");
+      setAiReport(data.markdown);
+    } catch (err) {
+      setAiReport(`**Report generation failed:** ${err.message}`);
+    } finally {
+      setIsGeneratingReport(false);
+    }
+  }
+
+  function downloadAiReport() {
+    const slug = (session.name || "report").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    const blob = new Blob([aiReport], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `quiver-ai-report-${slug}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   function isTargetParam(p) {
@@ -363,92 +463,6 @@ export default function SessionDetailPage() {
     await api.sessions.patchTargets(sessionId, updated).catch(() => {});
   }
 
-  async function openSuitePicker() {
-    setSuitePickerOpen(true);
-    setSelectedSuite(null);
-    setSuiteParams({});
-    if (!suites) {
-      const list = await api.suites.list().catch(() => []);
-      setSuites(list);
-    }
-  }
-
-  function selectSuite(suite) {
-    setSelectedSuite(suite);
-    const initial = {};
-    suite.steps.forEach((step, i) => {
-      const merged = { ...step.param_values };
-      // Pre-fill blank target params with the active target
-      if (activeTarget) {
-        const toolDef = tools.find(t => t.id === step.tool_id);
-        (toolDef?.parameters || []).forEach(p => {
-          if (isTargetParam(p) && !merged[p.name]) {
-            merged[p.name] = activeTarget.value;
-          }
-        });
-      }
-      initial[i] = merged;
-    });
-    setSuiteParams(initial);
-  }
-
-  // Collect steps that have at least one blank required param
-  function blankParams(suite) {
-    const blank = [];
-    suite.steps.forEach((step, stepIdx) => {
-      const toolDef = tools.find(t => t.id === step.tool_id);
-      (toolDef?.parameters || []).forEach(p => {
-        const val = (suiteParams[stepIdx] || {})[p.name] || "";
-        if (!val) blank.push({ stepIdx, stepName: step.tool_name, param: p });
-      });
-    });
-    return blank;
-  }
-
-  async function executeSuite() {
-    if (!selectedSuite) return;
-    setSuitePickerOpen(false);
-    setRunningSuite(true);
-
-    for (const [i, step] of selectedSuite.steps.entries()) {
-      const merged = { ...(step.param_values || {}), ...(suiteParams[i] || {}) };
-      let run;
-      try {
-        run = await api.runs.create({
-          session_id: sessionId,
-          tool_id: step.tool_id,
-          param_values: merged,
-          extra_flags: step.extra_flags || "",
-        });
-      } catch {
-        break;
-      }
-
-      setRuns(prev => [run, ...prev]);
-      openTab(run.id);
-      setLiveOutput(o => ({ ...o, [run.id]: "" }));
-      setStreaming(s => ({ ...s, [run.id]: true }));
-
-      await new Promise(resolve => {
-        createRunSocket(run.id, {
-          onOutput: line => setLiveOutput(o => ({ ...o, [run.id]: (o[run.id] || "") + line })),
-          onDone: msg => {
-            setStreaming(s => ({ ...s, [run.id]: false }));
-            setRuns(prev => prev.map(r => r.id === run.id ? { ...r, status: msg.status } : r));
-            resolve();
-          },
-          onError: err => {
-            setStreaming(s => ({ ...s, [run.id]: false }));
-            setLiveOutput(o => ({ ...o, [run.id]: (o[run.id] || "") + `\n[ERROR] ${err}` }));
-            resolve();
-          },
-        });
-      });
-    }
-
-    setRunningSuite(false);
-  }
-
   async function handleAnalyze(runId) {
     setAiAnalysis((prev) => ({ ...prev, [runId]: { status: "loading" } }));
     try {
@@ -456,6 +470,57 @@ export default function SessionDetailPage() {
       setAiAnalysis((prev) => ({ ...prev, [runId]: { status: "done", text: data.analysis, model: data.model } }));
     } catch (err) {
       setAiAnalysis((prev) => ({ ...prev, [runId]: { status: "error", error: err.message } }));
+    }
+  }
+
+  const trackPath = {
+    external: "/external",
+    internal: "/internal",
+    web:      "/web-app",
+  }[session?.engagement_type] || "/external";
+
+  async function handleLaunchAgent(e) {
+    e.preventDefault();
+    setAgentSubmitting(true);
+    try {
+      const targetScope = targets.map((t) => t.value).filter(Boolean);
+      const isScheduled = scheduleMode === "later" && scheduledAt;
+      const scheduleIso = isScheduled ? new Date(scheduledAt).toISOString() : null;
+
+      const newCampaign = await api.campaigns.create({
+        name:           `${session.name} — AI Agent`,
+        description:    "",
+        target_scope:   targetScope.length ? targetScope : [session.target],
+        ai_provider:    agentForm.ai_provider,
+        risk_level:     agentForm.risk_level,
+        schedule:       scheduleIso,
+        session_id:     sessionId,
+        max_iterations: agentForm.unlimited ? null : (parseInt(agentForm.max_iterations) || 50),
+      });
+      // Link back to session so the session knows its campaign
+      await api.sessions.update(sessionId, { ...session, campaign_id: newCampaign.id });
+      setSession((s) => ({ ...s, campaign_id: newCampaign.id }));
+      setCampaign(newCampaign);
+      setShowAgentSetup(false);
+      // Only fire immediately when running now; scheduled runs are handled by APScheduler
+      if (!isScheduled) {
+        await api.campaigns.run(newCampaign.id);
+      }
+    } catch (err) {
+      alert(err.message || "Failed to launch agent");
+    } finally {
+      setAgentSubmitting(false);
+    }
+  }
+
+  async function handleAgentToggle() {
+    if (!campaign) return;
+    if (campaign.status === "active") {
+      await api.campaigns.update(campaign.id, { status: "paused" });
+      setCampaign((c) => ({ ...c, status: "paused" }));
+    } else {
+      await api.campaigns.run(campaign.id);
+      setCampaign((c) => ({ ...c, status: "active" }));
     }
   }
 
@@ -508,6 +573,20 @@ export default function SessionDetailPage() {
     return new Date(isoStr).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   }
 
+  function getScheduledTime(c) {
+    if (!c?.schedule || !c.schedule.includes("T")) return null;
+    const dt = new Date(c.schedule);
+    return isNaN(dt) || dt <= new Date() ? null : dt;
+  }
+
+  function fmtScheduledTime(dt) {
+    const today = new Date();
+    const isToday = dt.toDateString() === today.toDateString();
+    const timePart = dt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    if (isToday) return `today at ${timePart}`;
+    return dt.toLocaleDateString([], { month: "short", day: "numeric" }) + ` at ${timePart}`;
+  }
+
   if (!session) return <div className={styles.loading}>Loading session...</div>;
 
   return (
@@ -525,25 +604,167 @@ export default function SessionDetailPage() {
         </div>
       )}
 
+      {/* Agent setup modal */}
+      {showAgentSetup && (
+        <div className={styles.modal} onClick={() => setShowAgentSetup(false)}>
+          <div className={styles.modalBox} onClick={(e) => e.stopPropagation()}>
+            <h2 className={styles.modalTitle}>Configure AI Agent</h2>
+            <form onSubmit={handleLaunchAgent} className={styles.form}>
+              <label className={styles.label}>AI Provider
+                <select className="input" value={agentForm.ai_provider}
+                  onChange={(e) => setAgentForm({ ...agentForm, ai_provider: e.target.value })}>
+                  <option value="claude">Claude (Anthropic)</option>
+                  <option value="local">Local AI (Ollama)</option>
+                </select>
+              </label>
+              <label className={styles.label}>Approval Mode
+                <select className="input" value={agentForm.risk_level}
+                  onChange={(e) => setAgentForm({ ...agentForm, risk_level: e.target.value })}>
+                  <option value="auto">Auto Only — passive recon runs freely</option>
+                  <option value="notify">Moderate — active scanning runs freely</option>
+                  <option value="approve">Approve All — every action requires human sign-off before execution</option>
+                </select>
+              </label>
+              {(() => {
+                const iterVal = parseInt(agentForm.max_iterations);
+                const iterError = !agentForm.unlimited && agentForm.max_iterations !== ""
+                  ? (isNaN(iterVal) ? "Enter a number" : iterVal < 1 ? "Minimum is 1" : iterVal > 500 ? "Maximum is 500" : null)
+                  : null;
+                return (
+                  <div className={styles.label}>
+                    Iteration limit
+                    <div className={styles.iterationRow}>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        className={`input ${iterError ? styles.inputError : ""}`}
+                        style={{ width: 72 }}
+                        value={agentForm.unlimited ? "" : agentForm.max_iterations}
+                        disabled={agentForm.unlimited}
+                        placeholder="50"
+                        onChange={(e) => setAgentForm({ ...agentForm, max_iterations: e.target.value.replace(/[^0-9]/g, "") })}
+                      />
+                      <label className={styles.unlimitedLabel}>
+                        <input
+                          type="checkbox"
+                          checked={agentForm.unlimited}
+                          onChange={(e) => setAgentForm({ ...agentForm, unlimited: e.target.checked })}
+                        />
+                        No limit — run until complete
+                      </label>
+                    </div>
+                    {iterError
+                      ? <span className={styles.iterationError}>{iterError}</span>
+                      : <span className={styles.iterationHint}>
+                          {agentForm.unlimited
+                            ? "Agent runs until it decides the engagement is complete."
+                            : `Agent pauses after ${iterVal || 50} steps — you can continue from where it left off.`}
+                        </span>
+                    }
+                  </div>
+                );
+              })()}
+              <div className={styles.label}>
+                When to run
+                <div className={styles.scheduleToggle}>
+                  <button
+                    type="button"
+                    className={`${styles.scheduleBtn} ${scheduleMode === "now" ? styles.scheduleBtnActive : ""}`}
+                    onClick={() => setScheduleMode("now")}
+                  >
+                    Run now
+                  </button>
+                  <button
+                    type="button"
+                    className={`${styles.scheduleBtn} ${scheduleMode === "later" ? styles.scheduleBtnActive : ""}`}
+                    onClick={() => setScheduleMode("later")}
+                  >
+                    Schedule for later
+                  </button>
+                </div>
+                {scheduleMode === "later" && (
+                  <input
+                    type="datetime-local"
+                    className="input"
+                    style={{ marginTop: 8 }}
+                    value={scheduledAt}
+                    min={new Date(Date.now() + 60000).toISOString().slice(0, 16)}
+                    onChange={(e) => setScheduledAt(e.target.value)}
+                    required={scheduleMode === "later"}
+                  />
+                )}
+              </div>
+              <div className={styles.formActions}>
+                <button type="button" className="btn btn-ghost" onClick={() => setShowAgentSetup(false)}>Cancel</button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={agentSubmitting || (scheduleMode === "later" && !scheduledAt) || (() => { const v = parseInt(agentForm.max_iterations); return !agentForm.unlimited && (isNaN(v) || v < 1 || v > 500); })()}
+                >
+                  {agentSubmitting
+                    ? (scheduleMode === "later" ? "Scheduling…" : "Launching…")
+                    : (scheduleMode === "later" ? "Schedule Agent" : "Launch Agent")}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Top bar */}
       <div className={styles.topBar}>
-        <button className="btn btn-ghost" style={{ padding: "4px 10px" }} onClick={() => navigate("/sessions")}>
-          <ArrowLeft size={14} /> Sessions
+        <button className="btn btn-ghost" style={{ padding: "4px 10px" }} onClick={() => navigate(trackPath)}>
+          <ArrowLeft size={14} /> {session.engagement_type === "internal" ? "Internal" : session.engagement_type === "web" ? "Web App" : "External"}
         </button>
         <div className={styles.sessionInfo}>
-          <h1 className={styles.sessionName}>{session.name}</h1>
+          <div className={styles.sessionNameRow}>
+            <h1 className={styles.sessionName}>{session.name}</h1>
+          </div>
           <code className={styles.target}>{session.target}</code>
         </div>
-        <button className="btn btn-ghost" style={{ fontSize: 12 }}
-          onClick={openSuitePicker} disabled={runningSuite}>
-          <ListOrdered size={13} /> {runningSuite ? "Running suite…" : "Run Suite"}
-        </button>
         <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={handleExport} disabled={isExporting}>
           <Download size={13} /> {isExporting ? "Exporting…" : "Export Report"}
+        </button>
+        <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={handleGenerateAiReport} disabled={isGeneratingReport}>
+          <Sparkles size={13} /> AI Report
         </button>
         <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => setShowFinding(true)}>
           <Flag size={13} /> Log Finding
         </button>
+      </div>
+
+      {/* AI Agent strip */}
+      <div className={`${styles.agentStrip} ${campaign?.status === "awaiting_approval" ? styles.agentStripAlert : ""}`}>
+        <Cpu size={13} style={{ color: campaign?.status === "awaiting_approval" ? "#f59e0b" : "var(--accent)", flexShrink: 0 }} />
+        {!campaign ? (
+          <>
+            <span className={styles.agentStripLabel}>No AI agent configured</span>
+            <button className={styles.agentStripBtn} onClick={() => { setShowAgentSetup(true); setScheduleMode("now"); setScheduledAt(""); }}>
+              <Settings size={11} /> Set up Agent
+            </button>
+          </>
+        ) : (
+          <>
+            <span className={campaign.status === "awaiting_approval" ? styles.agentStripLabelAlert : styles.agentStripLabel}>
+              {(() => {
+                const scheduled = getScheduledTime(campaign);
+                if (scheduled && campaign.status === "active") return `Scheduled — ${fmtScheduledTime(scheduled)}`;
+                if (campaign.status === "active")              return "Agent running";
+                if (campaign.status === "completed")           return "Agent completed";
+                if (campaign.status === "awaiting_approval")   return "⚠ Awaiting approval";
+                return "Agent paused — click Continue to run more iterations";
+              })()}
+            </span>
+            <span className={styles.agentStripProvider}>{campaign.ai_provider === "claude" ? "Claude" : "Local AI"}</span>
+            {campaign.status !== "completed" && (
+              <button className={styles.agentToggleBtn} onClick={handleAgentToggle}>
+                {campaign.status === "active"
+                  ? <><Pause size={11} /> Pause</>
+                  : <><Play size={11} /> Continue</>}
+              </button>
+            )}
+          </>
+        )}
       </div>
 
       {/* Target bar */}
@@ -594,19 +815,93 @@ export default function SessionDetailPage() {
       </div>
 
       <div className={styles.workspace}>
-        {/* Left: tool picker / checklist */}
+        {/* Left: reasoning terminal (agent sessions) or tool picker / checklist (manual) */}
         <aside className={styles.toolPicker}>
-          {/* View toggle */}
+          {/* Unified toggle — Reasoning tab only appears when agent is active */}
           <div className={styles.sidebarToggle}>
+            {session.campaign_id && (
+              <button
+                className={`${styles.toggleBtn} ${agentSidebarView === "reasoning" ? styles.toggleBtnActive : ""}`}
+                onClick={() => setAgentSidebarView("reasoning")}>Reasoning</button>
+            )}
             <button
-              className={`${styles.toggleBtn} ${sidebarView === "tools" ? styles.toggleBtnActive : ""}`}
-              onClick={() => setSidebarView("tools")}>Tools</button>
+              className={`${styles.toggleBtn} ${(session.campaign_id ? agentSidebarView : sidebarView) === "tools" ? styles.toggleBtnActive : ""}`}
+              onClick={() => session.campaign_id ? setAgentSidebarView("tools") : setSidebarView("tools")}>Tools</button>
             <button
-              className={`${styles.toggleBtn} ${sidebarView === "checklist" ? styles.toggleBtnActive : ""}`}
-              onClick={() => setSidebarView("checklist")}>Checklist</button>
+              className={`${styles.toggleBtn} ${(session.campaign_id ? agentSidebarView : sidebarView) === "checklist" ? styles.toggleBtnActive : ""}`}
+              onClick={() => session.campaign_id ? setAgentSidebarView("checklist") : setSidebarView("checklist")}>Checklist</button>
           </div>
 
-          {sidebarView === "checklist" ? (
+          {/* Agent reasoning view */}
+          {session.campaign_id && agentSidebarView === "reasoning" && (
+            <div className={styles.reasoningFeed}>
+              {campaign?.last_agent_reasoning && (campaign.status === "active" || campaign.status === "awaiting_approval") && (
+                <div className={styles.reasoningThinking}>
+                  <span className={styles.reasoningThinkingLabel}>
+                    {campaign.status === "awaiting_approval" ? "awaiting approval" : "thinking"}
+                  </span>
+                  <p>{campaign.last_agent_reasoning}</p>
+                </div>
+              )}
+              {runs.filter(r => r.reasoning).length === 0 && !campaign?.last_agent_reasoning && (
+                <p className={styles.reasoningEmpty}>Waiting for agent to run…</p>
+              )}
+              {runs.filter(r => r.reasoning).map((run, i, arr) => {
+                if (run.tool_name === "_summary") {
+                  const findings = run.param_values?._findings || [];
+                  const SEV_COLOR = { critical: "#f87171", high: "#fb923c", medium: "#facc15", low: "#60a5fa", info: "#94a3b8" };
+                  return (
+                    <div key={run.id} className={styles.summaryCard}>
+                      <div className={styles.summaryHeader}>
+                        <span className={styles.summaryLabel}>Agent Summary</span>
+                      </div>
+                      {run.reasoning && <p className={styles.summaryText}>{run.reasoning}</p>}
+                      {findings.length > 0 && (
+                        <div className={styles.summaryFindings}>
+                          <p className={styles.summaryFindingsLabel}>Findings logged ({findings.length})</p>
+                          {findings.map((f, fi) => (
+                            <div key={fi} className={styles.summaryFinding}>
+                              <span className={styles.summaryFindingSev} style={{ color: SEV_COLOR[f.severity] || "#94a3b8" }}>{f.severity}</span>
+                              <span className={styles.summaryFindingTitle}>{f.title}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {findings.length === 0 && (
+                        <p className={styles.summaryNoFindings}>No vulnerabilities identified.</p>
+                      )}
+                    </div>
+                  );
+                }
+                const isRunStreaming = streaming[run.id] || false;
+                const displayStatus = isRunStreaming ? "running" : run.status;
+                const regularRuns = arr.filter(r => r.tool_name !== "_summary");
+                const stepNum = regularRuns.length - regularRuns.indexOf(run);
+                return (
+                  <div key={run.id} className={styles.reasoningBlock}>
+                    <div className={styles.reasoningEntry}>
+                      <div className={styles.reasoningMeta}>
+                        <span className={styles.reasoningStep}>Step {stepNum}</span>
+                        <span className={`${styles.runStatus} ${styles[`status_${displayStatus}`]}`}>{displayStatus}</span>
+                      </div>
+                      <div className={styles.reasoningTool}>{run.tool_name}</div>
+                      <p className={styles.reasoningText}>{run.reasoning}</p>
+                      <code className={styles.reasoningCmd}>{run.command}</code>
+                    </div>
+                    {run.param_values?._thought && (
+                      <div className={styles.reasoningThought}>
+                        <span className={styles.reasoningThoughtLabel}>thinking</span>
+                        <p>{run.param_values._thought}</p>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Checklist view */}
+          {(session.campaign_id ? agentSidebarView : sidebarView) === "checklist" && (
             <ChecklistPane
               session={session}
               tools={enabledTools}
@@ -619,131 +914,130 @@ export default function SessionDetailPage() {
               onDeleteCustomItem={handleDeleteCustomItem}
               onJumpToTool={handleJumpToTool}
             />
-          ) : (
+          )}
+
+          {/* Tools view */}
+          {(session.campaign_id ? agentSidebarView : sidebarView) === "tools" && (
             <>
-          {/* Filter row */}
-          <div className={styles.filterRow}>
-            {toolSearchOpen ? (
-              <>
-                <Search size={12} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
-                <input
-                  className={styles.toolSearchInput}
-                  placeholder="Search tools…"
-                  value={toolSearch}
-                  onChange={e => setToolSearch(e.target.value)}
-                  autoFocus
-                />
-                <button className={styles.toolSearchClose} title="Close search"
-                  onClick={() => { setToolSearchOpen(false); setToolSearch(""); }}>
-                  <X size={12} />
-                </button>
-              </>
-            ) : (
-              <>
-                <select
-                  className={`${styles.filterSelect} ${workflowFilter !== "all" ? styles.filterSelectActive : ""}`}
-                  value={workflowFilter}
-                  onChange={e => setWorkflowFilter(e.target.value)}
-                >
-                  <option value="all">All Engagements</option>
-                  <option value="external">External</option>
-                  <option value="internal">Internal</option>
-                  <option value="web">Web</option>
-                </select>
-                <select
-                  className={`${styles.filterSelect} ${selectedCat !== "all" ? styles.filterSelectActive : ""}`}
-                  value={selectedCat}
-                  onChange={e => setSelectedCat(e.target.value)}
-                >
-                  <option value="all">All Categories</option>
-                  {CAT_ORDER.map(c => (
-                    <option key={c} value={c}>{CAT_LABELS[c]}</option>
-                  ))}
-                </select>
-                <button className={styles.toolSearchOpen} title="Search tools"
-                  onClick={() => setToolSearchOpen(true)}>
-                  <Search size={12} />
-                </button>
-              </>
-            )}
-          </div>
-          <div className={styles.toolList}>
-            {filteredTools.length === 0 && (
-              <div className={styles.toolFilterEmpty}>
-                <p>No {selectedCat === "all" ? "" : `${CAT_LABELS[selectedCat]} `}tools tagged for {workflowFilter} engagements.</p>
-                <button className={styles.toolFilterReset}
-                  onClick={() => { setWorkflowFilter("all"); setSelectedCat("all"); }}>
-                  Show all tools
-                </button>
+              <div className={styles.filterRow}>
+                {toolSearchOpen ? (
+                  <>
+                    <Search size={12} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
+                    <input
+                      className={styles.toolSearchInput}
+                      placeholder="Search tools…"
+                      value={toolSearch}
+                      onChange={e => setToolSearch(e.target.value)}
+                      autoFocus
+                    />
+                    <button className={styles.toolSearchClose} title="Close search"
+                      onClick={() => { setToolSearchOpen(false); setToolSearch(""); }}>
+                      <X size={12} />
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <select
+                      className={`${styles.filterSelect} ${workflowFilter !== "all" ? styles.filterSelectActive : ""}`}
+                      value={workflowFilter}
+                      onChange={e => setWorkflowFilter(e.target.value)}
+                    >
+                      <option value="all">All Engagements</option>
+                      <option value="external">External</option>
+                      <option value="internal">Internal</option>
+                      <option value="web">Web</option>
+                    </select>
+                    <select
+                      className={`${styles.filterSelect} ${selectedCat !== "all" ? styles.filterSelectActive : ""}`}
+                      value={selectedCat}
+                      onChange={e => setSelectedCat(e.target.value)}
+                    >
+                      <option value="all">All Categories</option>
+                      {CAT_ORDER.map(c => (
+                        <option key={c} value={c}>{CAT_LABELS[c]}</option>
+                      ))}
+                    </select>
+                    <button className={styles.toolSearchOpen} title="Search tools"
+                      onClick={() => setToolSearchOpen(true)}>
+                      <Search size={12} />
+                    </button>
+                  </>
+                )}
               </div>
-            )}
-            {filteredTools.map((tool) => {
-              const params = runParams[tool.id] || {};
-              const flags = extraFlags[tool.id] || "";
-              return (
-                <div key={tool.id} className={`${styles.toolCard} ${runningToolIds.has(tool.id) ? styles.toolRunning : ""}`}>
-                  <div className={styles.toolHeader}>
-                    <span className={`${styles.toolCat} cat-${tool.category}`}>{tool.category}</span>
-                    <span className={styles.toolName}>{tool.name}</span>
+              <div className={styles.toolList}>
+                {filteredTools.length === 0 && (
+                  <div className={styles.toolFilterEmpty}>
+                    <p>No {selectedCat === "all" ? "" : `${CAT_LABELS[selectedCat]} `}tools tagged for {workflowFilter} engagements.</p>
+                    <button className={styles.toolFilterReset}
+                      onClick={() => { setWorkflowFilter("all"); setSelectedCat("all"); }}>
+                      Show all tools
+                    </button>
                   </div>
-                  <code className={styles.toolCmd}>{tool.binary} {tool.default_flags}</code>
-
-                  {tool.parameters?.map((p) => (
-                    <div key={p.name} className={styles.paramField}>
-                      <label className={styles.paramLabel}>
-                        {p.name}{p.required && <span style={{ color: "var(--critical)" }}> *</span>}
-                      </label>
-                      {isWordlistParam(p) ? (
-                        <div className={styles.wordlistInput}>
-                          <input className="input input-mono" style={{ fontSize: 11 }}
-                            placeholder={p.placeholder || p.name}
-                            value={params[p.name] || ""}
-                            onChange={(e) => setRunParams((rp) => ({
-                              ...rp,
-                              [tool.id]: { ...params, [p.name]: e.target.value },
-                            }))} />
-                          <button type="button" className={styles.browseBtn}
-                            title="Browse wordlists"
-                            onClick={() => openWordlistPicker(tool.id, p.name)}>
-                            <FolderOpen size={12} />
-                          </button>
+                )}
+                {filteredTools.map((tool) => {
+                  const params = runParams[tool.id] || {};
+                  const flags = extraFlags[tool.id] || "";
+                  return (
+                    <div key={tool.id} className={`${styles.toolCard} ${runningToolIds.has(tool.id) ? styles.toolRunning : ""}`}>
+                      <div className={styles.toolHeader}>
+                        <span className={`${styles.toolCat} cat-${tool.category}`}>{tool.category}</span>
+                        <span className={styles.toolName}>{tool.name}</span>
+                      </div>
+                      <code className={styles.toolCmd}>{tool.binary} {tool.default_flags}</code>
+                      {tool.parameters?.map((p) => (
+                        <div key={p.name} className={styles.paramField}>
+                          <label className={styles.paramLabel}>
+                            {p.name}{p.required && <span style={{ color: "var(--critical)" }}> *</span>}
+                          </label>
+                          {isWordlistParam(p) ? (
+                            <div className={styles.wordlistInput}>
+                              <input className="input input-mono" style={{ fontSize: 11 }}
+                                placeholder={p.placeholder || p.name}
+                                value={params[p.name] || ""}
+                                onChange={(e) => setRunParams((rp) => ({
+                                  ...rp,
+                                  [tool.id]: { ...params, [p.name]: e.target.value },
+                                }))} />
+                              <button type="button" className={styles.browseBtn}
+                                title="Browse wordlists"
+                                onClick={() => openWordlistPicker(tool.id, p.name)}>
+                                <FolderOpen size={12} />
+                              </button>
+                            </div>
+                          ) : (
+                            <input className="input input-mono" style={{ fontSize: 11 }}
+                              placeholder={p.placeholder || p.name}
+                              value={params[p.name] || ""}
+                              onChange={(e) => setRunParams((rp) => ({
+                                ...rp,
+                                [tool.id]: { ...params, [p.name]: e.target.value },
+                              }))} />
+                          )}
                         </div>
-                      ) : (
+                      ))}
+                      <div className={styles.paramField}>
+                        <label className={styles.paramLabel}>Extra flags</label>
                         <input className="input input-mono" style={{ fontSize: 11 }}
-                          placeholder={p.placeholder || p.name}
-                          value={params[p.name] || ""}
-                          onChange={(e) => setRunParams((rp) => ({
-                            ...rp,
-                            [tool.id]: { ...params, [p.name]: e.target.value },
-                          }))} />
-                      )}
+                          placeholder="-v --timeout 30"
+                          value={flags}
+                          onChange={(e) => setExtraFlags((ef) => ({ ...ef, [tool.id]: e.target.value }))} />
+                      </div>
+                      <div className={styles.toolActions}>
+                        <button className="btn btn-primary" style={{ flex: 1, justifyContent: "center" }}
+                          onClick={() => stageTool(tool)}
+                          title="Fill command in shell tab for review/edit">
+                          Stage
+                        </button>
+                        <button className="btn btn-ghost" style={{ padding: "0 10px", justifyContent: "center", border: "1px solid var(--accent-dim)", color: "var(--accent)" }}
+                          onClick={() => runTool(tool)}
+                          title="Run immediately">
+                          <Play size={12} />
+                        </button>
+                      </div>
                     </div>
-                  ))}
-
-                  <div className={styles.paramField}>
-                    <label className={styles.paramLabel}>Extra flags</label>
-                    <input className="input input-mono" style={{ fontSize: 11 }}
-                      placeholder="-v --timeout 30"
-                      value={flags}
-                      onChange={(e) => setExtraFlags((ef) => ({ ...ef, [tool.id]: e.target.value }))} />
-                  </div>
-
-                  <div className={styles.toolActions}>
-                    <button className="btn btn-primary" style={{ flex: 1, justifyContent: "center" }}
-                      onClick={() => stageTool(tool)}
-                      title="Fill command in shell tab for review/edit">
-                      Stage
-                    </button>
-                    <button className="btn btn-ghost" style={{ padding: "0 10px", justifyContent: "center", border: "1px solid var(--accent-dim)", color: "var(--accent)" }}
-                      onClick={() => runTool(tool)}
-                      title="Run immediately">
-                      <Play size={12} />
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+                  );
+                })}
+              </div>
             </>
           )}
         </aside>
@@ -856,7 +1150,7 @@ export default function SessionDetailPage() {
                 <button className={styles.aiFloatBtn} onClick={() => handleAnalyze(activeRunId)}>
                   <Cpu size={13} />
                   Analyze with AI
-                  <span className={styles.aiModel}>phi3:mini</span>
+                  <span className={styles.aiModel}>Local AI</span>
                 </button>
             )}
           </div>
@@ -871,7 +1165,7 @@ export default function SessionDetailPage() {
                   <div className={styles.aiPanel}>
                     <div className={styles.aiLoading}>
                       <span className={styles.aiSpinner} />
-                      Analyzing with phi3:mini&hellip; this may take 30–60s on CPU
+                      Analyzing with Local AI&hellip; this may take 30–60s on CPU
                     </div>
                   </div>
                 );
@@ -903,7 +1197,7 @@ export default function SessionDetailPage() {
             })()}
         </div>
 
-        {/* Right: notes + run history + findings */}
+        {/* Right panel */}
         <aside className={styles.rightPanel}>
           {/* Session notes */}
           <div className={styles.notesSection}>
@@ -931,6 +1225,9 @@ export default function SessionDetailPage() {
                     className={`${styles.runItem} ${run.id === activeRunId ? styles.runActive : ""}`}
                     onClick={() => openTab(run.id)}>
                     <div className={styles.runName}>{run.tool_name}</div>
+                    {run.reasoning && (
+                      <div className={styles.runReasoning}>{run.reasoning}</div>
+                    )}
                     <div className={styles.runMeta}>
                       <span className={`${styles.runStatus} ${styles[`status_${displayStatus}`]}`}>
                         {displayStatus}
@@ -946,140 +1243,69 @@ export default function SessionDetailPage() {
           </div>
 
           <div className={styles.panelSection}>
-            <h3 className={styles.panelTitle}>Findings ({session.findings?.length || 0})</h3>
-            <div className={styles.findingList}>
-              {(session.findings || []).map((f) => {
-                const evidenceIds = getEvidenceIds(f);
-                const evidenceRuns = evidenceIds.map((id) => runsById[id]).filter(Boolean);
-                return (
-                  <div key={f.id} className={styles.findingItem}>
-                    <div className={styles.findingTop}>
-                      <span className={`badge badge-${f.severity}`}>{f.severity}</span>
-                      <button className={styles.delBtn} onClick={() => withConfirm(`Delete finding "${f.title}"?`, () => removeFinding(f.id))}>
-                        <X size={11} />
-                      </button>
-                    </div>
-                    <div className={styles.findingTitle}>{f.title}</div>
-                    {f.notes && <p className={styles.findingNotes}>{f.notes}</p>}
-                    <div className={styles.evidenceRow}>
-                      {evidenceRuns.map((run) => (
-                        <div key={run.id} className={styles.evidenceChip}>
-                          <button
-                            className={styles.evidenceChipBtn}
-                            onClick={() => openTab(run.id)}
-                            title="Jump to run output"
-                          >
-                            <Link2 size={9} />
-                            <span>{run.tool_name}</span>
-                          </button>
-                          <button
-                            className={styles.evidenceUnlinkBtn}
-                            onClick={() => toggleRunEvidence(f.id, run.id)}
-                            title="Remove evidence link"
-                          >
-                            <X size={9} />
-                          </button>
-                        </div>
-                      ))}
-                      <button
-                        className={styles.linkEvidenceBtn}
-                        onClick={() => setLinkingFindingId(f.id)}
-                      >
-                        <Link2 size={9} /> {evidenceRuns.length > 0 ? "Add more" : "Link evidence"}
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-              {(!session.findings || session.findings.length === 0) && (
-                <p className={styles.empty}>No findings logged.</p>
-              )}
+            <div className={styles.findingsHeader}>
+              <h3 className={styles.panelTitle}>Findings ({session.findings?.length || 0})</h3>
+              <div className={styles.findingsViewToggle}>
+                <button className={`${styles.viewBtn} ${findingsView === "list" ? styles.viewBtnActive : ""}`} onClick={() => setFindingsView("list")}>List</button>
+                <button className={`${styles.viewBtn} ${findingsView === "chain" ? styles.viewBtnActive : ""}`} onClick={() => setFindingsView("chain")}>Chain</button>
+              </div>
             </div>
+
+            {findingsView === "list" ? (
+              <div className={styles.findingList}>
+                {(session.findings || []).map((f) => {
+                  const evidenceIds = getEvidenceIds(f);
+                  const evidenceRuns = evidenceIds.map((id) => runsById[id]).filter(Boolean);
+                  const parentFinding = f.chains_from_id ? session.findings?.find(p => p.id === f.chains_from_id) : null;
+                  return (
+                    <div key={f.id} className={styles.findingItem}>
+                      <div className={styles.findingTop}>
+                        <span className={`badge badge-${f.severity}`}>{f.severity}</span>
+                        <button className={styles.delBtn} onClick={() => withConfirm(`Delete finding "${f.title}"?`, () => removeFinding(f.id))}>
+                          <X size={11} />
+                        </button>
+                      </div>
+                      <div className={styles.findingTitle}>{f.title}</div>
+                      {parentFinding && (
+                        <div className={styles.chainFromLabel}>
+                          ↳ chains from: <span>{parentFinding.title}</span>
+                        </div>
+                      )}
+                      {f.notes && <p className={styles.findingNotes}>{f.notes}</p>}
+                      <div className={styles.evidenceRow}>
+                        {evidenceRuns.map((run) => (
+                          <div key={run.id} className={styles.evidenceChip}>
+                            <button className={styles.evidenceChipBtn} onClick={() => openTab(run.id)} title="Jump to run output">
+                              <Link2 size={9} />
+                              <span>{run.tool_name}</span>
+                            </button>
+                            <button className={styles.evidenceUnlinkBtn} onClick={() => toggleRunEvidence(f.id, run.id)} title="Remove evidence link">
+                              <X size={9} />
+                            </button>
+                          </div>
+                        ))}
+                        <button className={styles.linkEvidenceBtn} onClick={() => setLinkingFindingId(f.id)}>
+                          <Link2 size={9} /> {evidenceRuns.length > 0 ? "Add more" : "Link evidence"}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+                {(!session.findings || session.findings.length === 0) && (
+                  <p className={styles.empty}>No findings logged.</p>
+                )}
+              </div>
+            ) : (
+              <AttackChainView findings={session.findings || []} onNodeClick={(f) => setFindingsView("list")} />
+            )}
           </div>
         </aside>
       </div>
 
-      {/* Suite picker modal */}
-      {suitePickerOpen && (
-        <div className={styles.modal}>
-          <div className={styles.modalBox}>
-            <h2 className={styles.modalTitle}>Run Suite</h2>
-
-            {suites === null && <p style={{ color: "var(--text-muted)", fontSize: 13 }}>Loading suites…</p>}
-            {suites && suites.length === 0 && (
-              <p style={{ color: "var(--text-muted)", fontSize: 13 }}>
-                No suites yet. Build one in the Suites tab first.
-              </p>
-            )}
-
-            {suites && suites.length > 0 && (
-              <div className={styles.form}>
-                {/* Suite picker list */}
-                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  {suites.map(suite => (
-                    <button key={suite.id} type="button"
-                      onClick={() => selectSuite(suite)}
-                      style={{
-                        textAlign: "left", padding: "10px 12px", borderRadius: 5,
-                        border: `1px solid ${selectedSuite?.id === suite.id ? "var(--accent)" : "var(--border)"}`,
-                        background: selectedSuite?.id === suite.id ? "var(--accent-glow)" : "var(--bg-elevated)",
-                        cursor: "pointer", display: "flex", flexDirection: "column", gap: 4,
-                      }}>
-                      <span style={{ fontWeight: 600, fontSize: 13, color: "var(--text-primary)" }}>
-                        {suite.name}
-                      </span>
-                      <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-                        {suite.steps.length} step{suite.steps.length !== 1 ? "s" : ""}
-                        {suite.description ? ` — ${suite.description}` : ""}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-
-                {/* Blank params for selected suite */}
-                {selectedSuite && blankParams(selectedSuite).length > 0 && (
-                  <div style={{ borderTop: "1px solid var(--border)", paddingTop: 16 }}>
-                    <p style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase",
-                      letterSpacing: "0.06em", color: "var(--text-secondary)", marginBottom: 12 }}>
-                      Fill in parameters
-                    </p>
-                    {blankParams(selectedSuite).map(({ stepIdx, stepName, param }) => (
-                      <label key={`${stepIdx}-${param.name}`} className={styles.label}
-                        style={{ marginBottom: 10 }}>
-                        <span style={{ color: "var(--text-muted)", fontSize: 10 }}>
-                          Step {stepIdx + 1} — {stepName}
-                        </span>
-                        {param.name}{param.required && <span style={{ color: "var(--critical)" }}> *</span>}
-                        <input className="input input-mono" style={{ fontSize: 12 }}
-                          placeholder={param.placeholder || param.name}
-                          value={(suiteParams[stepIdx] || {})[param.name] || ""}
-                          onChange={e => setSuiteParams(sp => ({
-                            ...sp,
-                            [stepIdx]: { ...(sp[stepIdx] || {}), [param.name]: e.target.value },
-                          }))} />
-                      </label>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            <div className={styles.formActions}>
-              <button className="btn btn-ghost" onClick={() => setSuitePickerOpen(false)}>Cancel</button>
-              <button className="btn btn-primary"
-                disabled={!selectedSuite}
-                onClick={executeSuite}>
-                <ListOrdered size={13} /> Run Suite
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Wordlist picker modal */}
       {wordlistPicker && (
-        <div className={styles.modal}>
-          <div className={styles.pickerBox}>
+        <div className={styles.modal} onClick={() => setWordlistPicker(null)}>
+          <div className={styles.pickerBox} onClick={(e) => e.stopPropagation()}>
             <div className={styles.pickerHeader}>
               <h2 className={styles.modalTitle}>Select Wordlist</h2>
               <button className={styles.delBtn} onClick={() => setWordlistPicker(null)}>
@@ -1227,6 +1453,366 @@ export default function SessionDetailPage() {
           </div>
         </div>
       )}
+
+      {/* AI Report modal */}
+      {showAiReport && (
+        <div className={styles.modal} onClick={() => setShowAiReport(false)}>
+          <div className={styles.modalBox} style={{ maxWidth: 820, width: "92vw", maxHeight: "88vh", display: "flex", flexDirection: "column" }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, flexShrink: 0 }}>
+              <h2 className={styles.modalTitle} style={{ margin: 0, display: "flex", alignItems: "center", gap: 8 }}>
+                <Sparkles size={16} style={{ color: "var(--accent)" }} /> Technical Brief
+              </h2>
+              <div style={{ display: "flex", gap: 8 }}>
+                {aiReport && !isGeneratingReport && (
+                  <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={downloadAiReport}>
+                    <Download size={13} /> Download .md
+                  </button>
+                )}
+                <button className="btn btn-ghost" style={{ fontSize: 12, padding: "4px 8px" }} onClick={() => setShowAiReport(false)}>
+                  <X size={14} />
+                </button>
+              </div>
+            </div>
+            <div style={{ flex: 1, overflow: "auto", background: "var(--bg-base)", borderRadius: 6, border: "1px solid var(--border)" }}>
+              {isGeneratingReport ? (
+                <div style={{ color: "var(--accent)", display: "flex", alignItems: "center", gap: 8, padding: 24 }}>
+                  <Sparkles size={14} style={{ animation: "spin 1.5s linear infinite" }} />
+                  Generating brief with Claude… this may take some time.
+                </div>
+              ) : aiReport ? (
+                <ReportRenderer markdown={aiReport} />
+              ) : (
+                <p style={{ padding: 24, color: "var(--text-muted)", fontSize: 13 }}>No report generated.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Report renderer ──────────────────────────────────────────────────────────
+
+const SEV_PALETTE = {
+  critical: { bg: "rgba(239,68,68,0.12)", border: "#ef4444", text: "#ef4444" },
+  high:     { bg: "rgba(249,115,22,0.12)", border: "#f97316", text: "#f97316" },
+  medium:   { bg: "rgba(234,179,8,0.12)",  border: "#eab308", text: "#eab308" },
+  low:      { bg: "rgba(59,130,246,0.12)", border: "#3b82f6", text: "#3b82f6" },
+  info:     { bg: "rgba(107,114,128,0.12)",border: "#6b7280", text: "#6b7280" },
+};
+
+const SECTION_COLORS = {
+  "Engagement Summary": "#60a5fa",
+  "Attack Surface":     "#34d399",
+  "Findings":           "#f87171",
+  "Attack Chains":      "#f97316",
+  "Coverage Gaps":      "#a78bfa",
+};
+
+function inlineStyle(text) {
+  // Returns spans for **bold**, `code`, and severity keywords
+  const parts = [];
+  const re = /(\*\*[^*]+\*\*)|(`[^`]+`)/g;
+  let last = 0, m;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) parts.push(<span key={last}>{text.slice(last, m.index)}</span>);
+    if (m[0].startsWith("**")) {
+      parts.push(<strong key={m.index}>{m[0].slice(2, -2)}</strong>);
+    } else {
+      parts.push(
+        <code key={m.index} style={{ background: "var(--bg-card)", padding: "1px 5px", borderRadius: 3, fontFamily: "var(--font-mono)", fontSize: "0.9em" }}>
+          {m[0].slice(1, -1)}
+        </code>
+      );
+    }
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) parts.push(<span key={last}>{text.slice(last)}</span>);
+  return parts.length ? parts : text;
+}
+
+function colorSeverityBadge(line) {
+  const sevMatch = line.match(/^###\s+(CRITICAL|HIGH|MEDIUM|LOW|INFO)\s+(.*)/i);
+  if (!sevMatch) return null;
+  const sev = sevMatch[1].toLowerCase();
+  const title = sevMatch[2];
+  const pal = SEV_PALETTE[sev] || SEV_PALETTE.info;
+  return (
+    <div style={{ display: "flex", alignItems: "baseline", gap: 10, margin: "20px 0 6px" }}>
+      <span style={{ background: pal.bg, border: `1px solid ${pal.border}`, color: pal.text, borderRadius: 4, padding: "2px 8px", fontSize: 10, fontWeight: 700, fontFamily: "var(--font-mono)", letterSpacing: "0.08em", flexShrink: 0 }}>
+        {sev.toUpperCase()}
+      </span>
+      <span style={{ fontWeight: 700, fontSize: 14, color: "var(--text-primary)" }}>{title}</span>
+    </div>
+  );
+}
+
+function ReportRenderer({ markdown }) {
+  const lines = markdown.split("\n");
+  const elements = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+
+    // Code block
+    if (line.trimStart().startsWith("```")) {
+      const lang = line.trim().slice(3);
+      const codeLines = [];
+      i++;
+      while (i < lines.length && !lines[i].trimStart().startsWith("```")) {
+        codeLines.push(lines[i]);
+        i++;
+      }
+      elements.push(
+        <pre key={i} style={{ background: "#0d1117", border: "1px solid var(--border)", borderRadius: 6, padding: "10px 14px", margin: "8px 0", overflowX: "auto", fontFamily: "var(--font-mono)", fontSize: 11, lineHeight: 1.6, color: "#e2e8f0" }}>
+          {codeLines.join("\n")}
+        </pre>
+      );
+      i++;
+      continue;
+    }
+
+    // H1
+    if (line.startsWith("# ")) {
+      elements.push(
+        <h1 key={i} style={{ fontSize: 18, fontWeight: 700, color: "var(--accent)", borderBottom: "2px solid var(--accent)", paddingBottom: 8, marginBottom: 4 }}>
+          {line.slice(2)}
+        </h1>
+      );
+      i++; continue;
+    }
+
+    // Blockquote (reviewer line)
+    if (line.startsWith("> ")) {
+      elements.push(
+        <div key={i} style={{ borderLeft: "3px solid var(--border)", paddingLeft: 12, margin: "4px 0 16px", color: "var(--text-muted)", fontSize: 12 }}>
+          {inlineStyle(line.slice(2))}
+        </div>
+      );
+      i++; continue;
+    }
+
+    // H2 — section headers with color coding
+    if (line.startsWith("## ")) {
+      const title = line.slice(3);
+      const color = Object.entries(SECTION_COLORS).find(([k]) => title.includes(k))?.[1] || "var(--text-secondary)";
+      elements.push(
+        <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, margin: "24px 0 10px", borderBottom: `1px solid ${color}40` }}>
+          <span style={{ width: 4, height: 18, borderRadius: 2, background: color, flexShrink: 0 }} />
+          <h2 style={{ fontSize: 14, fontWeight: 700, color, margin: 0, letterSpacing: "0.04em", textTransform: "uppercase" }}>{title}</h2>
+        </div>
+      );
+      i++; continue;
+    }
+
+    // H3 with severity badge detection
+    if (line.startsWith("### ")) {
+      const badge = colorSeverityBadge(line);
+      elements.push(badge || (
+        <h3 key={i} style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)", margin: "16px 0 4px" }}>
+          {line.slice(4)}
+        </h3>
+      ));
+      i++; continue;
+    }
+
+    // HR
+    if (/^---+$/.test(line.trim())) {
+      elements.push(<hr key={i} style={{ border: "none", borderTop: "1px solid var(--border)", margin: "16px 0" }} />);
+      i++; continue;
+    }
+
+    // Table
+    if (line.startsWith("|")) {
+      const tableLines = [];
+      while (i < lines.length && lines[i].startsWith("|")) {
+        tableLines.push(lines[i]);
+        i++;
+      }
+      const rows = tableLines.filter(l => !/^\|[-| :]+\|$/.test(l.trim()));
+      elements.push(
+        <table key={i} style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, margin: "8px 0" }}>
+          <tbody>
+            {rows.map((r, ri) => {
+              const cells = r.split("|").filter((_, ci) => ci > 0 && ci < r.split("|").length - 1);
+              return (
+                <tr key={ri} style={{ background: ri % 2 === 0 ? "var(--bg-card)" : "transparent" }}>
+                  {cells.map((c, ci) => (
+                    <td key={ci} style={{ padding: "5px 10px", borderBottom: "1px solid var(--border)", color: ci === 0 ? "var(--text-muted)" : "var(--text-primary)", fontWeight: ci === 0 ? 600 : 400 }}>
+                      {inlineStyle(c.trim())}
+                    </td>
+                  ))}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      );
+      continue;
+    }
+
+    // Numbered list
+    if (/^\d+\.\s/.test(line)) {
+      const listLines = [];
+      while (i < lines.length && /^\d+\.\s/.test(lines[i])) {
+        listLines.push(lines[i].replace(/^\d+\.\s/, ""));
+        i++;
+      }
+      elements.push(
+        <ol key={i} style={{ paddingLeft: 20, margin: "4px 0 8px", fontSize: 12, lineHeight: 1.7 }}>
+          {listLines.map((l, li) => <li key={li} style={{ color: "var(--text-primary)" }}>{inlineStyle(l)}</li>)}
+        </ol>
+      );
+      continue;
+    }
+
+    // Bullet list
+    if (line.startsWith("- ") || line.startsWith("* ")) {
+      const listLines = [];
+      while (i < lines.length && (lines[i].startsWith("- ") || lines[i].startsWith("* "))) {
+        listLines.push(lines[i].slice(2));
+        i++;
+      }
+      elements.push(
+        <ul key={i} style={{ paddingLeft: 18, margin: "4px 0 8px", fontSize: 12, lineHeight: 1.7 }}>
+          {listLines.map((l, li) => <li key={li} style={{ color: "var(--text-primary)" }}>{inlineStyle(l)}</li>)}
+        </ul>
+      );
+      continue;
+    }
+
+    // Empty line
+    if (!line.trim()) {
+      elements.push(<div key={i} style={{ height: 6 }} />);
+      i++; continue;
+    }
+
+    // Normal paragraph
+    elements.push(
+      <p key={i} style={{ fontSize: 12, lineHeight: 1.7, margin: "2px 0", color: "var(--text-primary)" }}>
+        {inlineStyle(line)}
+      </p>
+    );
+    i++;
+  }
+
+  return (
+    <div style={{ padding: "20px 24px", fontFamily: "var(--font-sans, system-ui)" }}>
+      {elements}
+    </div>
+  );
+}
+
+// ── Attack chain SVG ──────────────────────────────────────────────────────────
+
+const SEV_COLOR_CHAIN = {
+  critical: "#ef4444",
+  high: "#f97316",
+  medium: "#eab308",
+  low: "#3b82f6",
+  info: "#6b7280",
+};
+
+function AttackChainView({ findings, onNodeClick }) {
+  if (!findings.length) {
+    return <p style={{ color: "var(--text-muted)", fontSize: 12, padding: "12px 0" }}>No findings logged.</p>;
+  }
+
+  // Build tree: depth-first layout
+  const byId = Object.fromEntries(findings.map(f => [f.id, f]));
+  const childrenOf = {};
+  const roots = [];
+  for (const f of findings) {
+    if (f.chains_from_id && byId[f.chains_from_id]) {
+      (childrenOf[f.chains_from_id] = childrenOf[f.chains_from_id] || []).push(f.id);
+    } else {
+      roots.push(f.id);
+    }
+  }
+
+  // Assign (col, row) positions via DFS
+  const positions = {};
+  let globalRow = 0;
+  function place(id, col) {
+    const kids = childrenOf[id] || [];
+    if (!kids.length) {
+      positions[id] = { col, row: globalRow++ };
+      return;
+    }
+    const startRow = globalRow;
+    for (const kid of kids) place(kid, col + 1);
+    // center parent vertically over its children
+    const endRow = globalRow - 1;
+    positions[id] = { col, row: (startRow + endRow) / 2 };
+  }
+  for (const r of roots) place(r, 0);
+
+  const NODE_W = 160, NODE_H = 52, COL_GAP = 48, ROW_GAP = 16;
+  const maxCol = Math.max(...Object.values(positions).map(p => p.col));
+  const maxRow = Math.max(...Object.values(positions).map(p => p.row));
+  const svgW = (maxCol + 1) * (NODE_W + COL_GAP);
+  const svgH = (maxRow + 1) * (NODE_H + ROW_GAP) + ROW_GAP;
+
+  function cx(pos) { return pos.col * (NODE_W + COL_GAP) + NODE_W / 2; }
+  function cy(pos) { return pos.row * (NODE_H + ROW_GAP) + NODE_H / 2; }
+
+  const edges = [];
+  for (const f of findings) {
+    if (f.chains_from_id && positions[f.chains_from_id] && positions[f.id]) {
+      const p = positions[f.chains_from_id];
+      const c = positions[f.id];
+      const x1 = cx(p) + NODE_W / 2, y1 = cy(p);
+      const x2 = cx(c) - NODE_W / 2, y2 = cy(c);
+      const mx = (x1 + x2) / 2;
+      edges.push({ key: f.id, d: `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}` });
+    }
+  }
+
+  return (
+    <div style={{ overflowX: "auto", overflowY: "auto", maxHeight: 420 }}>
+      {!edges.length && (
+        <p style={{ color: "var(--text-muted)", fontSize: 11, marginBottom: 8 }}>
+          No chains mapped yet — the agent will link findings as it discovers exploitable chains.
+        </p>
+      )}
+      <svg width={svgW} height={svgH} style={{ display: "block", minWidth: svgW }}>
+        <defs>
+          <marker id="arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L6,3 z" fill="var(--text-muted)" />
+          </marker>
+        </defs>
+        {edges.map(e => (
+          <path key={e.key} d={e.d} fill="none" stroke="var(--text-muted)" strokeWidth="1.5"
+            strokeDasharray="4 3" markerEnd="url(#arrow)" />
+        ))}
+        {findings.map(f => {
+          const pos = positions[f.id];
+          if (!pos) return null;
+          const x = pos.col * (NODE_W + COL_GAP);
+          const y = pos.row * (NODE_H + ROW_GAP);
+          const color = SEV_COLOR_CHAIN[f.severity] || "#6b7280";
+          return (
+            <g key={f.id} style={{ cursor: "pointer" }} onClick={() => onNodeClick(f)}>
+              <rect x={x} y={y} width={NODE_W} height={NODE_H} rx={6}
+                fill="var(--bg-card)" stroke={color} strokeWidth="1.5" />
+              <rect x={x} y={y} width={NODE_W} height={4} rx={3} fill={color} />
+              <text x={x + NODE_W / 2} y={y + 18} textAnchor="middle"
+                fill={color} fontSize="9" fontWeight="600" fontFamily="monospace">
+                {f.severity.toUpperCase()}
+              </text>
+              <foreignObject x={x + 6} y={y + 22} width={NODE_W - 12} height={NODE_H - 26}>
+                <div xmlns="http://www.w3.org/1999/xhtml"
+                  style={{ fontSize: 10, color: "var(--text-primary)", lineHeight: 1.3,
+                    overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2,
+                    WebkitBoxOrient: "vertical" }}>
+                  {f.title}
+                </div>
+              </foreignObject>
+            </g>
+          );
+        })}
+      </svg>
     </div>
   );
 }

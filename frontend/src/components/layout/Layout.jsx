@@ -1,18 +1,33 @@
 import { NavLink } from "react-router-dom";
-import { Terminal, Shield, BookOpen, Radio, ListOrdered, Globe, Github, Clock } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Github, Clock, ShieldAlert, Globe, Network, Building2, Wrench } from "lucide-react";
+import { api } from "../../utils/api.js";
 import styles from "./Layout.module.css";
 
 const NAV = [
-  { to: "/sessions", icon: Terminal,    label: "Sessions" },
-  { to: "/tools",    icon: Shield,      label: "Tools" },
-  { to: "/suites",   icon: ListOrdered, label: "Suites" },
-  { to: "/activity", icon: Clock,       label: "Activity" },
-  { to: "/osint",    icon: Globe,       label: "OSINT" },
-  { to: "/wordlists",icon: BookOpen,    label: "Wordlists" },
-  { to: "/remote",   icon: Radio,       label: "Remote" },
+  { to: "/external",  icon: Network,     label: "External"  },
+  { to: "/internal",  icon: Building2,   label: "Internal"  },
+  { to: "/web-app",   icon: Globe,       label: "Web App"   },
+  { to: "/approvals", icon: ShieldAlert, label: "Approvals" },
+  { to: "/activity",  icon: Clock,       label: "Activity"  },
+  { to: "/tools",     icon: Wrench,      label: "Tools"     },
 ];
 
 export default function Layout({ children }) {
+  const [pendingCount, setPendingCount] = useState(0);
+
+  useEffect(() => {
+    async function fetchCount() {
+      try {
+        const data = await api.approvals.pending();
+        setPendingCount(data.count || 0);
+      } catch { /* ignore */ }
+    }
+    fetchCount();
+    const interval = setInterval(fetchCount, 8000);
+    return () => clearInterval(interval);
+  }, []);
+
   return (
     <div className={styles.root}>
       <aside className={styles.sidebar}>
@@ -31,6 +46,9 @@ export default function Layout({ children }) {
             >
               <Icon size={15} />
               <span>{label}</span>
+              {label === "Approvals" && pendingCount > 0 && (
+                <span className={styles.pendingBadge}>{pendingCount}</span>
+              )}
             </NavLink>
           ))}
         </nav>
