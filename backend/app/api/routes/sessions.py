@@ -21,6 +21,7 @@ class Finding(BaseModel):
     notes: str = ""
     tool_run_id: Optional[str] = None          # legacy — kept for backwards compat
     evidence_run_ids: Optional[list] = None    # [{run_id, ...}] multi-evidence
+    chains_from_id: Optional[str] = ""
 
 
 class SessionCreate(BaseModel):

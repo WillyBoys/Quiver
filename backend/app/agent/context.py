@@ -245,12 +245,16 @@ async def build_agent_prompt(campaign: Campaign, db: AsyncSession) -> str:
     # Build existing findings list so agent can update instead of duplicating
     existing_findings = sess.findings if sess else []
     if existing_findings:
+        findings_by_id = {f.get("id", ""): f for f in existing_findings}
         findings_lines = []
         for f in existing_findings:
             fid = f.get("id", "")
             ftitle = f.get("title", "")
             fsev = f.get("severity", "info")
-            findings_lines.append(f'  [{fid}] ({fsev}) {ftitle}')
+            parent_id = f.get("chains_from_id", "")
+            parent = findings_by_id.get(parent_id)
+            chain_suffix = f" ← chains from: {parent['title']}" if parent else ""
+            findings_lines.append(f'  [{fid}] ({fsev}) {ftitle}{chain_suffix}')
         findings_str = "\n".join(findings_lines)
     else:
         findings_str = "  (none yet)"

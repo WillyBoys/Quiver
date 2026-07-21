@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Play, Plus, Trash2, Flag, X, FolderOpen, Search, Download, Link2, Cpu, Pause, Settings, Sparkles } from "lucide-react";
+import { ArrowLeft, Play, Plus, Trash2, Flag, X, FolderOpen, Search, Download, Link2, Cpu, Pause, Settings, Sparkles, Pencil } from "lucide-react";
 import { api, createRunSocket } from "../utils/api.js";
 import TerminalPane from "../components/terminal/TerminalPane.jsx";
 import ChecklistPane from "../components/checklist/ChecklistPane.jsx";
@@ -27,6 +27,7 @@ export default function SessionDetailPage() {
   const [selectedCat, setSelectedCat] = useState("all");
   const [showFinding, setShowFinding] = useState(false);
   const [newFinding, setNewFinding] = useState({ title: "", severity: "high", notes: "", evidence_run_ids: [] });
+  const [editingFinding, setEditingFinding] = useState(null);
   const [linkingFindingId, setLinkingFindingId] = useState(null);
 
   // Notes editor state
@@ -307,6 +308,13 @@ export default function SessionDetailPage() {
     const updated = { ...session, findings: session.findings.filter((f) => f.id !== id) };
     const saved = await api.sessions.update(sessionId, updated);
     setSession(saved);
+  }
+
+  async function updateFinding(updatedFinding) {
+    const updated = { ...session, findings: session.findings.map((f) => f.id === updatedFinding.id ? updatedFinding : f) };
+    const saved = await api.sessions.update(sessionId, updated);
+    setSession(saved);
+    setEditingFinding(null);
   }
 
   function getEvidenceIds(finding) {
@@ -1261,9 +1269,14 @@ export default function SessionDetailPage() {
                     <div key={f.id} className={styles.findingItem}>
                       <div className={styles.findingTop}>
                         <span className={`badge badge-${f.severity}`}>{f.severity}</span>
-                        <button className={styles.delBtn} onClick={() => withConfirm(`Delete finding "${f.title}"?`, () => removeFinding(f.id))}>
-                          <X size={11} />
-                        </button>
+                        <div className={styles.findingActions}>
+                          <button className={styles.editBtn} onClick={() => setEditingFinding({ ...f, chains_from_id: f.chains_from_id || "" })} title="Edit finding">
+                            <Pencil size={11} />
+                          </button>
+                          <button className={styles.delBtn} onClick={() => withConfirm(`Delete finding "${f.title}"?`, () => removeFinding(f.id))}>
+                            <X size={11} />
+                          </button>
+                        </div>
                       </div>
                       <div className={styles.findingTitle}>{f.title}</div>
                       {parentFinding && (
@@ -1448,6 +1461,44 @@ export default function SessionDetailPage() {
               <div className={styles.formActions}>
                 <button className="btn btn-ghost" onClick={() => { setShowFinding(false); setNewFinding({ title: "", severity: "high", notes: "", evidence_run_ids: [] }); }}>Cancel</button>
                 <button className="btn btn-primary" onClick={addFinding} disabled={!newFinding.title}>Log Finding</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit finding modal */}
+      {editingFinding && (
+        <div className={styles.modal} onClick={() => setEditingFinding(null)}>
+          <div className={styles.modalBox} onClick={(e) => e.stopPropagation()}>
+            <h2 className={styles.modalTitle}>Edit Finding</h2>
+            <div className={styles.form}>
+              <label className={styles.label}>Title
+                <input className="input" value={editingFinding.title}
+                  onChange={(e) => setEditingFinding({ ...editingFinding, title: e.target.value })} />
+              </label>
+              <label className={styles.label}>Severity
+                <select className="input" value={editingFinding.severity}
+                  onChange={(e) => setEditingFinding({ ...editingFinding, severity: e.target.value })}>
+                  {SEVERITY_OPTS.map((s) => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </label>
+              <label className={styles.label}>Notes
+                <textarea className="input" rows={3} value={editingFinding.notes || ""}
+                  onChange={(e) => setEditingFinding({ ...editingFinding, notes: e.target.value })} />
+              </label>
+              <label className={styles.label}>Chains from (optional)
+                <select className="input" value={editingFinding.chains_from_id || ""}
+                  onChange={(e) => setEditingFinding({ ...editingFinding, chains_from_id: e.target.value })}>
+                  <option value="">— none —</option>
+                  {(session.findings || []).filter((f) => f.id !== editingFinding.id).map((f) => (
+                    <option key={f.id} value={f.id}>{f.title}</option>
+                  ))}
+                </select>
+              </label>
+              <div className={styles.formActions}>
+                <button className="btn btn-ghost" onClick={() => setEditingFinding(null)}>Cancel</button>
+                <button className="btn btn-primary" onClick={() => updateFinding(editingFinding)} disabled={!editingFinding.title}>Save</button>
               </div>
             </div>
           </div>

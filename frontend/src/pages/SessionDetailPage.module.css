@@ -589,6 +589,13 @@
   border-radius: 4px; padding: 8px; display: flex; flex-direction: column; gap: 4px;
 }
 .findingTop { display: flex; align-items: center; justify-content: space-between; }
+.findingActions { display: flex; align-items: center; gap: 2px; }
+.editBtn {
+  background: transparent; border: none; color: var(--text-muted);
+  cursor: pointer; padding: 2px; border-radius: 2px;
+  display: flex; align-items: center;
+}
+.editBtn:hover { color: var(--accent); }
 .findingTitle { font-size: 12px; font-weight: 500; }
 .findingNotes { font-size: 11px; color: var(--text-muted); }
 
