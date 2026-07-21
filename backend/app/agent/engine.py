@@ -25,6 +25,7 @@ from app.execution import (
 logger = logging.getLogger(__name__)
 
 _finding_locks: dict[str, asyncio.Lock] = {}
+_active_campaign_loops: set[str] = set()  # campaign IDs whose loop task is currently executing
 
 
 def _normalize_host(target: str) -> str:
@@ -669,66 +670,73 @@ async def run_campaign_loop(campaign_id: str) -> None:
     MAX_CONSECUTIVE_DUPES = 5
     STOP_STATUSES = {"completed", "not_found", "pending_approval", "waiting_approval", "auth_error"}
 
-    # Resolve per-campaign cap; None in DB means unlimited (use a safe ceiling of 500)
-    async with AsyncSessionLocal() as db:
-        _c = (await db.execute(select(Campaign).where(Campaign.id == campaign_id))).scalar_one_or_none()
-        MAX_ITERATIONS = (_c.max_iterations or DEFAULT_MAX_ITERATIONS) if _c else DEFAULT_MAX_ITERATIONS
-        if MAX_ITERATIONS <= 0:
-            MAX_ITERATIONS = 500  # "unlimited" sentinel
+    if campaign_id in _active_campaign_loops:
+        logger.warning("AGENT LOOP | campaign=%s already running — ignoring duplicate trigger", campaign_id)
+        return
+    _active_campaign_loops.add(campaign_id)
+    try:
+        # Resolve per-campaign cap; None in DB means unlimited (use a safe ceiling of 500)
+        async with AsyncSessionLocal() as db:
+            _c = (await db.execute(select(Campaign).where(Campaign.id == campaign_id))).scalar_one_or_none()
+            MAX_ITERATIONS = (_c.max_iterations or DEFAULT_MAX_ITERATIONS) if _c else DEFAULT_MAX_ITERATIONS
+            if MAX_ITERATIONS <= 0:
+                MAX_ITERATIONS = 500  # "unlimited" sentinel
 
-    consecutive_dupes = 0
+        consecutive_dupes = 0
 
-    for i in range(MAX_ITERATIONS):
-        # Check campaign is still active before each iteration
+        for i in range(MAX_ITERATIONS):
+            # Check campaign is still active before each iteration
+            async with AsyncSessionLocal() as db:
+                result = await db.execute(select(Campaign).where(Campaign.id == campaign_id))
+                campaign = result.scalar_one_or_none()
+                if campaign and campaign.status == "active":
+                    campaign.iteration_count = (campaign.iteration_count or 0) + 1
+                    await db.commit()
+            if not campaign or campaign.status != "active":
+                logger.info("AGENT LOOP | campaign=%s stopped (status=%s)", campaign_id,
+                            campaign.status if campaign else "gone")
+                return
+
+            status = await run_campaign_agent(campaign_id)
+            logger.info("AGENT LOOP | campaign=%s iteration=%d/%d result=%s",
+                        campaign_id, i + 1, MAX_ITERATIONS, status)
+
+            if status in STOP_STATUSES:
+                return
+
+            if status == "duplicate":
+                consecutive_dupes += 1
+                logger.warning("AGENT LOOP | campaign=%s consecutive duplicates=%d",
+                               campaign_id, consecutive_dupes)
+                if consecutive_dupes >= MAX_CONSECUTIVE_DUPES:
+                    logger.error("AGENT LOOP | campaign=%s too many consecutive duplicates — stopping",
+                                 campaign_id)
+                    return
+                continue
+
+            consecutive_dupes = 0
+
+            if status == "ai_error":
+                # Brief pause before retrying after an LLM failure
+                await asyncio.sleep(10)
+                continue
+
+            # For action_executed / parse_error / scope_violation / skipped:
+            # loop straight into the next iteration — the LLM call is the natural
+            # rate-limiter (~60-90 s on CPU), so no extra sleep is needed.
+
+        # Iteration cap reached — pause so the UI shows the correct state and
+        # the user can resume with another batch of iterations.
+        logger.warning("AGENT LOOP | campaign=%s iteration cap (%d) reached — pausing",
+                       campaign_id, MAX_ITERATIONS if MAX_ITERATIONS < 500 else 0)
         async with AsyncSessionLocal() as db:
             result = await db.execute(select(Campaign).where(Campaign.id == campaign_id))
             campaign = result.scalar_one_or_none()
             if campaign and campaign.status == "active":
-                campaign.iteration_count = (campaign.iteration_count or 0) + 1
+                campaign.status = "paused"
                 await db.commit()
-        if not campaign or campaign.status != "active":
-            logger.info("AGENT LOOP | campaign=%s stopped (status=%s)", campaign_id,
-                        campaign.status if campaign else "gone")
-            return
-
-        status = await run_campaign_agent(campaign_id)
-        logger.info("AGENT LOOP | campaign=%s iteration=%d/%d result=%s",
-                    campaign_id, i + 1, MAX_ITERATIONS, status)
-
-        if status in STOP_STATUSES:
-            return
-
-        if status == "duplicate":
-            consecutive_dupes += 1
-            logger.warning("AGENT LOOP | campaign=%s consecutive duplicates=%d",
-                           campaign_id, consecutive_dupes)
-            if consecutive_dupes >= MAX_CONSECUTIVE_DUPES:
-                logger.error("AGENT LOOP | campaign=%s too many consecutive duplicates — stopping",
-                             campaign_id)
-                return
-            continue
-
-        consecutive_dupes = 0
-
-        if status == "ai_error":
-            # Brief pause before retrying after an LLM failure
-            await asyncio.sleep(10)
-            continue
-
-        # For action_executed / parse_error / scope_violation / skipped:
-        # loop straight into the next iteration — the LLM call is the natural
-        # rate-limiter (~60-90 s on CPU), so no extra sleep is needed.
-
-    # Iteration cap reached — pause so the UI shows the correct state and
-    # the user can resume with another batch of iterations.
-    logger.warning("AGENT LOOP | campaign=%s iteration cap (%d) reached — pausing",
-                   campaign_id, MAX_ITERATIONS if MAX_ITERATIONS < 500 else 0)
-    async with AsyncSessionLocal() as db:
-        result = await db.execute(select(Campaign).where(Campaign.id == campaign_id))
-        campaign = result.scalar_one_or_none()
-        if campaign and campaign.status == "active":
-            campaign.status = "paused"
-            await db.commit()
+    finally:
+        _active_campaign_loops.discard(campaign_id)
 
 
 async def _run_approved_then_resume(run_id: str, command: str, session_id: str,

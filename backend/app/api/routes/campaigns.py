@@ -9,7 +9,7 @@ from app.db.database import get_db
 from app.models.campaign import Campaign
 from app.models.session import Session as EngagementSession
 from app.agent.scheduler import add_campaign_job, remove_campaign_job
-from app.agent.engine import run_campaign_loop
+from app.agent.engine import run_campaign_loop, _active_campaign_loops
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -121,7 +121,7 @@ async def trigger_campaign(
     campaign = await _get_or_404(campaign_id, db)
     if campaign.status == "completed":
         raise HTTPException(status_code=400, detail="Campaign has already completed")
-    if campaign.status == "active":
+    if campaign_id in _active_campaign_loops:
         raise HTTPException(status_code=409, detail="Campaign is already running")
     # Ensure campaign is active before running (handles paused campaigns resumed manually)
     if campaign.status not in ("active", "awaiting_approval"):

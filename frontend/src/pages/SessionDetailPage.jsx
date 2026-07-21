@@ -105,6 +105,7 @@ export default function SessionDetailPage() {
       // Reconnect to any runs that were still in progress when we left
       const runningRuns = fetchedRuns.filter((r) => r.status === "running");
       for (const run of runningRuns) {
+        connectedRunIds.current.add(run.id);
         setLiveOutput((o) => ({ ...o, [run.id]: "" }));
         setStreaming((s) => ({ ...s, [run.id]: true }));
         setOpenTabs((t) => (t.includes(run.id) ? t : [...t, run.id]));
@@ -205,6 +206,7 @@ export default function SessionDetailPage() {
     setLiveOutput((o) => ({ ...o, [run.id]: "" }));
     setStreaming((s) => ({ ...s, [run.id]: true }));
 
+    connectedRunIds.current.add(run.id);
     const ws3 = createRunSocket(run.id, {
       onOutput: (line) => setLiveOutput((o) => ({ ...o, [run.id]: (o[run.id] || "") + line })),
       onDone: (msg) => {
@@ -517,9 +519,8 @@ export default function SessionDetailPage() {
       await api.campaigns.update(campaign.id, { status: "paused" });
       setCampaign((c) => ({ ...c, status: "paused" }));
     } else {
-      await api.campaigns.update(campaign.id, { status: "active" });
-      setCampaign((c) => ({ ...c, status: "active" }));
       await api.campaigns.run(campaign.id);
+      setCampaign((c) => ({ ...c, status: "active" }));
     }
   }
 
