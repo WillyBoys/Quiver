@@ -876,7 +876,7 @@ export default function SessionDetailPage() {
                 const isRunStreaming = streaming[run.id] || false;
                 const displayStatus = isRunStreaming ? "running" : run.status;
                 const regularRuns = arr.filter(r => r.tool_name !== "_summary");
-                const stepNum = regularRuns.indexOf(run) + 1;
+                const stepNum = regularRuns.length - regularRuns.indexOf(run);
                 return (
                   <div key={run.id} className={styles.reasoningBlock}>
                     <div className={styles.reasoningEntry}>

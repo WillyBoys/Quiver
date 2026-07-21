@@ -764,7 +764,7 @@ async def execute_approval(approval_id: str) -> bool:
     async with AsyncSessionLocal() as db:
         result = await db.execute(select(ApprovalRequest).where(ApprovalRequest.id == approval_id))
         approval = result.scalar_one_or_none()
-        if not approval or approval.status != "pending":
+        if not approval or approval.status != "processing":
             return False
 
         camp_result = await db.execute(select(Campaign).where(Campaign.id == approval.campaign_id))
