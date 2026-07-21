@@ -48,11 +48,11 @@ docker-compose up --build backend
 | `dnsenum` | DNS enumeration |
 
 > [!NOTE]
-> `dirb` has already been added as a custom tool to show more of how this would work.
+> `masscan` has already been added via `user-tools.txt` as a live Pattern A example. It appears in the tool registry under **Masscan — Fast Port Scan** and is ready to use after a normal build.
 
 **Cautions:**
-- The package must exist in Debian bookworm's default repos. If `apt-get` can't find it, the entire build fails.
-- To verify a package exists before adding it, check [https://packages.debian.org](https://packages.debian.org) and search for the package name under the `bookworm` distribution.
+- The package must exist in Kali's repos. If `apt-get` can't find it, the entire build fails.
+- To verify a package name, run `docker exec quiver_backend apt-cache search <keyword>` against the running container.
 - Do not add GUI applications, database daemons, or multi-service tools (e.g. BloodHound, Metasploit). These are not CLI tools and will not work in this environment.
 - One wrong package name fails the whole build — double-check spelling.
 

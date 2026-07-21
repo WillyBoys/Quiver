@@ -41,6 +41,19 @@ DEFAULT_TOOLS = [
         "is_builtin": True,
     },
     {
+        "name": "Masscan - Fast Port Scan",
+        "description": "Extremely fast TCP port scanner — useful for large IP ranges where nmap would be too slow. Added via user-tools.txt as a Pattern A custom tool example.",
+        "category": "recon",
+        "binary": "masscan",
+        "default_flags": "--rate=1000",
+        "parameters": [
+            {"name": "target", "placeholder": "10.10.10.0/24", "required": True, "description": "Target IP or CIDR range"},
+            {"name": "ports", "flag": "-p", "placeholder": "1-65535", "required": True, "description": "Port range to scan"},
+        ],
+        "workflow_tags": ["external", "internal"],
+        "is_builtin": False,
+    },
+    {
         "name": "whois",
         "description": "Domain registration and ownership lookup",
         "category": "recon",

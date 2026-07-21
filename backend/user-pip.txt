@@ -13,5 +13,5 @@
 # Uncomment to install netexec (nxc) — large dependency tree, may take 3-5 min to build:
 # git+https://github.com/Pennyw0rth/NetExec
 
-# Uncomment to install Subdominator — requires Python 3.13+ (base image is 3.12; upgrade FROM first):
+# Uncomment to install Subdominator — requires Python 3.13+:
 # subdominator

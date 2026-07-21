@@ -76,8 +76,7 @@ RUN if grep -qvE '^\s*#|^\s*$' /tmp/user-pip.txt; then \
 
 # pip tools not packaged in Kali
 RUN pip install --no-cache-dir --break-system-packages \
-    bbot \
-    subdominator
+    bbot
 
 WORKDIR /app
 
