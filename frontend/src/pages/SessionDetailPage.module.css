@@ -560,6 +560,7 @@
 .runItem:hover { background: var(--bg-hover); }
 .runActive { background: var(--accent-glow); border-color: var(--accent-dim); }
 
+.runTop { display: flex; align-items: flex-start; justify-content: space-between; gap: 4px; }
 .runName { font-size: 12px; color: var(--text-primary); }
 .runReasoning {
   font-size: 10px; color: var(--text-muted); font-style: italic;

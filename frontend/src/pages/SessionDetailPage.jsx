@@ -1241,7 +1241,12 @@ export default function SessionDetailPage() {
                   <div key={run.id}
                     className={`${styles.runItem} ${run.id === activeRunId ? styles.runActive : ""}`}
                     onClick={() => openTab(run.id)}>
-                    <div className={styles.runName}>{run.tool_name}</div>
+                    <div className={styles.runTop}>
+                      <div className={styles.runName}>{run.tool_name}</div>
+                      <button className={styles.delBtn} onClick={(e) => { e.stopPropagation(); withConfirm(`Delete run "${run.tool_name}"?`, () => deleteRun(run.id)); }}>
+                        <Trash2 size={11} />
+                      </button>
+                    </div>
                     {run.reasoning && (
                       <div className={styles.runReasoning}>{run.reasoning}</div>
                     )}
@@ -1249,9 +1254,6 @@ export default function SessionDetailPage() {
                       <span className={`${styles.runStatus} ${styles[`status_${displayStatus}`]}`}>
                         {displayStatus}
                       </span>
-                      <button className={styles.delBtn} onClick={(e) => { e.stopPropagation(); withConfirm(`Delete run "${run.tool_name}"?`, () => deleteRun(run.id)); }}>
-                        <Trash2 size={11} />
-                      </button>
                     </div>
                   </div>
                 );
@@ -1283,7 +1285,7 @@ export default function SessionDetailPage() {
                             <Pencil size={11} />
                           </button>
                           <button className={styles.delBtn} onClick={() => withConfirm(`Delete finding "${f.title}"?`, () => removeFinding(f.id))}>
-                            <X size={11} />
+                            <Trash2 size={11} />
                           </button>
                         </div>
                       </div>
