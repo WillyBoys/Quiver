@@ -14,7 +14,7 @@ class Campaign(Base):
     target_scope: Mapped[list] = mapped_column(JSON, default=list)   # ["10.0.0.1", "example.com"]
     schedule: Mapped[str | None] = mapped_column(String, nullable=True)  # cron string; None = manual only
     status: Mapped[str] = mapped_column(String, default="paused")    # active / paused / completed / awaiting_approval
-    risk_level: Mapped[str] = mapped_column(String, default="notify")   # auto / notify / approve
+    risk_level: Mapped[str] = mapped_column(String, default="passive")   # approve_all / passive / active / autonomous
     ai_provider: Mapped[str] = mapped_column(String, default="local")   # local / claude
     session_id: Mapped[str | None] = mapped_column(String, ForeignKey("sessions.id"), nullable=True)
     last_agent_reasoning: Mapped[str] = mapped_column(Text, default="")  # most recent agent thought

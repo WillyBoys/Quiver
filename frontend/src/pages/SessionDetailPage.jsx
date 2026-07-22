@@ -52,7 +52,7 @@ export default function SessionDetailPage() {
   const connectedRunIds = useRef(new Set());
   const openSocketsRef = useRef([]);
   const [showAgentSetup, setShowAgentSetup] = useState(false);
-  const [agentForm, setAgentForm] = useState({ ai_provider: "claude", risk_level: "notify", max_iterations: "50", unlimited: false });
+  const [agentForm, setAgentForm] = useState({ ai_provider: "claude", risk_level: "passive", max_iterations: "50", unlimited: false });
   const [scheduleMode, setScheduleMode] = useState("now"); // "now" | "later"
   const [scheduledAt, setScheduledAt] = useState(""); // datetime-local value
   const [agentSubmitting, setAgentSubmitting] = useState(false);
@@ -636,9 +636,10 @@ export default function SessionDetailPage() {
               <label className={styles.label}>Approval Mode
                 <select className="input" value={agentForm.risk_level}
                   onChange={(e) => setAgentForm({ ...agentForm, risk_level: e.target.value })}>
-                  <option value="auto">Auto Only — passive recon runs freely</option>
-                  <option value="notify">Moderate — active scanning runs freely</option>
-                  <option value="approve">Approve All — every action requires human sign-off before execution</option>
+                  <option value="approve_all">Approval Mode — every action requires sign-off before execution</option>
+                  <option value="passive">Passive Mode — only passive recon runs freely</option>
+                  <option value="active">Active Mode — passive and active scans run freely</option>
+                  <option value="autonomous">Autonomous Mode — AI runs everything without approval</option>
                 </select>
               </label>
               {(() => {

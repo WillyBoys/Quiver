@@ -68,9 +68,9 @@ def _build_param_values(tool, target: str, llm_params: dict) -> dict:
     return param_values
 
 
-# Risk tiers for known tool binaries.
-# Tools not in this map default to "notify" (active, requires campaign risk_level >= notify to auto-run).
-TIER_ORDER = {"auto": 0, "approve": 1}
+# Tool agent_mode tiers: passive=0, active=1, exploit=2
+# Campaign risk_level controls which tiers auto-run vs. need approval.
+TIER_ORDER = {"passive": 0, "active": 1, "exploit": 2}
 
 
 def _is_readonly_curl(command: str) -> bool:
@@ -105,11 +105,17 @@ def _is_readonly_curl(command: str) -> bool:
 
 
 def _needs_approval(tool_agent_mode: str, campaign_risk_level: str, command: str = "") -> bool:
-    # "auto" tools always run; "approve" tools need human sign-off
-    # Exception: read-only curl/wget GET/HEAD requests are always auto-approved
-    tool_tier = TIER_ORDER.get(tool_agent_mode or "auto", 0)
-    campaign_tier = TIER_ORDER.get(campaign_risk_level, 0)
-    if tool_tier > campaign_tier:
+    # Autonomous: nothing ever needs approval.
+    if campaign_risk_level == "autonomous":
+        return False
+    # Approval Mode: everything needs sign-off (read-only curl excepted).
+    if campaign_risk_level == "approve_all":
+        return not _is_readonly_curl(command)
+    # Passive: only passive-tier tools auto-run; active and exploit need approval.
+    # Active:  passive + active auto-run; only exploit needs approval.
+    tool_tier = TIER_ORDER.get(tool_agent_mode or "passive", 0)
+    threshold = 1 if campaign_risk_level == "passive" else 2  # active → threshold=2
+    if tool_tier >= threshold:
         return not _is_readonly_curl(command)
     return False
 
@@ -578,7 +584,7 @@ async def run_campaign_agent(campaign_id: str) -> str:
                                campaign_id, command)
                 return "duplicate"
 
-        tool_agent_mode = tool.agent_mode if tool else "auto"
+        tool_agent_mode = tool.agent_mode if tool else "passive"
         if _needs_approval(tool_agent_mode, campaign.risk_level, command):
             # Don't queue the same command twice
             existing_approval = (await db.execute(

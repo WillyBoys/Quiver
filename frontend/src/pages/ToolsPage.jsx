@@ -8,7 +8,7 @@ const CAT_LABELS = { recon: "Recon", web: "Web", enum: "Enumeration", vuln: "Vul
 
 const EMPTY_FORM = {
   name: "", description: "", category: "recon", binary: "", default_flags: "",
-  parameters: [], workflow_tags: [], agent_mode: "auto", scope_types: [],
+  parameters: [], workflow_tags: [], agent_mode: "passive", scope_types: [],
 };
 
 const SCOPE_OPTIONS = [
@@ -18,8 +18,9 @@ const SCOPE_OPTIONS = [
 ];
 
 const AGENT_MODE_LABELS = {
-  auto:    { label: "Auto",    desc: "LLM can run without approval" },
-  approve: { label: "Approve", desc: "LLM must get human sign-off first" },
+  passive: { label: "Passive", desc: "Passive recon — runs freely in Passive Mode and above" },
+  active:  { label: "Active",  desc: "Active scanning — runs freely in Active Mode and above" },
+  exploit: { label: "Exploit", desc: "Exploitation/credential attacks — runs freely in Autonomous Mode only" },
   never:   { label: "Never",   desc: "Hidden from LLM — manual use only" },
 };
 
@@ -83,7 +84,7 @@ export default function ToolsPage() {
       binary: tool.binary, default_flags: tool.default_flags,
       parameters: tool.parameters || [],
       workflow_tags: tool.workflow_tags || [],
-      agent_mode: tool.agent_mode || "auto",
+      agent_mode: tool.agent_mode || "passive",
       scope_types: tool.scope_types || [],
       enabled: tool.enabled,
     });
@@ -121,7 +122,7 @@ export default function ToolsPage() {
       name: tool.name, description: tool.description, category: tool.category,
       binary: tool.binary, default_flags: tool.default_flags,
       parameters: tool.parameters, workflow_tags: tool.workflow_tags,
-      agent_mode: tool.agent_mode || "auto",
+      agent_mode: tool.agent_mode || "passive",
       scope_types: tool.scope_types || [],
       enabled: !tool.enabled,
     });
@@ -381,10 +382,10 @@ export default function ToolsPage() {
                           {tool.is_builtin && <span className={styles.builtinLabel}>built-in</span>}
                           <span
                             className={styles.agentModeIcon}
-                            data-mode={tool.agent_mode || "auto"}
-                            title={AGENT_MODE_LABELS[tool.agent_mode || "auto"]?.desc}
+                            data-mode={tool.agent_mode || "passive"}
+                            title={AGENT_MODE_LABELS[tool.agent_mode || "passive"]?.desc}
                           >
-                            {tool.agent_mode === "never" ? "⊘" : tool.agent_mode === "approve" ? "⏸" : "▶"}
+                            {tool.agent_mode === "never" ? "⊘" : tool.agent_mode === "exploit" ? "⚡" : tool.agent_mode === "active" ? "⏩" : "▶"}
                           </span>
                         </div>
                         <code className={styles.toolCmd}>{tool.binary} {tool.default_flags}</code>

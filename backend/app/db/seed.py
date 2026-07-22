@@ -13,6 +13,7 @@ DEFAULT_TOOLS = [
         "parameters": [
             {"name": "target", "placeholder": "10.10.10.1", "required": True, "description": "Target IP or hostname"},
         ],
+        "agent_mode": "passive",
         "workflow_tags": ["external", "internal", "web"],
         "is_builtin": True,
     },
@@ -25,6 +26,7 @@ DEFAULT_TOOLS = [
         "parameters": [
             {"name": "target", "placeholder": "10.10.10.1", "required": True, "description": "Target IP or hostname"},
         ],
+        "agent_mode": "passive",
         "workflow_tags": ["external", "internal"],
         "is_builtin": True,
     },
@@ -37,6 +39,7 @@ DEFAULT_TOOLS = [
         "parameters": [
             {"name": "target", "placeholder": "10.10.10.1", "required": True, "description": "Target IP or hostname"},
         ],
+        "agent_mode": "passive",
         "workflow_tags": ["internal"],
         "is_builtin": True,
     },
@@ -50,6 +53,7 @@ DEFAULT_TOOLS = [
             {"name": "target", "placeholder": "10.10.10.0/24", "required": True, "description": "Target IP or CIDR range"},
             {"name": "ports", "flag": "-p", "placeholder": "1-65535", "required": True, "description": "Port range to scan"},
         ],
+        "agent_mode": "active",
         "workflow_tags": ["external", "internal"],
         "is_builtin": False,
     },
@@ -62,6 +66,7 @@ DEFAULT_TOOLS = [
         "parameters": [
             {"name": "target", "placeholder": "target.com", "required": True, "description": "Domain or IP"},
         ],
+        "agent_mode": "passive",
         "workflow_tags": ["external"],
         "is_builtin": True,
     },
@@ -74,6 +79,7 @@ DEFAULT_TOOLS = [
         "parameters": [
             {"name": "target", "placeholder": "target.com", "required": True, "description": "Domain"},
         ],
+        "agent_mode": "passive",
         "workflow_tags": ["external", "web"],
         "is_builtin": True,
     },
@@ -86,6 +92,7 @@ DEFAULT_TOOLS = [
         "parameters": [
             {"name": "domain", "flag": "-d", "placeholder": "target.com", "required": True, "description": "Target domain"},
         ],
+        "agent_mode": "passive",
         "workflow_tags": ["external", "web"],
         "is_builtin": True,
     },
@@ -100,6 +107,7 @@ DEFAULT_TOOLS = [
             {"name": "target", "flag": "",         "placeholder": "target.com or 192.168.1.1", "required": True,  "description": "Domain or IP to look up"},
             {"name": "server", "flag": "",         "placeholder": "8.8.8.8",                  "required": False, "description": "DNS server to query (default: system resolver)"},
         ],
+        "agent_mode": "passive",
         "workflow_tags": ["external", "internal", "web"],
         "is_builtin": True,
     },
@@ -112,6 +120,7 @@ DEFAULT_TOOLS = [
         "parameters": [
             {"name": "target", "flag": "-t", "placeholder": "target.com", "required": True, "description": "Target domain"},
         ],
+        "agent_mode": "passive",
         "workflow_tags": ["external"],
         "is_builtin": True,
     },
@@ -124,6 +133,7 @@ DEFAULT_TOOLS = [
         "parameters": [
             {"name": "domain", "flag": "-d", "placeholder": "target.com", "required": True, "description": "Target domain"},
         ],
+        "agent_mode": "passive",
         "workflow_tags": ["external"],
         "is_builtin": False,
     },
@@ -138,6 +148,7 @@ DEFAULT_TOOLS = [
             {"name": "url", "flag": "-u", "placeholder": "http://10.10.10.1", "required": True, "description": "Target URL"},
             {"name": "wordlist", "flag": "-w", "placeholder": "/wordlists/Discovery/Web-Content/common.txt", "required": True, "description": "Wordlist path"},
         ],
+        "agent_mode": "active",
         "workflow_tags": ["web"],
         "is_builtin": True,
     },
@@ -152,6 +163,7 @@ DEFAULT_TOOLS = [
             {"name": "domain", "flag": "-d", "placeholder": "target.htb", "required": True, "description": "Base domain"},
             {"name": "wordlist", "flag": "-w", "placeholder": "/wordlists/Discovery/DNS/subdomains-top1million-5000.txt", "required": True, "description": "Wordlist path"},
         ],
+        "agent_mode": "active",
         "workflow_tags": ["web"],
         "is_builtin": True,
     },
@@ -165,6 +177,7 @@ DEFAULT_TOOLS = [
             {"name": "url", "flag": "-u", "placeholder": "http://10.10.10.1/FUZZ", "required": True, "description": "URL with FUZZ keyword"},
             {"name": "wordlist", "flag": "-w", "placeholder": "/wordlists/Discovery/Web-Content/common.txt", "required": True, "description": "Wordlist path"},
         ],
+        "agent_mode": "active",
         "workflow_tags": ["web"],
         "is_builtin": True,
     },
@@ -178,6 +191,7 @@ DEFAULT_TOOLS = [
             {"name": "url", "flag": "-u", "placeholder": "http://10.10.10.1", "required": True, "description": "Target URL"},
             {"name": "wordlist", "flag": "-w", "placeholder": "/wordlists/Discovery/Web-Content/common.txt", "required": True, "description": "Wordlist path"},
         ],
+        "agent_mode": "active",
         "workflow_tags": ["web"],
         "is_builtin": True,
     },
@@ -190,6 +204,7 @@ DEFAULT_TOOLS = [
         "parameters": [
             {"name": "host", "flag": "-h", "placeholder": "10.10.10.1", "required": True, "description": "Target host"},
         ],
+        "agent_mode": "active",
         "workflow_tags": ["web"],
         "is_builtin": True,
     },
@@ -202,6 +217,7 @@ DEFAULT_TOOLS = [
         "parameters": [
             {"name": "target", "placeholder": "http://10.10.10.1", "required": True, "description": "Target URL"},
         ],
+        "agent_mode": "passive",
         "workflow_tags": ["web"],
         "is_builtin": True,
     },
@@ -214,6 +230,7 @@ DEFAULT_TOOLS = [
         "parameters": [
             {"name": "url", "flag": "--url", "placeholder": "http://10.10.10.1", "required": True, "description": "WordPress URL"},
         ],
+        "agent_mode": "active",
         "workflow_tags": ["web"],
         "is_builtin": True,
     },
@@ -226,6 +243,7 @@ DEFAULT_TOOLS = [
         "parameters": [
             {"name": "target", "placeholder": "target.com:443", "required": True, "description": "Target host:port"},
         ],
+        "agent_mode": "passive",
         "workflow_tags": ["web", "external"],
         "is_builtin": True,
     },
@@ -238,6 +256,7 @@ DEFAULT_TOOLS = [
         "parameters": [
             {"name": "url", "placeholder": "http://target.com", "required": True, "description": "Target URL"},
         ],
+        "agent_mode": "passive",
         "workflow_tags": ["web", "external"],
         "is_builtin": True,
     },
@@ -251,6 +270,7 @@ DEFAULT_TOOLS = [
         "parameters": [
             {"name": "target", "placeholder": "10.10.10.1", "required": True, "description": "Target IP"},
         ],
+        "agent_mode": "active",
         "workflow_tags": ["internal"],
         "is_builtin": True,
     },
@@ -263,6 +283,7 @@ DEFAULT_TOOLS = [
         "parameters": [
             {"name": "target", "flag": "-L", "placeholder": "10.10.10.1", "required": True, "description": "Target IP"},
         ],
+        "agent_mode": "active",
         "workflow_tags": ["internal"],
         "is_builtin": True,
     },
@@ -275,6 +296,7 @@ DEFAULT_TOOLS = [
         "parameters": [
             {"name": "target", "placeholder": "10.10.10.1", "required": True, "description": "Target IP"},
         ],
+        "agent_mode": "active",
         "workflow_tags": ["internal"],
         "is_builtin": True,
     },
@@ -287,6 +309,7 @@ DEFAULT_TOOLS = [
         "parameters": [
             {"name": "target", "placeholder": "10.10.10.0/24", "required": True, "description": "Target IP or CIDR range"},
         ],
+        "agent_mode": "active",
         "workflow_tags": ["internal"],
         "is_builtin": True,
     },
@@ -299,6 +322,7 @@ DEFAULT_TOOLS = [
         "parameters": [
             {"name": "target", "placeholder": "10.10.10.1", "required": True, "description": "Domain controller IP"},
         ],
+        "agent_mode": "active",
         "workflow_tags": ["internal"],
         "is_builtin": True,
     },
@@ -313,6 +337,7 @@ DEFAULT_TOOLS = [
             {"name": "dc", "flag": "--dc", "placeholder": "10.10.10.1", "required": True, "description": "Domain controller IP"},
             {"name": "wordlist", "placeholder": "/wordlists/Usernames/top-usernames-shortlist.txt", "required": True, "description": "Username wordlist"},
         ],
+        "agent_mode": "active",
         "workflow_tags": ["internal"],
         "is_builtin": True,
     },
@@ -325,6 +350,7 @@ DEFAULT_TOOLS = [
         "parameters": [
             {"name": "target", "placeholder": "DOMAIN/user:password@10.10.10.1", "required": True, "description": "Auth string: DOMAIN/user:pass@host"},
         ],
+        "agent_mode": "exploit",
         "workflow_tags": ["internal"],
         "is_builtin": True,
     },
@@ -338,6 +364,7 @@ DEFAULT_TOOLS = [
             {"name": "dc", "flag": "-dc-ip", "placeholder": "10.10.10.1", "required": True, "description": "Domain controller IP"},
             {"name": "domain", "placeholder": "domain.local/", "required": True, "description": "Target domain with trailing slash"},
         ],
+        "agent_mode": "exploit",
         "workflow_tags": ["internal"],
         "is_builtin": True,
     },
@@ -351,6 +378,7 @@ DEFAULT_TOOLS = [
         "parameters": [
             {"name": "target", "flag": "-u", "placeholder": "http://10.10.10.1", "required": True, "description": "Target URL"},
         ],
+        "agent_mode": "active",
         "workflow_tags": ["web", "external"],
         "is_builtin": True,
     },
@@ -363,6 +391,7 @@ DEFAULT_TOOLS = [
         "parameters": [
             {"name": "url", "flag": "-u", "placeholder": "http://10.10.10.1/page?id=1", "required": True, "description": "Target URL with parameter"},
         ],
+        "agent_mode": "exploit",
         "workflow_tags": ["web"],
         "is_builtin": True,
     },
@@ -376,6 +405,7 @@ DEFAULT_TOOLS = [
         "parameters": [
             {"name": "keyword", "flag": "-k", "placeholder": "targetcorp", "required": True, "description": "Company name or keyword to enumerate"},
         ],
+        "agent_mode": "passive",
         "workflow_tags": ["external"],
         "is_builtin": True,
     },
@@ -389,6 +419,7 @@ DEFAULT_TOOLS = [
         "parameters": [
             {"name": "repo", "placeholder": "https://github.com/org/repo", "required": True, "description": "Git repository URL"},
         ],
+        "agent_mode": "passive",
         "workflow_tags": ["external"],
         "is_builtin": True,
     },
@@ -404,7 +435,7 @@ DEFAULT_TOOLS = [
         "parameters": [
             {"name": "url", "placeholder": "http://target.com/api/endpoint", "required": True, "description": "Full URL to probe"},
         ],
-        "agent_mode": "auto",
+        "agent_mode": "passive",
         "scope_types": ["web"],
         "workflow_tags": ["web", "external"],
         "is_builtin": True,
@@ -418,7 +449,7 @@ DEFAULT_TOOLS = [
         "parameters": [
             {"name": "url", "placeholder": "http://target.com", "required": True, "description": "Target URL"},
         ],
-        "agent_mode": "auto",
+        "agent_mode": "passive",
         "scope_types": ["web"],
         "workflow_tags": ["web", "external"],
         "is_builtin": True,
@@ -432,7 +463,7 @@ DEFAULT_TOOLS = [
         "parameters": [
             {"name": "url", "placeholder": "http://target.com/api/endpoint", "required": True, "description": "Endpoint to test"},
         ],
-        "agent_mode": "auto",
+        "agent_mode": "passive",
         "scope_types": ["web"],
         "workflow_tags": ["web", "external"],
         "is_builtin": True,
@@ -446,7 +477,7 @@ DEFAULT_TOOLS = [
         "parameters": [
             {"name": "url", "placeholder": "http://target.com/api/v1/users", "required": True, "description": "API endpoint URL"},
         ],
-        "agent_mode": "auto",
+        "agent_mode": "passive",
         "scope_types": ["web"],
         "workflow_tags": ["web", "external"],
         "is_builtin": True,
@@ -460,7 +491,7 @@ DEFAULT_TOOLS = [
         "parameters": [
             {"name": "url", "placeholder": "http://target.com/redirect?url=http://evil.com", "required": True, "description": "URL to follow"},
         ],
-        "agent_mode": "auto",
+        "agent_mode": "passive",
         "scope_types": ["web"],
         "workflow_tags": ["web", "external"],
         "is_builtin": True,
@@ -475,7 +506,7 @@ DEFAULT_TOOLS = [
             {"name": "host", "placeholder": "10.10.10.1", "required": True, "description": "Target host or IP"},
             {"name": "port", "placeholder": "8080", "required": True, "description": "TCP port"},
         ],
-        "agent_mode": "auto",
+        "agent_mode": "passive",
         "scope_types": [],
         "workflow_tags": ["external", "internal", "web"],
         "is_builtin": True,
@@ -488,7 +519,7 @@ DEFAULT_TOOLS = [
         "binary": "bash",
         "default_flags": "",
         "parameters": [],
-        "agent_mode": "approve",
+        "agent_mode": "exploit",
         "scope_types": [],
         "workflow_tags": ["web", "external", "internal"],
         "is_builtin": True,
@@ -506,6 +537,7 @@ DEFAULT_TOOLS = [
             {"name": "target", "placeholder": "10.10.10.1", "required": True, "description": "Target IP"},
             {"name": "protocol", "placeholder": "ssh", "required": True, "description": "Service (ssh, ftp, rdp, etc.)"},
         ],
+        "agent_mode": "exploit",
         "workflow_tags": ["internal", "external"],
         "is_builtin": True,
     },
@@ -518,6 +550,7 @@ DEFAULT_TOOLS = [
         "parameters": [
             {"name": "query", "placeholder": "apache 2.4", "required": True, "description": "Search term (service, version, or CVE)"},
         ],
+        "agent_mode": "passive",
         "workflow_tags": ["external", "internal", "web"],
         "is_builtin": True,
     },
@@ -530,6 +563,7 @@ DEFAULT_TOOLS = [
         "parameters": [
             {"name": "url", "placeholder": "http://target.com", "required": True, "description": "Target URL to crawl"},
         ],
+        "agent_mode": "active",
         "workflow_tags": ["web", "external"],
         "is_builtin": True,
     },
