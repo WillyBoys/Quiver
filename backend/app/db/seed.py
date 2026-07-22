@@ -125,7 +125,7 @@ DEFAULT_TOOLS = [
             {"name": "domain", "flag": "-d", "placeholder": "target.com", "required": True, "description": "Target domain"},
         ],
         "workflow_tags": ["external"],
-        "is_builtin": True,
+        "is_builtin": False,
     },
     # ── WEB ───────────────────────────────────────────────────────────────────
     {
@@ -554,4 +554,5 @@ async def seed_default_tools():
                 existing.workflow_tags = tool_data.get("workflow_tags", [])
                 existing.agent_mode = tool_data.get("agent_mode", existing.agent_mode or "auto")
                 existing.scope_types = tool_data.get("scope_types", existing.scope_types or [])
+                existing.is_builtin = tool_data.get("is_builtin", existing.is_builtin)
         await db.commit()

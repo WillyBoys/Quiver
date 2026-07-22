@@ -711,6 +711,12 @@ async def run_campaign_loop(campaign_id: str) -> None:
                 if consecutive_dupes >= MAX_CONSECUTIVE_DUPES:
                     logger.error("AGENT LOOP | campaign=%s too many consecutive duplicates — stopping",
                                  campaign_id)
+                    async with AsyncSessionLocal() as db:
+                        result = await db.execute(select(Campaign).where(Campaign.id == campaign_id))
+                        camp = result.scalar_one_or_none()
+                        if camp and camp.status == "active":
+                            camp.status = "paused"
+                            await db.commit()
                     return
                 continue
 

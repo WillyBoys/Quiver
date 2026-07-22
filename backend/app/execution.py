@@ -158,6 +158,8 @@ async def execute_run_background(
         await process.wait()
         exit_code = process.returncode
         run_status = "timeout" if timed_out else ("complete" if exit_code == 0 else "error")
+        if exit_code != 0 and not timed_out:
+            buf.append(f"\n[Exit code {exit_code}]\n")
 
     except Exception as e:
         buf.append(f"\n[ERROR] {str(e)}\n")

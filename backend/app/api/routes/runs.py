@@ -67,6 +67,9 @@ async def get_run(run_id: str, db: AsyncSession = Depends(get_db)):
 
 @router.post("/", status_code=201)
 async def create_run(body: RunCreate, db: AsyncSession = Depends(get_db)):
+    session_check = await db.execute(select(EngagementSession).where(EngagementSession.id == body.session_id))
+    if not session_check.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Session not found")
     if body.tool_id:
         result = await db.execute(select(Tool).where(Tool.id == body.tool_id))
         tool = result.scalar_one_or_none()

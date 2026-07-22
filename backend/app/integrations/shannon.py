@@ -22,7 +22,9 @@ class ShannonClient:
         return bool(SHANNON_URL)
 
     async def _authenticate(self) -> None:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        # Short connect timeout so callers fail fast when Shannon isn't running.
+        timeout = httpx.Timeout(connect=2.0, read=10.0, write=5.0, pool=5.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.post(
                 f"{self._base}/api/auth/login",
                 json={"email": SHANNON_ADMIN_EMAIL, "password": SHANNON_ADMIN_PASSWORD},

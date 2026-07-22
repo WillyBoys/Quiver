@@ -124,6 +124,10 @@ export default function SessionDetailPage() {
         openSocketsRef.current.push(ws1);
       }
     });
+    return () => {
+      openSocketsRef.current.forEach(ws => { try { ws.close(); } catch {} });
+      openSocketsRef.current = [];
+    };
   }, [sessionId]);
 
   // Poll for new agent-created runs + campaign status; auto-connect streaming for new running runs
@@ -212,9 +216,12 @@ export default function SessionDetailPage() {
       onOutput: (line) => setLiveOutput((o) => ({ ...o, [run.id]: (o[run.id] || "") + line })),
       onDone: (msg) => {
         setStreaming((s) => ({ ...s, [run.id]: false }));
-        setRuns((prev) => prev.map((r) =>
-          r.id === run.id ? { ...r, status: msg.status, output: liveOutput[run.id] } : r
-        ));
+        setLiveOutput((current) => {
+          setRuns((prev) => prev.map((r) =>
+            r.id === run.id ? { ...r, status: msg.status, output: current[run.id] || "" } : r
+          ));
+          return current;
+        });
       },
       onError: (err) => {
         setStreaming((s) => ({ ...s, [run.id]: false }));
@@ -297,7 +304,7 @@ export default function SessionDetailPage() {
 
   async function addFinding() {
     const finding = { id: crypto.randomUUID(), ...newFinding };
-    const updated = { ...session, findings: [...(session.findings || []), finding] };
+    const updated = { ...session, notes: notesValue, findings: [...(session.findings || []), finding] };
     const saved = await api.sessions.update(sessionId, updated);
     setSession(saved);
     setShowFinding(false);
@@ -305,13 +312,13 @@ export default function SessionDetailPage() {
   }
 
   async function removeFinding(id) {
-    const updated = { ...session, findings: session.findings.filter((f) => f.id !== id) };
+    const updated = { ...session, notes: notesValue, findings: session.findings.filter((f) => f.id !== id) };
     const saved = await api.sessions.update(sessionId, updated);
     setSession(saved);
   }
 
   async function updateFinding(updatedFinding) {
-    const updated = { ...session, findings: session.findings.map((f) => f.id === updatedFinding.id ? updatedFinding : f) };
+    const updated = { ...session, notes: notesValue, findings: session.findings.map((f) => f.id === updatedFinding.id ? updatedFinding : f) };
     const saved = await api.sessions.update(sessionId, updated);
     setSession(saved);
     setEditingFinding(null);
@@ -326,6 +333,7 @@ export default function SessionDetailPage() {
   async function toggleRunEvidence(findingId, runId) {
     const updated = {
       ...session,
+      notes: notesValue,
       findings: session.findings.map((f) => {
         if (f.id !== findingId) return f;
         const existing = getEvidenceIds(f);

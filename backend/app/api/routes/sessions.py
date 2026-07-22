@@ -8,7 +8,7 @@ from app.db.database import get_db
 from app.models.session import Session
 from app.models.run import Run
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Literal
 from datetime import datetime, timezone
 
 router = APIRouter()
@@ -17,7 +17,7 @@ router = APIRouter()
 class Finding(BaseModel):
     id: str
     title: str
-    severity: str  # critical / high / medium / low / info
+    severity: Literal["critical", "high", "medium", "low", "info"]
     notes: str = ""
     tool_run_id: Optional[str] = None          # legacy — kept for backwards compat
     evidence_run_ids: Optional[list] = None    # [{run_id, ...}] multi-evidence
