@@ -261,9 +261,7 @@ async def _save_inline_finding(session_id: str, finding: dict, reasoning: str, r
 
 
 async def _generate_and_save_summary(campaign_id: str, session_id: str, provider: str) -> None:
-    """Generate a final summary + findings after the campaign completes."""
-    import uuid as _uuid
-
+    """Generate a final summary after the campaign completes."""
     summary_text = ""
     findings_data: list = []
     llm_succeeded = False
@@ -304,20 +302,6 @@ async def _generate_and_save_summary(campaign_id: str, session_id: str, provider
                 select(EngagementSession).where(EngagementSession.id == session_id)
             )
             sess = sess_result.scalar_one_or_none()
-            if sess and findings_data:
-                existing = list(sess.findings or [])
-                new_findings = [
-                    {
-                        "id": str(_uuid.uuid4()),
-                        "title": f.get("title", "Untitled Finding"),
-                        "severity": f.get("severity", "info"),
-                        "notes": f.get("notes", ""),
-                        "evidence_run_ids": [],
-                    }
-                    for f in findings_data
-                ]
-                sess.findings = existing + new_findings
-
             # Always create a summary run so it appears in the session terminal.
             summary_run = Run(
                 session_id=session_id,
