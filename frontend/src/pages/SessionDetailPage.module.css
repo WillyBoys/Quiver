@@ -1386,3 +1386,198 @@
   font-style: italic;
 }
 .chainFromLabel span { color: var(--accent); font-style: normal; }
+
+/* ── Report history sidebar ─────────────────────────────────────────────── */
+.reportSidebar {
+  width: 200px;
+  min-width: 200px;
+  flex-shrink: 0;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 8px 0;
+}
+
+.reportSidebarTitle {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  padding: 4px 12px 8px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+  flex-shrink: 0;
+}
+
+.reportSidebarEmpty {
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 12px;
+  line-height: 1.5;
+}
+
+.reportSidebarGenerating {
+  font-size: 11px;
+  color: var(--accent);
+  padding: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.reportHistoryItem {
+  position: relative;
+  padding: 8px 12px 6px;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.reportHistoryItem:hover {
+  background: var(--bg-hover);
+}
+
+.reportHistoryItemActive {
+  background: var(--accent-glow);
+  border-left-color: var(--accent);
+}
+
+.reportHistoryName {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
+  margin-bottom: 2px;
+  word-break: break-word;
+}
+
+.reportNameInput {
+  width: 100%;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
+  background: var(--bg-base);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  padding: 1px 4px;
+  outline: none;
+}
+
+.reportHistoryMeta {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.reportSidebarActions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.reportActionBtn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--bg-base);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-family: var(--font-ui);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+  text-align: left;
+}
+
+.reportActionBtn:hover:not(:disabled) {
+  background: var(--accent-glow);
+  color: var(--accent);
+  border-color: var(--accent-dim);
+}
+
+.reportActionBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.reportItemActions {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.reportHistoryItem:hover .reportItemActions {
+  opacity: 1;
+}
+
+.reportItemBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: 3px;
+  transition: color 0.12s, background 0.12s;
+}
+
+.reportItemBtn:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.reportItemBtnDelete:hover {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.reportContentHeader {
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.reportTitleEditable {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  cursor: text;
+  border-radius: 3px;
+  padding: 2px 4px;
+  margin: -2px -4px;
+  transition: background 0.12s;
+  display: inline-block;
+}
+
+.reportTitleEditable:hover {
+  background: var(--bg-hover);
+}
+
+.reportTitleInput {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  background: var(--bg-base);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  padding: 2px 8px;
+  outline: none;
+  width: 100%;
+}

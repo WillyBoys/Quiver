@@ -45,11 +45,20 @@ export const api = {
       a.click();
       URL.revokeObjectURL(url);
     },
-    generateAiReport: (id, provider = "claude") =>
+    generateAiReport: (id, provider = "claude", name = "Draft Report") =>
       req(`/sessions/${id}/report/generate`, {
         method: "POST",
-        body: JSON.stringify({ provider }),
+        body: JSON.stringify({ provider, name }),
       }),
+    listReports: (id) => req(`/sessions/${id}/reports`),
+    getReport: (id, reportId) => req(`/sessions/${id}/reports/${reportId}`),
+    renameReport: (id, reportId, name) =>
+      req(`/sessions/${id}/reports/${reportId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ name }),
+      }),
+    deleteReport: (id, reportId) =>
+      req(`/sessions/${id}/reports/${reportId}`, { method: "DELETE" }),
   },
   tools: {
     list: (category) => req(`/tools/${category ? `?category=${category}` : ""}`),

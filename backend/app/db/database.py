@@ -25,7 +25,7 @@ class Base(DeclarativeBase):
 
 
 async def init_db():
-    from app.models import tool, session, run, campaign  # noqa: import all models
+    from app.models import tool, session, run, campaign, report  # noqa: import all models
     async with engine.begin() as conn:
         # Enable WAL mode so reads never block writes (persists in the DB file)
         await conn.execute(text("PRAGMA journal_mode=WAL"))

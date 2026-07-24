@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Play, Plus, Trash2, X, FolderOpen, Search, Download, Link2, Cpu, Pause, Settings, Sparkles, Pencil, List, GitBranch } from "lucide-react";
+import { ArrowLeft, Play, Plus, Trash2, X, FolderOpen, Search, Download, Link2, Cpu, Pause, Settings, Sparkles, Pencil, List, GitBranch, FileText } from "lucide-react";
 import { api, createRunSocket } from "../utils/api.js";
 import TerminalPane from "../components/terminal/TerminalPane.jsx";
 import ChecklistPane from "../components/checklist/ChecklistPane.jsx";
@@ -64,11 +64,15 @@ export default function SessionDetailPage() {
   const [isExporting, setIsExporting] = useState(false);
   const [analyzeProvider, setAnalyzeProvider] = useState("local");
   const [reportProvider, setReportProvider] = useState("claude");
-  const [exportMode, setExportMode] = useState("ai"); // "ai" | "full"
   const [showSettings, setShowSettings] = useState(false);
   const [settingsForm, setSettingsForm] = useState(null);
   const [showAiReport, setShowAiReport] = useState(false);
-  const [aiReport, setAiReport] = useState(null);
+  const [savedReports, setSavedReports] = useState([]);
+  const [selectedReport, setSelectedReport] = useState(null); // full report object with content
+  const [editingReportId, setEditingReportId] = useState(null);   // content area title edit
+  const [editingReportName, setEditingReportName] = useState("");
+  const [sidebarEditId, setSidebarEditId] = useState(null);        // sidebar inline edit
+  const [sidebarEditName, setSidebarEditName] = useState("");
   const [sidebarView, setSidebarView] = useState("tools");   // "tools" | "checklist"
   const [shellCmd, setShellCmd] = useState("");
   const [workflowFilter, setWorkflowFilter] = useState("all"); // "all" | "external" | "internal" | "web"
@@ -108,6 +112,7 @@ export default function SessionDetailPage() {
         } catch { /* ignore */ }
       }
     });
+    api.sessions.listReports(sessionId).then(setSavedReports).catch(() => {});
     api.tools.list().then(setTools);
     api.runs.listForSession(sessionId).then((fetchedRuns) => {
       setRuns(fetchedRuns);
@@ -398,28 +403,85 @@ export default function SessionDetailPage() {
     await saveChecklist(phaseChecks, updated);
   }
 
-  async function handleExport() {
-    if (exportMode === "full") {
-      setIsExporting(true);
-      try {
-        await api.sessions.exportReport(sessionId, session.name);
-      } catch (err) {
-        console.error("Export failed:", err);
-      } finally {
-        setIsExporting(false);
-      }
-    } else {
-      setIsExporting(true);
-      setAiReport(null);
-      setShowAiReport(true);
-      try {
-        const data = await api.sessions.generateAiReport(sessionId, reportProvider);
-        setAiReport(data.markdown);
-      } catch (err) {
-        setAiReport(`**Report generation failed:** ${err.message}`);
-      } finally {
-        setIsExporting(false);
-      }
+  function handleExport() {
+    setShowAiReport(true);
+    if (!selectedReport && savedReports.length > 0) {
+      loadReport(savedReports[0]);
+    }
+  }
+
+  async function downloadFullReport() {
+    setIsExporting(true);
+    try {
+      await api.sessions.exportReport(sessionId, session.name);
+    } catch (err) {
+      console.error("Export failed:", err);
+    } finally {
+      setIsExporting(false);
+    }
+  }
+
+  async function generateNewReport() {
+    setIsExporting(true);
+    setSelectedReport(null);
+    try {
+      const report = await api.sessions.generateAiReport(sessionId, reportProvider);
+      setSavedReports((prev) => [report, ...prev]);
+      setSelectedReport(report);
+    } catch (err) {
+      setSelectedReport({ id: null, name: "Error", content: `**Report generation failed:** ${err.message}`, provider: reportProvider, generated_at: new Date().toISOString() });
+    } finally {
+      setIsExporting(false);
+    }
+  }
+
+  async function loadReport(report) {
+    if (report.content) {
+      setSelectedReport(report);
+      return;
+    }
+    try {
+      const full = await api.sessions.getReport(sessionId, report.id);
+      setSelectedReport(full);
+      setSavedReports((prev) => prev.map((r) => r.id === full.id ? { ...r, ...full } : r));
+    } catch (err) {
+      console.error("Failed to load report:", err);
+    }
+  }
+
+  async function deleteReport(reportId) {
+    try {
+      await api.sessions.deleteReport(sessionId, reportId);
+      setSavedReports((prev) => prev.filter((r) => r.id !== reportId));
+      if (selectedReport?.id === reportId) setSelectedReport(null);
+    } catch (err) {
+      console.error("Failed to delete report:", err);
+    }
+  }
+
+  async function commitReportRename(reportId) {
+    const name = editingReportName.trim();
+    setEditingReportId(null);
+    if (!name) return;
+    try {
+      await api.sessions.renameReport(sessionId, reportId, name);
+      setSavedReports((prev) => prev.map((r) => r.id === reportId ? { ...r, name } : r));
+      if (selectedReport?.id === reportId) setSelectedReport((r) => ({ ...r, name }));
+    } catch (err) {
+      console.error("Failed to rename report:", err);
+    }
+  }
+
+  async function commitSidebarRename(reportId) {
+    const name = sidebarEditName.trim();
+    setSidebarEditId(null);
+    if (!name) return;
+    try {
+      await api.sessions.renameReport(sessionId, reportId, name);
+      setSavedReports((prev) => prev.map((r) => r.id === reportId ? { ...r, name } : r));
+      if (selectedReport?.id === reportId) setSelectedReport((r) => ({ ...r, name }));
+    } catch (err) {
+      console.error("Failed to rename report:", err);
     }
   }
 
@@ -455,7 +517,6 @@ export default function SessionDetailPage() {
     setSettingsForm({
       analyzeProvider,
       reportProvider,
-      exportMode,
       agentMode: campaign?.risk_level || "passive",
       name: session.name || "",
       target: session.target || "",
@@ -469,7 +530,6 @@ export default function SessionDetailPage() {
     if (!settingsForm) return;
     setAnalyzeProvider(settingsForm.analyzeProvider);
     setReportProvider(settingsForm.reportProvider);
-    setExportMode(settingsForm.exportMode);
     const sessionChanged =
       settingsForm.name !== session.name ||
       settingsForm.target !== session.target ||
@@ -495,13 +555,15 @@ export default function SessionDetailPage() {
     setShowSettings(false);
   }
 
-  function downloadAiReport() {
-    const slug = (session.name || "report").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-    const blob = new Blob([aiReport], { type: "text/markdown" });
+  function downloadAiReport(report) {
+    const target = report || selectedReport;
+    if (!target?.content) return;
+    const slug = (target.name || session.name || "report").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    const blob = new Blob([target.content], { type: "text/markdown" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `quiver-ai-report-${slug}.md`;
+    a.download = `quiver-${slug}.md`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -821,9 +883,8 @@ export default function SessionDetailPage() {
           </div>
           <code className={styles.target}>{session.target}</code>
         </div>
-        <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={handleExport} disabled={isExporting}>
-          {exportMode === "ai" ? <Sparkles size={13} /> : <Download size={13} />}
-          {isExporting ? "Exporting…" : "Export Report"}
+        <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={handleExport}>
+          <FileText size={13} /> Reports
         </button>
         <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={openSettings} title="Session settings">
           <Settings size={13} />
@@ -1614,33 +1675,134 @@ export default function SessionDetailPage() {
       {/* AI Report modal */}
       {showAiReport && (
         <div className={styles.modal} onClick={() => setShowAiReport(false)}>
-          <div className={styles.modalBox} style={{ maxWidth: 820, width: "92vw", maxHeight: "88vh", display: "flex", flexDirection: "column" }} onClick={(e) => e.stopPropagation()}>
+          <div className={styles.modalBox} style={{ maxWidth: 980, width: "96vw", maxHeight: "90vh", display: "flex", flexDirection: "column" }} onClick={(e) => e.stopPropagation()}>
+            {/* Header */}
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, flexShrink: 0 }}>
               <h2 className={styles.modalTitle} style={{ margin: 0, display: "flex", alignItems: "center", gap: 8 }}>
-                <Sparkles size={16} style={{ color: "var(--accent)" }} /> Technical Brief
+                <FileText size={16} style={{ color: "var(--accent)" }} /> Reports
               </h2>
-              <div style={{ display: "flex", gap: 8 }}>
-                {aiReport && !isExporting && (
-                  <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={downloadAiReport}>
-                    <Download size={13} /> Download .md
-                  </button>
-                )}
-                <button className="btn btn-ghost" style={{ fontSize: 12, padding: "4px 8px" }} onClick={() => setShowAiReport(false)}>
-                  <X size={14} />
-                </button>
-              </div>
+              <button className="btn btn-ghost" style={{ fontSize: 12, padding: "4px 8px" }} onClick={() => setShowAiReport(false)}>
+                <X size={14} />
+              </button>
             </div>
-            <div style={{ flex: 1, overflow: "auto", background: "var(--bg-base)", borderRadius: 6, border: "1px solid var(--border)" }}>
-              {isExporting ? (
-                <div style={{ color: "var(--accent)", display: "flex", alignItems: "center", gap: 8, padding: 24 }}>
-                  <Sparkles size={14} style={{ animation: "spin 1.5s linear infinite" }} />
-                  Generating brief with Claude… this may take some time.
+            {/* Body: sidebar + content */}
+            <div style={{ display: "flex", flex: 1, gap: 12, minHeight: 0 }}>
+              {/* Sidebar */}
+              <div className={styles.reportSidebar}>
+                {/* Action buttons */}
+                <div className={styles.reportSidebarActions}>
+                  <button className={styles.reportActionBtn} onClick={generateNewReport} disabled={isExporting}>
+                    <Sparkles size={12} /> {isExporting ? "Generating…" : "Generate AI Report"}
+                  </button>
+                  <button className={styles.reportActionBtn} onClick={downloadFullReport} disabled={isExporting}>
+                    <Download size={12} /> Export Session
+                  </button>
                 </div>
-              ) : aiReport ? (
-                <ReportRenderer markdown={aiReport} />
-              ) : (
-                <p style={{ padding: 24, color: "var(--text-muted)", fontSize: 13 }}>No report generated.</p>
-              )}
+                <div className={styles.reportSidebarTitle}>Saved Reports</div>
+                {savedReports.length === 0 && !isExporting && (
+                  <p className={styles.reportSidebarEmpty}>No saved reports yet. Click Generate AI Report to create one.</p>
+                )}
+                {isExporting && savedReports.length === 0 && (
+                  <div className={styles.reportSidebarGenerating}>
+                    <Sparkles size={12} style={{ animation: "spin 1.5s linear infinite" }} /> Generating…
+                  </div>
+                )}
+                {savedReports.map((r) => (
+                  <div
+                    key={r.id}
+                    className={`${styles.reportHistoryItem} ${selectedReport?.id === r.id ? styles.reportHistoryItemActive : ""}`}
+                    onClick={() => loadReport(r)}
+                  >
+                    <div className={styles.reportHistoryName}>
+                      {sidebarEditId === r.id ? (
+                        <input
+                          className={styles.reportNameInput}
+                          value={sidebarEditName}
+                          autoFocus
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={(e) => setSidebarEditName(e.target.value)}
+                          onBlur={() => commitSidebarRename(r.id)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") commitSidebarRename(r.id);
+                            if (e.key === "Escape") setSidebarEditId(null);
+                          }}
+                        />
+                      ) : (
+                        <span
+                          title="Double-click to rename"
+                          onDoubleClick={(e) => {
+                            e.stopPropagation();
+                            setSidebarEditId(r.id);
+                            setSidebarEditName(r.name);
+                          }}
+                        >{r.name}</span>
+                      )}
+                    </div>
+                    <div className={styles.reportHistoryMeta}>
+                      {new Date(r.generated_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                      {" · "}{r.provider}
+                    </div>
+                    <div className={styles.reportItemActions}>
+                      <button
+                        className={styles.reportItemBtn}
+                        title="Download report"
+                        onClick={(e) => { e.stopPropagation(); downloadAiReport(r); }}
+                      >
+                        <Download size={11} />
+                      </button>
+                      <button
+                        className={`${styles.reportItemBtn} ${styles.reportItemBtnDelete}`}
+                        title="Delete report"
+                        onClick={(e) => { e.stopPropagation(); withConfirm(`Delete report "${r.name}"?`, () => deleteReport(r.id)); }}
+                      >
+                        <Trash2 size={11} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {/* Content area */}
+              <div style={{ flex: 1, overflow: "auto", background: "var(--bg-base)", borderRadius: 6, border: "1px solid var(--border)", minWidth: 0, display: "flex", flexDirection: "column" }}>
+                {isExporting ? (
+                  <div style={{ color: "var(--accent)", display: "flex", alignItems: "center", gap: 8, padding: 24 }}>
+                    <Sparkles size={14} style={{ animation: "spin 1.5s linear infinite" }} />
+                    Generating brief… this may take a moment.
+                  </div>
+                ) : selectedReport?.content ? (
+                  <>
+                    <div className={styles.reportContentHeader}>
+                      {editingReportId === selectedReport.id ? (
+                        <input
+                          className={styles.reportTitleInput}
+                          value={editingReportName}
+                          autoFocus
+                          onChange={(e) => setEditingReportName(e.target.value)}
+                          onBlur={() => commitReportRename(selectedReport.id)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") commitReportRename(selectedReport.id);
+                            if (e.key === "Escape") setEditingReportId(null);
+                          }}
+                        />
+                      ) : (
+                        <span
+                          className={styles.reportTitleEditable}
+                          title="Click to rename"
+                          onClick={() => { setEditingReportId(selectedReport.id); setEditingReportName(selectedReport.name); }}
+                        >
+                          {selectedReport.name}
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ flex: 1, overflow: "auto" }}>
+                      <ReportRenderer markdown={selectedReport.content} />
+                    </div>
+                  </>
+                ) : (
+                  <p style={{ padding: 24, color: "var(--text-muted)", fontSize: 13 }}>
+                    {savedReports.length > 0 ? "Select a report from the left to view it." : "No reports yet — click Generate AI Report to create one."}
+                  </p>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -1654,17 +1816,6 @@ export default function SessionDetailPage() {
 
             <div className={styles.settingsSection}>
               <div className={styles.settingsSectionTitle}>AI</div>
-              <label className={styles.label}>Export report type
-                <div className={styles.settingsToggle}>
-                  {[["ai", "AI Technical Brief"], ["full", "Full Raw Export"]].map(([val, lbl]) => (
-                    <button key={val}
-                      className={`${styles.settingsToggleBtn} ${settingsForm.exportMode === val ? styles.settingsToggleActive : ""}`}
-                      onClick={() => setSettingsForm((f) => ({ ...f, exportMode: val }))}>
-                      {lbl}
-                    </button>
-                  ))}
-                </div>
-              </label>
               <label className={styles.label}>Analyze provider
                 <div className={styles.settingsToggle}>
                   {[["local", "Local AI"], ["claude", "Claude"]].map(([val, lbl]) => (

@@ -51,6 +51,11 @@ class ChecklistUpdate(BaseModel):
 
 class ReportGenerateRequest(BaseModel):
     provider: Optional[str] = "claude"
+    name: Optional[str] = "Draft Report"
+
+
+class ReportRenameRequest(BaseModel):
+    name: str
 
 
 class TargetsUpdate(BaseModel):
@@ -142,6 +147,7 @@ async def delete_session(session_id: str, db: AsyncSession = Depends(get_db)):
 @router.post("/{session_id}/report/generate")
 async def generate_ai_report(session_id: str, body: ReportGenerateRequest, db: AsyncSession = Depends(get_db)):
     from app.agent.llm import generate_report as llm_generate_report, AuthError
+    from app.models.report import Report
     session = await _get_or_404(session_id, db)
     result = await db.execute(
         select(Run).where(Run.session_id == session_id).order_by(Run.created_at)
@@ -150,11 +156,50 @@ async def generate_ai_report(session_id: str, body: ReportGenerateRequest, db: A
     prompt = _build_ai_report_prompt(session, runs)
     try:
         markdown = await llm_generate_report(prompt, provider=body.provider or "claude")
-        return {"markdown": markdown}
+        report = Report(
+            session_id=session_id,
+            name=body.name or "Draft Report",
+            provider=body.provider or "claude",
+            content=markdown,
+        )
+        db.add(report)
+        await db.commit()
+        await db.refresh(report)
+        return _report_dict(report)
     except AuthError as e:
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"Report generation failed: {e}")
+
+
+@router.get("/{session_id}/reports")
+async def list_reports(session_id: str, db: AsyncSession = Depends(get_db)):
+    from app.models.report import Report
+    await _get_or_404(session_id, db)
+    result = await db.execute(
+        select(Report).where(Report.session_id == session_id).order_by(Report.generated_at.desc())
+    )
+    return [_report_dict(r, include_content=False) for r in result.scalars().all()]
+
+
+@router.get("/{session_id}/reports/{report_id}")
+async def get_report(session_id: str, report_id: str, db: AsyncSession = Depends(get_db)):
+    return _report_dict(await _get_report_or_404(session_id, report_id, db))
+
+
+@router.patch("/{session_id}/reports/{report_id}")
+async def rename_report(session_id: str, report_id: str, body: ReportRenameRequest, db: AsyncSession = Depends(get_db)):
+    report = await _get_report_or_404(session_id, report_id, db)
+    report.name = body.name.strip() or report.name
+    await db.commit()
+    return _report_dict(report, include_content=False)
+
+
+@router.delete("/{session_id}/reports/{report_id}", status_code=204)
+async def delete_report(session_id: str, report_id: str, db: AsyncSession = Depends(get_db)):
+    report = await _get_report_or_404(session_id, report_id, db)
+    await db.delete(report)
+    await db.commit()
 
 
 @router.get("/{session_id}/report.md")
@@ -402,6 +447,30 @@ def _build_report(session, runs) -> str:
             ]
 
     return "\n".join(lines)
+
+
+async def _get_report_or_404(session_id: str, report_id: str, db: AsyncSession):
+    from app.models.report import Report
+    result = await db.execute(
+        select(Report).where(Report.id == report_id, Report.session_id == session_id)
+    )
+    report = result.scalar_one_or_none()
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    return report
+
+
+def _report_dict(r, include_content: bool = True) -> dict:
+    d = {
+        "id": r.id,
+        "session_id": r.session_id,
+        "name": r.name,
+        "provider": r.provider,
+        "generated_at": r.generated_at.isoformat(),
+    }
+    if include_content:
+        d["content"] = r.content
+    return d
 
 
 async def _get_or_404(session_id: str, db: AsyncSession) -> Session:
