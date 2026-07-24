@@ -1,4 +1,4 @@
-# Adding Custom Tools to Quiver
+# Custom Tools to Quiver
 
 There are two stages to adding a custom tool:
 

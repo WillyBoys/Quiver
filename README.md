@@ -74,7 +74,7 @@ Both modes run simultaneously. An AI campaign against one target does not block 
 | [SETUP.md](SETUP.md) | Environment variables, AI providers, Shannon setup, wordlists, remote access |
 | [FEATURES.md](FEATURES.md) | Full feature reference — sessions, tools, findings, campaigns, approval gates |
 | [ROADMAP.md](ROADMAP.md) | Platform vision, track status, and what's coming next |
-| [Adding_Custom_Tools.md](Adding_Custom_Tools.md) | Install and register new tools — apt, GitHub binaries, Go, Python, Ruby |
+| [CUSTOM_TOOLS.md](CUSTOM_TOOLS.md) | Install and register new tools — apt, GitHub binaries, Go, Python, Ruby |
 
 ---
 

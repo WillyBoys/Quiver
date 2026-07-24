@@ -30,7 +30,7 @@ The React frontend uses Vite HMR — frontend changes reflect in the browser imm
 **High value:**
 - Internal campaign agent tuning — improving the LLM prompting for AD/lateral movement context
 - Shannon finding import — structured import of Shannon deliverables into the Quiver session findings layer
-- New tool integrations — see [Adding Custom Tools](Adding_Custom_Tools.md) for how tool registration works
+- New tool integrations — see [Custom Tools](CUSTOM_TOOLS.md) for how tool registration works
 
 **Also welcome:**
 - Bug fixes with a clear reproduction case
@@ -46,7 +46,7 @@ The React frontend uses Vite HMR — frontend changes reflect in the browser imm
 
 ## Adding a Tool
 
-See [Adding_Custom_Tools.md](Adding_Custom_Tools.md) for the full guide. The short version:
+See [CUSTOM_TOOLS.md](CUSTOM_TOOLS.md) for the full guide. The short version:
 
 1. Install the binary in `backend/Dockerfile` (or `user-tools.txt` / `user-pip.txt` for apt/pip packages)
 2. Rebuild: `docker-compose up --build backend`

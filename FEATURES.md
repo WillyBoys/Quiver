@@ -36,7 +36,7 @@
 - Scope types — declare which target types a tool is compatible with (Web, IP Network, Domain)
 - Wordlist browser — auto-discovers wordlists from the mounted volume; Browse button on wordlist parameters; create custom wordlists in the UI
 
-See [Adding_Custom_Tools.md](Adding_Custom_Tools.md) to install new binaries into the container.
+See [CUSTOM_TOOLS.md](CUSTOM_TOOLS.md) to install new binaries into the container.
 
 ---
 
