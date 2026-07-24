@@ -1582,14 +1582,30 @@
   width: 100%;
 }
 
-/* ── Artifact Panel ──────────────────────────────────────────────────────── */
-.artifactPanel {
+/* ── Artifact Box (shown below AI reasoning when enabled in settings) ────── */
+.artifactBox {
+  flex-shrink: 0;
+  display: flex; flex-direction: column;
+  border-top: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.artifactBoxHeader {
+  padding: 5px 14px;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.07em;
+  text-transform: uppercase; color: var(--text-muted);
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.artifactBoxScroll {
   flex: 1; overflow-y: auto;
 }
 
 .artifactEmpty {
-  padding: 24px 14px; color: var(--text-muted);
-  font-size: 12px; font-style: italic; text-align: center; line-height: 1.7;
+  padding: 12px 14px; color: var(--text-muted);
+  font-size: 11px; font-style: italic; text-align: center;
 }
 
 .artifactSection {

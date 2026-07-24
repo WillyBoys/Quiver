@@ -48,14 +48,15 @@ export default function SessionDetailPage() {
   const [newTargetValue, setNewTargetValue] = useState("");
 
   const [campaign, setCampaign] = useState(null);
-  const [agentSidebarView, setAgentSidebarView] = useState("reasoning"); // "reasoning" | "tools" | "checklist" | "artifacts"
+  const [agentSidebarView, setAgentSidebarView] = useState("reasoning"); // "reasoning" | "tools" | "checklist"
   const connectedRunIds = useRef(new Set());
   const openSocketsRef = useRef([]);
   const [leftWidth, setLeftWidth] = useState(260);
   const [rightWidth, setRightWidth] = useState(240);
   const [notesSectionHeight, setNotesSectionHeight] = useState(130);
   const [runSectionHeight, setRunSectionHeight] = useState(200);
-  const dragRef = useRef({ active: false, handle: null, startX: 0, startY: 0, startLeft: 0, startRight: 0, startHeight: 0 });
+  const [artifactBoxHeight, setArtifactBoxHeight] = useState(150);
+  const dragRef = useRef({ active: false, handle: null, startX: 0, startY: 0, startLeft: 0, startRight: 0, startHeight: 0, startNotesHeight: 0, startArtifactHeight: 0 });
   const [showAgentSetup, setShowAgentSetup] = useState(false);
   const [agentForm, setAgentForm] = useState({ ai_provider: "claude", risk_level: "passive", max_iterations: "50", unlimited: false });
   const [scheduleMode, setScheduleMode] = useState("now"); // "now" | "later"
@@ -73,8 +74,9 @@ export default function SessionDetailPage() {
   const [editingReportName, setEditingReportName] = useState("");
   const [sidebarEditId, setSidebarEditId] = useState(null);        // sidebar inline edit
   const [sidebarEditName, setSidebarEditName] = useState("");
-  const [sidebarView, setSidebarView] = useState("tools");   // "tools" | "checklist" | "artifacts"
+  const [sidebarView, setSidebarView] = useState("tools");   // "tools" | "checklist"
   const [artifacts, setArtifacts] = useState({});
+  const [showArtifacts, setShowArtifacts] = useState(() => localStorage.getItem("quiver_show_artifacts") === "true");
   const [shellCmd, setShellCmd] = useState("");
   const [workflowFilter, setWorkflowFilter] = useState("all"); // "all" | "external" | "internal" | "web"
   const [phaseChecks, setPhaseChecks] = useState({});
@@ -502,8 +504,8 @@ export default function SessionDetailPage() {
 
   const handleResizeMouseDown = useCallback((e, handle) => {
     e.preventDefault();
-    dragRef.current = { active: true, handle, startX: e.clientX, startY: e.clientY, startLeft: leftWidth, startRight: rightWidth, startHeight: runSectionHeight, startNotesHeight: notesSectionHeight };
-  }, [leftWidth, rightWidth, runSectionHeight, notesSectionHeight]);
+    dragRef.current = { active: true, handle, startX: e.clientX, startY: e.clientY, startLeft: leftWidth, startRight: rightWidth, startHeight: runSectionHeight, startNotesHeight: notesSectionHeight, startArtifactHeight: artifactBoxHeight };
+  }, [leftWidth, rightWidth, runSectionHeight, notesSectionHeight, artifactBoxHeight]);
 
   useEffect(() => {
     const onMove = (e) => {
@@ -517,6 +519,8 @@ export default function SessionDetailPage() {
         setRunSectionHeight(Math.max(60, Math.min(600, d.startHeight + (e.clientY - d.startY))));
       } else if (d.handle === 'notes') {
         setNotesSectionHeight(Math.max(60, Math.min(400, d.startNotesHeight + (e.clientY - d.startY))));
+      } else if (d.handle === 'artifact') {
+        setArtifactBoxHeight(Math.max(60, Math.min(400, d.startArtifactHeight - (e.clientY - d.startY))));
       }
     };
     const onUp = () => { dragRef.current.active = false; };
@@ -1004,9 +1008,6 @@ export default function SessionDetailPage() {
             <button
               className={`${styles.toggleBtn} ${(session.campaign_id ? agentSidebarView : sidebarView) === "checklist" ? styles.toggleBtnActive : ""}`}
               onClick={() => session.campaign_id ? setAgentSidebarView("checklist") : setSidebarView("checklist")}>Checklist</button>
-            <button
-              className={`${styles.toggleBtn} ${(session.campaign_id ? agentSidebarView : sidebarView) === "artifacts" ? styles.toggleBtnActive : ""}`}
-              onClick={() => session.campaign_id ? setAgentSidebarView("artifacts") : setSidebarView("artifacts")}>Artifacts</button>
           </div>
 
           {/* Agent reasoning view */}
@@ -1075,6 +1076,78 @@ export default function SessionDetailPage() {
                 );
               })}
             </div>
+          )}
+
+          {/* Artifact store box — shown below reasoning when enabled in settings */}
+          {showArtifacts && session.campaign_id && agentSidebarView === "reasoning" && (
+            <>
+              <div className={styles.resizeHandleH} onMouseDown={(e) => handleResizeMouseDown(e, 'artifact')} />
+              <div className={styles.artifactBox} style={{ height: artifactBoxHeight }}>
+                <div className={styles.artifactBoxHeader}>AI Artifacts</div>
+                <div className={styles.artifactBoxScroll}>
+                  {(() => {
+                    const hasArtifacts =
+                      (artifacts.hosts  || []).length > 0 ||
+                      (artifacts.users  || []).length > 0 ||
+                      (artifacts.spns   || []).length > 0 ||
+                      (artifacts.notes  || []).length > 0 ||
+                      Object.keys(artifacts.hashes || {}).length > 0 ||
+                      Object.keys(artifacts.creds  || {}).length > 0;
+                    if (!hasArtifacts) return <p className={styles.artifactEmpty}>No artifacts yet.</p>;
+                    return (
+                      <>
+                        {(artifacts.hosts || []).length > 0 && (
+                          <div className={styles.artifactSection}>
+                            <div className={styles.artifactSectionLabel}>Hosts</div>
+                            {artifacts.hosts.map((h, i) => <div key={i} className={styles.artifactItem}><code>{h}</code></div>)}
+                          </div>
+                        )}
+                        {(artifacts.users || []).length > 0 && (
+                          <div className={styles.artifactSection}>
+                            <div className={styles.artifactSectionLabel}>Users</div>
+                            {artifacts.users.map((u, i) => <div key={i} className={styles.artifactItem}><code>{u}</code></div>)}
+                          </div>
+                        )}
+                        {(artifacts.spns || []).length > 0 && (
+                          <div className={styles.artifactSection}>
+                            <div className={styles.artifactSectionLabel}>SPNs</div>
+                            {artifacts.spns.map((s, i) => <div key={i} className={styles.artifactItem}><code className={styles.artifactMono}>{s}</code></div>)}
+                          </div>
+                        )}
+                        {Object.keys(artifacts.hashes || {}).length > 0 && (
+                          <div className={styles.artifactSection}>
+                            <div className={styles.artifactSectionLabel}>Hashes</div>
+                            {Object.entries(artifacts.hashes).map(([user, hash]) => (
+                              <div key={user} className={styles.artifactItemKV}>
+                                <span className={styles.artifactKey}>{user}</span>
+                                <code className={styles.artifactHash}>{hash.length > 44 ? hash.slice(0, 44) + "…" : hash}</code>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {Object.keys(artifacts.creds || {}).length > 0 && (
+                          <div className={styles.artifactSection}>
+                            <div className={styles.artifactSectionLabel}>Credentials</div>
+                            {Object.entries(artifacts.creds).map(([user, pass_]) => (
+                              <div key={user} className={styles.artifactItemKV}>
+                                <span className={styles.artifactKey}>{user}</span>
+                                <code>{pass_}</code>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {(artifacts.notes || []).length > 0 && (
+                          <div className={styles.artifactSection}>
+                            <div className={styles.artifactSectionLabel}>Notes</div>
+                            {artifacts.notes.map((n, i) => <div key={i} className={styles.artifactItem}>{n}</div>)}
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
+                </div>
+              </div>
+            </>
           )}
 
           {/* Checklist view */}
@@ -1217,72 +1290,6 @@ export default function SessionDetailPage() {
               </div>
             </>
           )}
-          {/* Artifacts view */}
-          {(session.campaign_id ? agentSidebarView : sidebarView) === "artifacts" && (() => {
-            const hasArtifacts =
-              (artifacts.hosts  || []).length > 0 ||
-              (artifacts.users  || []).length > 0 ||
-              (artifacts.spns   || []).length > 0 ||
-              (artifacts.notes  || []).length > 0 ||
-              Object.keys(artifacts.hashes || {}).length > 0 ||
-              Object.keys(artifacts.creds  || {}).length > 0;
-            return (
-              <div className={styles.artifactPanel}>
-                {!hasArtifacts ? (
-                  <p className={styles.artifactEmpty}>No artifacts stored yet.<br/>The AI agent stores discovered users, hashes, credentials, and hosts here for use in later steps.</p>
-                ) : (
-                  <>
-                    {(artifacts.hosts || []).length > 0 && (
-                      <div className={styles.artifactSection}>
-                        <div className={styles.artifactSectionLabel}>Hosts</div>
-                        {artifacts.hosts.map((h, i) => <div key={i} className={styles.artifactItem}><code>{h}</code></div>)}
-                      </div>
-                    )}
-                    {(artifacts.users || []).length > 0 && (
-                      <div className={styles.artifactSection}>
-                        <div className={styles.artifactSectionLabel}>Users</div>
-                        {artifacts.users.map((u, i) => <div key={i} className={styles.artifactItem}><code>{u}</code></div>)}
-                      </div>
-                    )}
-                    {(artifacts.spns || []).length > 0 && (
-                      <div className={styles.artifactSection}>
-                        <div className={styles.artifactSectionLabel}>SPNs</div>
-                        {artifacts.spns.map((s, i) => <div key={i} className={styles.artifactItem}><code className={styles.artifactMono}>{s}</code></div>)}
-                      </div>
-                    )}
-                    {Object.keys(artifacts.hashes || {}).length > 0 && (
-                      <div className={styles.artifactSection}>
-                        <div className={styles.artifactSectionLabel}>Hashes</div>
-                        {Object.entries(artifacts.hashes).map(([user, hash]) => (
-                          <div key={user} className={styles.artifactItemKV}>
-                            <span className={styles.artifactKey}>{user}</span>
-                            <code className={styles.artifactHash}>{hash.length > 44 ? hash.slice(0, 44) + "…" : hash}</code>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    {Object.keys(artifacts.creds || {}).length > 0 && (
-                      <div className={styles.artifactSection}>
-                        <div className={styles.artifactSectionLabel}>Credentials</div>
-                        {Object.entries(artifacts.creds).map(([user, pass_]) => (
-                          <div key={user} className={styles.artifactItemKV}>
-                            <span className={styles.artifactKey}>{user}</span>
-                            <code>{pass_}</code>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    {(artifacts.notes || []).length > 0 && (
-                      <div className={styles.artifactSection}>
-                        <div className={styles.artifactSectionLabel}>Notes</div>
-                        {artifacts.notes.map((n, i) => <div key={i} className={styles.artifactItem}>{n}</div>)}
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
-            );
-          })()}
         </aside>
 
         <div className={styles.resizeHandle} onMouseDown={(e) => handleResizeMouseDown(e, 'left')} />
@@ -1918,6 +1925,17 @@ export default function SessionDetailPage() {
                     <button key={val}
                       className={`${styles.settingsToggleBtn} ${settingsForm.reportProvider === val ? styles.settingsToggleActive : ""}`}
                       onClick={() => setSettingsForm((f) => ({ ...f, reportProvider: val }))}>
+                      {lbl}
+                    </button>
+                  ))}
+                </div>
+              </label>
+              <label className={styles.label}>AI artifacts
+                <div className={styles.settingsToggle}>
+                  {[["false", "Hidden"], ["true", "Visible"]].map(([val, lbl]) => (
+                    <button key={val}
+                      className={`${styles.settingsToggleBtn} ${String(showArtifacts) === val ? styles.settingsToggleActive : ""}`}
+                      onClick={() => { const on = val === "true"; setShowArtifacts(on); localStorage.setItem("quiver_show_artifacts", String(on)); }}>
                       {lbl}
                     </button>
                   ))}
