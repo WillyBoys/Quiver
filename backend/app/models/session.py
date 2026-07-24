@@ -19,6 +19,7 @@ class Session(Base):
     findings: Mapped[list] = mapped_column(JSON, default=list)        # [{title, severity, notes}]
     checklist_state: Mapped[dict] = mapped_column(JSON, default=dict) # {phase_checks: {key: bool}}
     targets: Mapped[list] = mapped_column(JSON, default=list)         # [{id, value}]
+    artifacts: Mapped[dict] = mapped_column(JSON, default=dict)       # {users, hashes, creds, hosts, spns, notes}
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc),
                                                   onupdate=lambda: datetime.now(timezone.utc))

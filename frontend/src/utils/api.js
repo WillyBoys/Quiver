@@ -59,6 +59,8 @@ export const api = {
       }),
     deleteReport: (id, reportId) =>
       req(`/sessions/${id}/reports/${reportId}`, { method: "DELETE" }),
+    patchArtifacts: (id, artifact) =>
+      req(`/sessions/${id}/artifacts`, { method: "PATCH", body: JSON.stringify(artifact) }),
   },
   tools: {
     list: (category) => req(`/tools/${category ? `?category=${category}` : ""}`),

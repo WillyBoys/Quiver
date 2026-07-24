@@ -195,6 +195,9 @@ async def build_agent_prompt(campaign: Campaign, db: AsyncSession) -> str:
         scopes = t.scope_types or []
         if scopes and kind not in scopes:
             continue
+        tags = t.workflow_tags or []
+        if tags and engagement_type not in tags:
+            continue
         if t.binary not in seen_binaries:
             seen_binaries.add(t.binary)
             tool_map[t.binary] = t
@@ -242,6 +245,23 @@ async def build_agent_prompt(campaign: Campaign, db: AsyncSession) -> str:
     actions_str = "\n".join(action_lines) or "  (none yet)"
     already_run_str = "\n".join(already_run_commands) if already_run_commands else "  (none)"
 
+    # Build artifact summary (discovered users, creds, hosts — persisted across iterations)
+    raw_artifacts = sess.artifacts if sess else {}
+    artifacts_lines = []
+    if raw_artifacts.get("hosts"):
+        artifacts_lines.append("  Hosts: " + ", ".join(raw_artifacts["hosts"]))
+    if raw_artifacts.get("users"):
+        artifacts_lines.append("  Users: " + ", ".join(raw_artifacts["users"]))
+    if raw_artifacts.get("spns"):
+        artifacts_lines.append("  SPNs: " + ", ".join(raw_artifacts["spns"]))
+    for user, h in (raw_artifacts.get("hashes") or {}).items():
+        artifacts_lines.append(f"  Hash  {user}: {h}")
+    for user, pw in (raw_artifacts.get("creds") or {}).items():
+        artifacts_lines.append(f"  Cred  {user}: {pw}")
+    for note in (raw_artifacts.get("notes") or []):
+        artifacts_lines.append(f"  Note: {note}")
+    artifacts_str = "\n".join(artifacts_lines) or "  (none yet)"
+
     # Build existing findings list so agent can update instead of duplicating
     existing_findings = sess.findings if sess else []
     if existing_findings:
@@ -277,6 +297,9 @@ TOOLS AVAILABLE (use binary name as tool_name):
 FINDINGS ALREADY LOGGED (id | severity | title):
 {findings_str}
 
+ARTIFACTS (discovered credentials, hosts, and users — use these in subsequent commands):
+{artifacts_str}
+
 HISTORY (oldest first — read this to understand what was found and which phase you are in):
 {actions_str}
 
@@ -295,6 +318,9 @@ To ADD DETAIL to an existing finding (use the id from FINDINGS ALREADY LOGGED):
 To show this finding was made possible by a prior one, add chains_from with the prior finding's title:
 {{"...","finding":{{"title":"RCE via deserialization","severity":"critical","notes":"...","chains_from":"SQL Injection Authentication Bypass"}}}}
 
+To store a discovered credential, user, hash, host, or SPN for use in later steps (appears in ARTIFACTS next iteration):
+{{"thought":"...","reasoning":"...","tool_name":"binary","target":"{primary}","parameters":{{}},"extra_flags":"","artifact":{{"type":"cred","user":"jsmith","value":"Summer2024!"}}}}
+
 Or if all useful enumeration is complete:
 {{"reasoning":"why done","done":true}}
 
@@ -306,6 +332,7 @@ RULES (follow all):
 - bash special rule: when tool_name is "bash", put the COMPLETE shell command in extra_flags. The bash tool requires human approval and is your escape hatch for custom probes, chained commands, or anything no other tool covers.
 - finding: ONLY include when the CURRENT step's output confirms a real vulnerability. Prefer updating an existing finding (with its id) over creating a near-duplicate.
 - chains_from: optional — only set when the current finding directly depended on a prior finding to be exploitable.
+- artifact: ONLY include when the current step's output reveals something worth storing for later (credentials, hashes, usernames, hosts, SPNs). Types: "user" (value=username), "hash" (user=username, value=full-hash-string), "cred" (user=username, value=plaintext-password), "host" (value="IP description"), "spn" (value=full-SPN-string), "note" (value=domain-level-info). For hash and cred, include a "user" key. Omit artifact if nothing new was found.
 - Reply with exactly one line of JSON, no line breaks inside"""
 
 

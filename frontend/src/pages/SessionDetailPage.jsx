@@ -48,7 +48,7 @@ export default function SessionDetailPage() {
   const [newTargetValue, setNewTargetValue] = useState("");
 
   const [campaign, setCampaign] = useState(null);
-  const [agentSidebarView, setAgentSidebarView] = useState("reasoning"); // "reasoning" | "tools" | "checklist"
+  const [agentSidebarView, setAgentSidebarView] = useState("reasoning"); // "reasoning" | "tools" | "checklist" | "artifacts"
   const connectedRunIds = useRef(new Set());
   const openSocketsRef = useRef([]);
   const [leftWidth, setLeftWidth] = useState(260);
@@ -73,7 +73,8 @@ export default function SessionDetailPage() {
   const [editingReportName, setEditingReportName] = useState("");
   const [sidebarEditId, setSidebarEditId] = useState(null);        // sidebar inline edit
   const [sidebarEditName, setSidebarEditName] = useState("");
-  const [sidebarView, setSidebarView] = useState("tools");   // "tools" | "checklist"
+  const [sidebarView, setSidebarView] = useState("tools");   // "tools" | "checklist" | "artifacts"
+  const [artifacts, setArtifacts] = useState({});
   const [shellCmd, setShellCmd] = useState("");
   const [workflowFilter, setWorkflowFilter] = useState("all"); // "all" | "external" | "internal" | "web"
   const [phaseChecks, setPhaseChecks] = useState({});
@@ -85,6 +86,7 @@ export default function SessionDetailPage() {
   useEffect(() => {
     api.sessions.get(sessionId).then(async (s) => {
       setSession(s);
+      setArtifacts(s.artifacts || {});
       setNotesValue(s.notes || "");
       setPhaseChecks(s.checklist_state?.phase_checks || {});
       setCustomItems(s.checklist_state?.custom_items || []);
@@ -183,9 +185,10 @@ export default function SessionDetailPage() {
     const interval = setInterval(() => {
       api.runs.listForSession(sessionId).then((r) => { setRuns(r); connectNewRunningRuns(r); });
       api.campaigns.get(campaignId).then(setCampaign);
-      // Merge only findings + checklist from the server so in-progress notes edits aren't clobbered
+      // Merge only findings + checklist + artifacts from the server so in-progress notes edits aren't clobbered
       api.sessions.get(sessionId).then((fresh) => {
         setSession((prev) => prev ? { ...prev, findings: fresh.findings, checklist_state: fresh.checklist_state } : prev);
+        setArtifacts(fresh.artifacts || {});
       });
     }, 4000);
     return () => {
@@ -198,17 +201,19 @@ export default function SessionDetailPage() {
 
   const enabledTools = useMemo(() => tools.filter((t) => t.enabled), [tools]);
   const filteredTools = useMemo(() => {
+    let list = workflowFilter !== "all"
+      ? enabledTools.filter((t) => (t.workflow_tags || []).includes(workflowFilter))
+      : enabledTools;
     if (toolSearch.trim()) {
       const q = toolSearch.toLowerCase();
-      return enabledTools.filter(
+      return list.filter(
         (t) => t.name.toLowerCase().includes(q) ||
                t.binary.toLowerCase().includes(q) ||
                (t.category || "").toLowerCase().includes(q)
       );
     }
-    let list = selectedCat === "all" ? enabledTools : enabledTools.filter((t) => t.category === selectedCat);
-    if (workflowFilter !== "all") {
-      list = list.filter((t) => (t.workflow_tags || []).includes(workflowFilter));
+    if (selectedCat !== "all") {
+      list = list.filter((t) => t.category === selectedCat);
     }
     return list;
   }, [enabledTools, selectedCat, workflowFilter, toolSearch]);
@@ -658,14 +663,15 @@ export default function SessionDetailPage() {
       const scheduleIso = isScheduled ? new Date(scheduledAt).toISOString() : null;
 
       const newCampaign = await api.campaigns.create({
-        name:           `${session.name} — AI Agent`,
-        description:    "",
-        target_scope:   targetScope.length ? targetScope : [session.target],
-        ai_provider:    agentForm.ai_provider,
-        risk_level:     agentForm.risk_level,
-        schedule:       scheduleIso,
-        session_id:     sessionId,
-        max_iterations: agentForm.unlimited ? null : (parseInt(agentForm.max_iterations) || 50),
+        name:            `${session.name} — AI Agent`,
+        description:     "",
+        target_scope:    targetScope.length ? targetScope : [session.target],
+        ai_provider:     agentForm.ai_provider,
+        risk_level:      agentForm.risk_level,
+        engagement_type: session.engagement_type || "external",
+        schedule:        scheduleIso,
+        session_id:      sessionId,
+        max_iterations:  agentForm.unlimited ? null : (parseInt(agentForm.max_iterations) || 50),
       });
       // Link back to session so the session knows its campaign
       await api.sessions.update(sessionId, { ...session, campaign_id: newCampaign.id });
@@ -998,6 +1004,9 @@ export default function SessionDetailPage() {
             <button
               className={`${styles.toggleBtn} ${(session.campaign_id ? agentSidebarView : sidebarView) === "checklist" ? styles.toggleBtnActive : ""}`}
               onClick={() => session.campaign_id ? setAgentSidebarView("checklist") : setSidebarView("checklist")}>Checklist</button>
+            <button
+              className={`${styles.toggleBtn} ${(session.campaign_id ? agentSidebarView : sidebarView) === "artifacts" ? styles.toggleBtnActive : ""}`}
+              onClick={() => session.campaign_id ? setAgentSidebarView("artifacts") : setSidebarView("artifacts")}>Artifacts</button>
           </div>
 
           {/* Agent reasoning view */}
@@ -1208,6 +1217,72 @@ export default function SessionDetailPage() {
               </div>
             </>
           )}
+          {/* Artifacts view */}
+          {(session.campaign_id ? agentSidebarView : sidebarView) === "artifacts" && (() => {
+            const hasArtifacts =
+              (artifacts.hosts  || []).length > 0 ||
+              (artifacts.users  || []).length > 0 ||
+              (artifacts.spns   || []).length > 0 ||
+              (artifacts.notes  || []).length > 0 ||
+              Object.keys(artifacts.hashes || {}).length > 0 ||
+              Object.keys(artifacts.creds  || {}).length > 0;
+            return (
+              <div className={styles.artifactPanel}>
+                {!hasArtifacts ? (
+                  <p className={styles.artifactEmpty}>No artifacts stored yet.<br/>The AI agent stores discovered users, hashes, credentials, and hosts here for use in later steps.</p>
+                ) : (
+                  <>
+                    {(artifacts.hosts || []).length > 0 && (
+                      <div className={styles.artifactSection}>
+                        <div className={styles.artifactSectionLabel}>Hosts</div>
+                        {artifacts.hosts.map((h, i) => <div key={i} className={styles.artifactItem}><code>{h}</code></div>)}
+                      </div>
+                    )}
+                    {(artifacts.users || []).length > 0 && (
+                      <div className={styles.artifactSection}>
+                        <div className={styles.artifactSectionLabel}>Users</div>
+                        {artifacts.users.map((u, i) => <div key={i} className={styles.artifactItem}><code>{u}</code></div>)}
+                      </div>
+                    )}
+                    {(artifacts.spns || []).length > 0 && (
+                      <div className={styles.artifactSection}>
+                        <div className={styles.artifactSectionLabel}>SPNs</div>
+                        {artifacts.spns.map((s, i) => <div key={i} className={styles.artifactItem}><code className={styles.artifactMono}>{s}</code></div>)}
+                      </div>
+                    )}
+                    {Object.keys(artifacts.hashes || {}).length > 0 && (
+                      <div className={styles.artifactSection}>
+                        <div className={styles.artifactSectionLabel}>Hashes</div>
+                        {Object.entries(artifacts.hashes).map(([user, hash]) => (
+                          <div key={user} className={styles.artifactItemKV}>
+                            <span className={styles.artifactKey}>{user}</span>
+                            <code className={styles.artifactHash}>{hash.length > 44 ? hash.slice(0, 44) + "…" : hash}</code>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {Object.keys(artifacts.creds || {}).length > 0 && (
+                      <div className={styles.artifactSection}>
+                        <div className={styles.artifactSectionLabel}>Credentials</div>
+                        {Object.entries(artifacts.creds).map(([user, pass_]) => (
+                          <div key={user} className={styles.artifactItemKV}>
+                            <span className={styles.artifactKey}>{user}</span>
+                            <code>{pass_}</code>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {(artifacts.notes || []).length > 0 && (
+                      <div className={styles.artifactSection}>
+                        <div className={styles.artifactSectionLabel}>Notes</div>
+                        {artifacts.notes.map((n, i) => <div key={i} className={styles.artifactItem}>{n}</div>)}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            );
+          })()}
         </aside>
 
         <div className={styles.resizeHandle} onMouseDown={(e) => handleResizeMouseDown(e, 'left')} />

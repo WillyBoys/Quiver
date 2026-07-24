@@ -1581,3 +1581,48 @@
   outline: none;
   width: 100%;
 }
+
+/* ── Artifact Panel ──────────────────────────────────────────────────────── */
+.artifactPanel {
+  flex: 1; overflow-y: auto;
+}
+
+.artifactEmpty {
+  padding: 24px 14px; color: var(--text-muted);
+  font-size: 12px; font-style: italic; text-align: center; line-height: 1.7;
+}
+
+.artifactSection {
+  padding: 8px 14px 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.artifactSectionLabel {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.07em;
+  text-transform: uppercase; color: var(--accent); margin-bottom: 6px;
+}
+
+.artifactItem {
+  font-size: 11px; color: var(--text-primary);
+  padding: 2px 0; word-break: break-all;
+}
+
+.artifactItemKV {
+  display: flex; flex-direction: column; gap: 1px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+  word-break: break-all;
+}
+.artifactItemKV:last-child { border-bottom: none; }
+
+.artifactKey {
+  font-size: 10px; color: var(--text-muted);
+}
+
+.artifactHash {
+  font-size: 10px; color: var(--text-secondary);
+}
+
+.artifactMono {
+  font-size: 10px;
+}

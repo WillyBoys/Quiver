@@ -72,6 +72,16 @@ async def init_db():
         except OperationalError as e:
             if "duplicate column" not in str(e).lower() and "already exists" not in str(e).lower():
                 logger.warning("Migration warning: %s", e)
+        try:
+            await conn.execute(text("ALTER TABLE campaigns ADD COLUMN engagement_type TEXT DEFAULT 'external'"))
+        except OperationalError as e:
+            if "duplicate column" not in str(e).lower() and "already exists" not in str(e).lower():
+                logger.warning("Migration warning: %s", e)
+        try:
+            await conn.execute(text("ALTER TABLE sessions ADD COLUMN artifacts JSON DEFAULT '{}'"))
+        except OperationalError as e:
+            if "duplicate column" not in str(e).lower() and "already exists" not in str(e).lower():
+                logger.warning("Migration warning: %s", e)
         # Ensure indexes exist on pre-index DBs
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_runs_session_id ON runs (session_id)"

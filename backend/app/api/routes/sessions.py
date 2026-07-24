@@ -62,6 +62,12 @@ class TargetsUpdate(BaseModel):
     targets: list
 
 
+class ArtifactsUpdate(BaseModel):
+    type: str              # user / hash / cred / host / spn / note
+    value: str
+    user: Optional[str] = None
+
+
 @router.get("/")
 async def list_sessions(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Session).order_by(Session.created_at.desc()))
@@ -135,6 +141,16 @@ async def update_checklist(session_id: str, body: ChecklistUpdate, db: AsyncSess
     session.checklist_state = {"phase_checks": body.phase_checks, "custom_items": body.custom_items}
     await db.commit()
     return {"checklist_state": session.checklist_state}
+
+
+@router.patch("/{session_id}/artifacts")
+async def patch_artifacts(session_id: str, body: ArtifactsUpdate, db: AsyncSession = Depends(get_db)):
+    from sqlalchemy.orm.attributes import flag_modified
+    session = await _get_or_404(session_id, db)
+    session.artifacts = _merge_artifact(dict(session.artifacts or {}), body.model_dump())
+    flag_modified(session, "artifacts")
+    await db.commit()
+    return {"artifacts": session.artifacts}
 
 
 @router.delete("/{session_id}", status_code=204)
@@ -481,6 +497,29 @@ async def _get_or_404(session_id: str, db: AsyncSession) -> Session:
     return session
 
 
+def _merge_artifact(current: dict, item: dict) -> dict:
+    result = {
+        "users": list(current.get("users") or []),
+        "hashes": dict(current.get("hashes") or {}),
+        "creds":  dict(current.get("creds") or {}),
+        "hosts":  list(current.get("hosts") or []),
+        "spns":   list(current.get("spns") or []),
+        "notes":  list(current.get("notes") or []),
+    }
+    t = item.get("type", "")
+    value = (item.get("value") or "").strip()
+    user  = (item.get("user") or "").strip()
+    if not value:
+        return result
+    if   t == "user" and value not in result["users"]:  result["users"].append(value)
+    elif t == "hash" and user:                          result["hashes"][user] = value
+    elif t == "cred" and user:                          result["creds"][user]  = value
+    elif t == "host" and value not in result["hosts"]:  result["hosts"].append(value)
+    elif t == "spn"  and value not in result["spns"]:   result["spns"].append(value)
+    elif t == "note" and value not in result["notes"]:  result["notes"].append(value)
+    return result
+
+
 def _session_dict(s: Session) -> dict:
     return {
         "id": s.id,
@@ -493,6 +532,7 @@ def _session_dict(s: Session) -> dict:
         "findings": s.findings or [],
         "checklist_state": s.checklist_state or {},
         "targets": s.targets or [],
+        "artifacts": s.artifacts or {},
         "campaign_id": s.campaign_id or None,
         "created_at": s.created_at.isoformat(),
         "updated_at": s.updated_at.isoformat(),
