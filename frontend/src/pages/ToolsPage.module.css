@@ -125,6 +125,11 @@
   font-size: 11px; font-weight: 600; color: var(--text-secondary);
   text-transform: uppercase; letter-spacing: 0.05em;
 }
+.labelHint {
+  font-size: 11px; font-weight: 400; color: var(--text-muted);
+  text-transform: none; letter-spacing: 0; line-height: 1.5;
+  font-style: italic;
+}
 
 .paramsSection {
   border: 1px solid var(--border); border-radius: 4px;
@@ -167,8 +172,15 @@
 .agentModeOption[data-active="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .agentModeOption[data-mode="never"][data-active="true"] { border-color: var(--critical); background: color-mix(in srgb, var(--critical) 10%, transparent); }
 .agentModeOption[data-mode="approve"][data-active="true"] { border-color: var(--warning); background: color-mix(in srgb, var(--warning) 10%, transparent); }
+.agentModeTop { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 .agentModeLabel { font-size: 12px; font-weight: 600; color: var(--text-primary); text-transform: none; letter-spacing: 0; }
-.agentModeDesc { font-size: 11px; color: var(--text-muted); text-transform: none; letter-spacing: 0; font-weight: 400; }
+.agentModeDesc { font-size: 11px; color: var(--text-muted); text-transform: none; letter-spacing: 0; font-weight: 400; line-height: 1.4; margin-top: 2px; }
+.riskBar { display: flex; gap: 3px; align-items: center; flex-shrink: 0; }
+.riskSegment { width: 14px; height: 5px; border-radius: 2px; background: var(--border); transition: background 0.15s; }
+.riskSegment[data-filled="true"][data-pos="1"] { background: var(--accent); }
+.riskSegment[data-filled="true"][data-pos="2"] { background: #f59e0b; }
+.riskSegment[data-filled="true"][data-pos="3"] { background: var(--critical); }
+.riskNever { font-size: 10px; font-weight: 500; color: var(--text-muted); letter-spacing: 0.03em; flex-shrink: 0; }
 
 /* Scope type checkboxes in edit form */
 .scopeCheckboxRow { display: flex; gap: 8px; }

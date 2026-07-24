@@ -1,7 +1,9 @@
+import glob
+import os
 import re
 import uuid
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import Response
+from fastapi.responses import FileResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.db.database import get_db
@@ -520,6 +522,25 @@ def _merge_artifact(current: dict, item: dict) -> dict:
     return result
 
 
+@router.get("/{session_id}/bloodhound-zip")
+async def download_bloodhound_zip(session_id: str, db: AsyncSession = Depends(get_db)):
+    await _get_or_404(session_id, db)
+    bh_dir = f"/data/bloodhound/{session_id}"
+    zips = sorted(glob.glob(os.path.join(bh_dir, "*.zip")), reverse=True)
+    if not zips:
+        raise HTTPException(status_code=404, detail="No BloodHound data collected yet — run bloodhound-python first")
+    return FileResponse(
+        zips[0],
+        media_type="application/zip",
+        filename=f"bloodhound-{session_id[:8]}.zip",
+    )
+
+
+def _bloodhound_available(session_id: str) -> bool:
+    bh_dir = f"/data/bloodhound/{session_id}"
+    return bool(os.path.isdir(bh_dir) and glob.glob(os.path.join(bh_dir, "*.zip")))
+
+
 def _session_dict(s: Session) -> dict:
     return {
         "id": s.id,
@@ -534,6 +555,7 @@ def _session_dict(s: Session) -> dict:
         "targets": s.targets or [],
         "artifacts": s.artifacts or {},
         "campaign_id": s.campaign_id or None,
+        "bloodhound_available": _bloodhound_available(s.id),
         "created_at": s.created_at.isoformat(),
         "updated_at": s.updated_at.isoformat(),
     }

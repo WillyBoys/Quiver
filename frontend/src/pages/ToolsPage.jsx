@@ -17,11 +17,17 @@ const SCOPE_OPTIONS = [
   { value: "domain", label: "Domain",     desc: "Hostnames and domains" },
 ];
 
+const WORKFLOW_TAG_OPTIONS = [
+  { value: "external", label: "External", desc: "External network engagements" },
+  { value: "internal", label: "Internal", desc: "Internal AD/network engagements" },
+  { value: "web",      label: "Web App",  desc: "Web application engagements" },
+];
+
 const AGENT_MODE_LABELS = {
-  passive: { label: "Passive", desc: "Passive recon — runs freely in Passive Mode and above" },
-  active:  { label: "Active",  desc: "Active scanning — runs freely in Active Mode and above" },
-  exploit: { label: "Exploit", desc: "Exploitation/credential attacks — runs freely in Autonomous Mode only" },
-  never:   { label: "Never",   desc: "Hidden from LLM — manual use only" },
+  passive: { label: "Passive", risk: 1, desc: "Read-only queries — no auth, no writes, no target changes. Runs without approval in any campaign mode." },
+  active:  { label: "Active",  risk: 2, desc: "Sends probes or auth attempts that appear in target logs. Runs freely in Active or Autonomous mode." },
+  exploit: { label: "Exploit", risk: 3, desc: "Credential attacks, shells, or lateral movement. Always requires approval unless Autonomous mode." },
+  never:   { label: "Never",   risk: null, desc: "AI sees this tool in its reasoning and can suggest it, but will never execute it — engineer-run only." },
 };
 
 export default function ToolsPage() {
@@ -94,12 +100,7 @@ export default function ToolsPage() {
 
   async function handleSubmit(e) {
     e.preventDefault();
-    const payload = {
-      ...form,
-      workflow_tags: typeof form.workflow_tags === "string"
-        ? form.workflow_tags.split(",").map((s) => s.trim()).filter(Boolean)
-        : form.workflow_tags,
-    };
+    const payload = { ...form };
 
     if (editing === "new") {
       const created = await api.tools.create(payload);
@@ -135,6 +136,15 @@ export default function ToolsPage() {
       scope_types: f.scope_types.includes(value)
         ? f.scope_types.filter(s => s !== value)
         : [...f.scope_types, value],
+    }));
+  }
+
+  function toggleTag(value) {
+    setForm(f => ({
+      ...f,
+      workflow_tags: f.workflow_tags.includes(value)
+        ? f.workflow_tags.filter(t => t !== value)
+        : [...f.workflow_tags, value],
     }));
   }
 
@@ -262,7 +272,7 @@ export default function ToolsPage() {
 
               <label className={styles.label}>
                 Target Scope
-                <span className={styles.labelHint}>Which target types the LLM can use this tool against. Leave all unchecked to allow any type.</span>
+                <span className={styles.labelHint}>Controls which target types this tool is eligible for. For example, a web scanner scoped to "Web" will be hidden when the campaign target is a raw IP or CIDR range. Leaving all unchecked allows any type.</span>
                 <div className={styles.scopeCheckboxRow}>
                   {SCOPE_OPTIONS.map(({ value, label, desc }) => (
                     <button
@@ -285,7 +295,7 @@ export default function ToolsPage() {
               <label className={styles.label}>
                 Agent Access
                 <div className={styles.agentModeRow}>
-                  {Object.entries(AGENT_MODE_LABELS).map(([val, { label, desc }]) => (
+                  {Object.entries(AGENT_MODE_LABELS).map(([val, { label, risk, desc }]) => (
                     <button
                       key={val}
                       type="button"
@@ -294,17 +304,44 @@ export default function ToolsPage() {
                       data-mode={val}
                       onClick={() => setForm(f => ({ ...f, agent_mode: val }))}
                     >
-                      <span className={styles.agentModeLabel}>{label}</span>
+                      <div className={styles.agentModeTop}>
+                        <span className={styles.agentModeLabel}>{label}</span>
+                        {risk !== null ? (
+                          <div className={styles.riskBar}>
+                            {[1, 2, 3].map(i => (
+                              <span key={i} className={styles.riskSegment} data-filled={String(i <= risk)} data-pos={String(i)} />
+                            ))}
+                          </div>
+                        ) : (
+                          <span className={styles.riskNever}>AI hidden</span>
+                        )}
+                      </div>
                       <span className={styles.agentModeDesc}>{desc}</span>
                     </button>
                   ))}
                 </div>
               </label>
 
-              <label className={styles.label}>Workflow Tags (comma separated)
-                <input className="input" value={Array.isArray(form.workflow_tags) ? form.workflow_tags.join(", ") : form.workflow_tags}
-                  placeholder="external, web, internal"
-                  onChange={(e) => setForm({ ...form, workflow_tags: e.target.value })} />
+              <label className={styles.label}>
+                Engagement Types
+                <span className={styles.labelHint}>Which engagement tracks the AI will include this tool in. Leave all unchecked to include in all tracks.</span>
+                <div className={styles.scopeCheckboxRow}>
+                  {WORKFLOW_TAG_OPTIONS.map(({ value, label, desc }) => (
+                    <button
+                      key={value}
+                      type="button"
+                      className={styles.scopeCheckbox}
+                      data-active={Array.isArray(form.workflow_tags) && form.workflow_tags.includes(value)}
+                      onClick={() => toggleTag(value)}
+                    >
+                      <span className={styles.scopeCheckboxMark}>{Array.isArray(form.workflow_tags) && form.workflow_tags.includes(value) ? "✓" : ""}</span>
+                      <span>
+                        <span className={styles.scopeCheckboxLabel}>{label}</span>
+                        <span className={styles.scopeCheckboxDesc}>{desc}</span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
               </label>
 
               <div className={styles.paramsSection}>

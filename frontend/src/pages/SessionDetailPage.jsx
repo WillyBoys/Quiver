@@ -427,6 +427,14 @@ export default function SessionDetailPage() {
     }
   }
 
+  async function handleBloodhoundDownload() {
+    try {
+      await api.sessions.downloadBloodhound(sessionId);
+    } catch (err) {
+      alert(err.message);
+    }
+  }
+
   async function downloadFullReport() {
     setIsExporting(true);
     try {
@@ -906,6 +914,11 @@ export default function SessionDetailPage() {
         <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={handleExport}>
           <FileText size={13} /> Reports
         </button>
+        {session.engagement_type === "internal" && session.bloodhound_available && (
+          <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={handleBloodhoundDownload} title="Download BloodHound collection data for import into BloodHound CE">
+            <Download size={13} /> BloodHound
+          </button>
+        )}
         <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={openSettings} title="Session settings">
           <Settings size={13} />
         </button>

@@ -61,6 +61,20 @@ export const api = {
       req(`/sessions/${id}/reports/${reportId}`, { method: "DELETE" }),
     patchArtifacts: (id, artifact) =>
       req(`/sessions/${id}/artifacts`, { method: "PATCH", body: JSON.stringify(artifact) }),
+    downloadBloodhound: async (id) => {
+      const res = await fetch(`${BASE}/sessions/${id}/bloodhound-zip`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: "Download failed" }));
+        throw new Error(err.detail || "Download failed");
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `bloodhound-${id.slice(0, 8)}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+    },
   },
   tools: {
     list: (category) => req(`/tools/${category ? `?category=${category}` : ""}`),
