@@ -1,5 +1,11 @@
 # Quiver
 
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
+![FastAPI](https://img.shields.io/badge/FastAPI-005571?logo=fastapi&logoColor=white)
+![React](https://img.shields.io/badge/React-20232A?logo=react&logoColor=61DAFB)
+![Docker](https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=white)
+![SQLite](https://img.shields.io/badge/SQLite-07405E?logo=sqlite&logoColor=white)
+
 An AI-powered penetration testing platform for security consulting firms. Quiver orchestrates autonomous agents across three engagement tracks — **External**, **Internal**, and **Web Application** — under a single management layer with campaigns, findings, approval gates, scheduling, and reporting.
 
 Quiver's agent handles network and infrastructure testing. For web application depth, Quiver integrates [Shannon](https://github.com/KeygraphHQ/shannon) — a parallel multi-agent web app testing pipeline — and imports its findings into the same session. Both the AI agent and full manual control are available simultaneously, sharing the same tool library, session tracker, findings layer, and reporting.
@@ -29,6 +35,8 @@ Quiver's agent handles network and infrastructure testing. For web application d
  │ surface             │   │ Post-access enum     │   │ analysis (optional)  │
  └─────────────────────┘   └──────────────────────┘   └──────────────────────┘
 ```
+
+![Quiver session detail — autonomous campaign running nuclei against Juice Shop, with agent reasoning, live terminal output, and findings panel](docs/screenshot.png)
 
 ---
 
@@ -89,9 +97,13 @@ Tool runs stream over **WebSockets** — the backend spawns processes with `asyn
 
 ---
 
-## Security Note
+## Authorized Use Only
 
-Quiver is designed to run on a dedicated pentest VM or isolated local machine, **not** exposed to the internet. The backend executes commands with the privileges of the Docker container. Use responsibly and only against systems you are authorized to test.
+Quiver is a penetration testing platform. You are solely responsible for ensuring you have explicit written authorization before running any scan, campaign, or tool against any target. Unauthorized use against systems you do not own or have permission to test may violate the Computer Fraud and Abuse Act (CFAA), the UK Computer Misuse Act, and equivalent laws in your jurisdiction.
+
+**Do not use Quiver against systems you do not own or have written permission to test.**
+
+Quiver is designed to run on a dedicated pentest VM or isolated local machine, not exposed to the internet. The backend executes commands with the privileges of the Docker container.
 
 ---
 

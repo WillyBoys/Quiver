@@ -74,9 +74,12 @@ This is what differentiates Quiver from running Shannon and a network scanner in
 - **Shannon integration** — Shannon runs as Docker services in the same compose stack; Quiver UI exposes scan management, progress tracking, and deliverable viewing
 - **Report generation** — one-click Markdown export; AI-assisted client-ready report draft via Claude
 - **claude-bridge** — Node.js sidecar enabling Claude Code OAuth auth path without exposing the token to the backend
+- **Three-tier tool approval system** — per-tool modes (Passive / Active / Exploit / Never) combined with four campaign risk levels (Approval Mode / Passive Mode / Active Mode / Autonomous Mode); the tier system determines which tools run freely vs. require human sign-off
+- **Saved AI report history** — AI-generated reports are persisted in the database per session; reports can be named, renamed, downloaded individually, or deleted; full history is preserved
+- **Resizable workspace panels** — all three columns and the right-panel sections (Notes, Run History, Findings) are drag-resizable; main nav sidebar is collapsible to icon-only
 
 ### In Progress / Planned
-- **Internal campaign tuning** — prompt and context improvements for AD/lateral movement reasoning; tools are present but agent prompting needs refinement for post-compromise context
+- **Internal campaign tuning** — prompt and context improvements for AD/lateral movement reasoning; tools are present but agent prompting needs refinement for post-compromise context (AD attack chains, lateral movement reasoning, credential reuse)
 - **Shannon finding import** — structured import of Shannon deliverables into Quiver session findings layer
 - **Client/project management** — track multiple clients and engagements, status at a glance
 - **Remediation retesting** — store original PoC; rerun to verify fix after client remediation

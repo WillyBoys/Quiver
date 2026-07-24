@@ -59,14 +59,25 @@ Campaigns run an autonomous ReAct loop: **Think** (LLM selects the next action) 
 - Duplicate command blocking — completed commands are never re-run within the same campaign
 - LLM retry on error — one targeted retry attempt if a tool errors, before moving on
 
-**Agent modes (per tool):**
-| Mode | Behavior |
-|---|---|
-| **Auto** | Agent runs the tool immediately without asking |
-| **Approve** | Agent pauses, queues an approval request, and resumes after sign-off |
-| **Never** | Tool is hidden from the AI entirely (still available for manual use) |
+**Per-tool agent mode** — controls the tool's tier in the three-level system:
 
-Use **Approve** for destructive or noisy tools: `sqlmap`, `hydra`, `nuclei` with exploit templates, free-form bash commands.
+| Mode | Tier | Behavior |
+|---|---|---|
+| **Passive** | 0 | Read-only recon: nmap, whois, dig, BBOT, WhatWeb, sslscan, cloud_enum. Runs freely in Passive Mode and above |
+| **Active** | 1 | Active scanning: gobuster, ffuf, nikto, nuclei, enum4linux-ng, netexec. Runs freely in Active Mode and above |
+| **Exploit** | 2 | Exploitation and credential attacks: sqlmap, hydra, impacket, free-form bash. Runs freely in Autonomous Mode only |
+| **Never** | — | Hidden from the AI entirely — manual use only; never shown to the agent |
+
+**Campaign risk level** — controls which tool tiers run without approval:
+
+| Level | Passive tools | Active tools | Exploit tools |
+|---|---|---|---|
+| **Approval Mode** | Requires approval | Requires approval | Requires approval |
+| **Passive Mode** | Runs freely | Requires approval | Requires approval |
+| **Active Mode** | Runs freely | Runs freely | Requires approval |
+| **Autonomous Mode** | Runs freely | Runs freely | Runs freely |
+
+Use **Approval Mode** for client environments where every action needs sign-off. Use **Autonomous Mode** only on isolated lab targets — it bypasses all approval gates.
 
 **Scheduling:**
 - Attach a cron expression to any campaign for recurring assessments (e.g. `0 2 * * 1` for weekly)
@@ -128,8 +139,12 @@ Setup requirements are in [SETUP.md](SETUP.md#shannon-setup-web-app-track).
 - One-click Markdown export from any session — includes session info, findings sorted by severity, and all tool output
 
 **AI-assisted report generation:**
-- Send the session's findings to Claude to produce a client-ready draft report
-- Available from the session detail page; uses whichever Claude provider is configured
+- Click **Reports** from the session detail page to open the report manager
+- **Generate AI Report** — sends findings and tool output to Claude; the resulting report is saved to the database and added to the session's report history
+- Reports are named "Draft Report" by default — click the title in the content area to rename (e.g. "Final", "Delivered", "Pre-remediation v1")
+- Each saved report shows the date and provider used; the full history is preserved until you delete individual entries
+- **Export Session** — one-click raw Markdown export of everything: session info, findings sorted by severity, and all tool output; not saved to the database
+- Download any saved AI report as a `.md` file directly from the report history list
 
 **Manual AI analysis:**
 - "Analyze with AI" button on any completed tool run
