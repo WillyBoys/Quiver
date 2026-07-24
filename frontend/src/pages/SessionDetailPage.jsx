@@ -57,9 +57,13 @@ export default function SessionDetailPage() {
   const [scheduledAt, setScheduledAt] = useState(""); // datetime-local value
   const [agentSubmitting, setAgentSubmitting] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [analyzeProvider, setAnalyzeProvider] = useState("local");
+  const [reportProvider, setReportProvider] = useState("claude");
+  const [exportMode, setExportMode] = useState("ai"); // "ai" | "full"
+  const [showSettings, setShowSettings] = useState(false);
+  const [settingsForm, setSettingsForm] = useState(null);
   const [showAiReport, setShowAiReport] = useState(false);
   const [aiReport, setAiReport] = useState(null);
-  const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const [sidebarView, setSidebarView] = useState("tools");   // "tools" | "checklist"
   const [shellCmd, setShellCmd] = useState("");
   const [workflowFilter, setWorkflowFilter] = useState("all"); // "all" | "external" | "internal" | "web"
@@ -390,28 +394,72 @@ export default function SessionDetailPage() {
   }
 
   async function handleExport() {
-    setIsExporting(true);
-    try {
-      await api.sessions.exportReport(sessionId, session.name);
-    } catch (err) {
-      console.error("Export failed:", err);
-    } finally {
-      setIsExporting(false);
+    if (exportMode === "full") {
+      setIsExporting(true);
+      try {
+        await api.sessions.exportReport(sessionId, session.name);
+      } catch (err) {
+        console.error("Export failed:", err);
+      } finally {
+        setIsExporting(false);
+      }
+    } else {
+      setIsExporting(true);
+      setAiReport(null);
+      setShowAiReport(true);
+      try {
+        const data = await api.sessions.generateAiReport(sessionId, reportProvider);
+        setAiReport(data.markdown);
+      } catch (err) {
+        setAiReport(`**Report generation failed:** ${err.message}`);
+      } finally {
+        setIsExporting(false);
+      }
     }
   }
 
-  async function handleGenerateAiReport() {
-    setIsGeneratingReport(true);
-    setAiReport(null);
-    setShowAiReport(true);
-    try {
-      const data = await api.sessions.generateAiReport(sessionId, campaign?.ai_provider || "claude");
-      setAiReport(data.markdown);
-    } catch (err) {
-      setAiReport(`**Report generation failed:** ${err.message}`);
-    } finally {
-      setIsGeneratingReport(false);
+  function openSettings() {
+    setSettingsForm({
+      analyzeProvider,
+      reportProvider,
+      exportMode,
+      agentMode: campaign?.risk_level || "passive",
+      name: session.name || "",
+      target: session.target || "",
+      scope: session.scope || "",
+      engagement_type: session.engagement_type || "external",
+    });
+    setShowSettings(true);
+  }
+
+  async function saveSettings() {
+    if (!settingsForm) return;
+    setAnalyzeProvider(settingsForm.analyzeProvider);
+    setReportProvider(settingsForm.reportProvider);
+    setExportMode(settingsForm.exportMode);
+    const sessionChanged =
+      settingsForm.name !== session.name ||
+      settingsForm.target !== session.target ||
+      settingsForm.scope !== session.scope ||
+      settingsForm.engagement_type !== session.engagement_type;
+    if (sessionChanged) {
+      const updated = await api.sessions.update(sessionId, {
+        name: settingsForm.name,
+        target: settingsForm.target,
+        scope: settingsForm.scope,
+        engagement_type: settingsForm.engagement_type,
+        notes: session.notes,
+        status: session.status,
+        findings: session.findings,
+        targets: session.targets,
+      });
+      setSession(updated);
     }
+    if (campaign && settingsForm.agentMode !== campaign.risk_level) {
+      await api.campaigns.update(campaign.id, { risk_level: settingsForm.agentMode });
+      setCampaign((c) => ({ ...c, risk_level: settingsForm.agentMode }));
+    }
+    setShowSettings(false);
   }
 
   function downloadAiReport() {
@@ -479,10 +527,11 @@ export default function SessionDetailPage() {
     await api.sessions.patchTargets(sessionId, updated).catch(() => {});
   }
 
-  async function handleAnalyze(runId) {
-    setAiAnalysis((prev) => ({ ...prev, [runId]: { status: "loading" } }));
+  async function handleAnalyze(runId, provider) {
+    const p = provider || analyzeProvider;
+    setAiAnalysis((prev) => ({ ...prev, [runId]: { status: "loading", provider: p } }));
     try {
-      const data = await api.ai.analyze(runId);
+      const data = await api.ai.analyze(runId, p);
       setAiAnalysis((prev) => ({ ...prev, [runId]: { status: "done", text: data.analysis, model: data.model } }));
     } catch (err) {
       setAiAnalysis((prev) => ({ ...prev, [runId]: { status: "error", error: err.message } }));
@@ -740,13 +789,14 @@ export default function SessionDetailPage() {
           <code className={styles.target}>{session.target}</code>
         </div>
         <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={handleExport} disabled={isExporting}>
-          <Download size={13} /> {isExporting ? "Exporting…" : "Export Report"}
-        </button>
-        <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={handleGenerateAiReport} disabled={isGeneratingReport}>
-          <Sparkles size={13} /> AI Report
+          {exportMode === "ai" ? <Sparkles size={13} /> : <Download size={13} />}
+          {isExporting ? "Exporting…" : "Export Report"}
         </button>
         <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => setShowFinding(true)}>
           <Flag size={13} /> Log Finding
+        </button>
+        <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={openSettings} title="Session settings">
+          <Settings size={13} />
         </button>
       </div>
 
@@ -1167,7 +1217,7 @@ export default function SessionDetailPage() {
                 <button className={styles.aiFloatBtn} onClick={() => handleAnalyze(activeRunId)}>
                   <Cpu size={13} />
                   Analyze with AI
-                  <span className={styles.aiModel}>Local AI</span>
+                  <span className={styles.aiModel}>{analyzeProvider === "claude" ? "Claude" : "Local AI"}</span>
                 </button>
             )}
           </div>
@@ -1178,11 +1228,13 @@ export default function SessionDetailPage() {
               const ai = aiAnalysis[activeRunId];
               if (!ai) return null;
               if (ai.status === "loading") {
+                const providerLabel = ai.provider === "claude" ? "Claude" : "Local AI";
+                const loadingHint = ai.provider === "claude" ? "" : "… this may take 30–60s on CPU";
                 return (
                   <div className={styles.aiPanel}>
                     <div className={styles.aiLoading}>
                       <span className={styles.aiSpinner} />
-                      Analyzing with Local AI&hellip; this may take 30–60s on CPU
+                      Analyzing with {providerLabel}{loadingHint}
                     </div>
                   </div>
                 );
@@ -1193,7 +1245,7 @@ export default function SessionDetailPage() {
                     <div className={styles.aiError}>
                       <Cpu size={12} />
                       <span>{ai.error}</span>
-                      <button className={styles.aiRetry} onClick={() => handleAnalyze(activeRunId)}>Retry</button>
+                      <button className={styles.aiRetry} onClick={() => handleAnalyze(activeRunId, analyzeProvider)}>Retry</button>
                     </div>
                   </div>
                 );
@@ -1204,7 +1256,7 @@ export default function SessionDetailPage() {
                     <Cpu size={11} />
                     <span>AI Analysis</span>
                     <span className={styles.aiModel}>{ai.model}</span>
-                    <button className={styles.aiReanalyze} onClick={() => handleAnalyze(activeRunId)}>Re-analyze</button>
+                    <button className={styles.aiReanalyze} onClick={() => handleAnalyze(activeRunId, analyzeProvider)}>Re-analyze</button>
                   </div>
                   <div className={styles.aiResultInner}>
                     <pre className={styles.aiText}>{ai.text}</pre>
@@ -1525,7 +1577,7 @@ export default function SessionDetailPage() {
                 <Sparkles size={16} style={{ color: "var(--accent)" }} /> Technical Brief
               </h2>
               <div style={{ display: "flex", gap: 8 }}>
-                {aiReport && !isGeneratingReport && (
+                {aiReport && !isExporting && (
                   <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={downloadAiReport}>
                     <Download size={13} /> Download .md
                   </button>
@@ -1536,7 +1588,7 @@ export default function SessionDetailPage() {
               </div>
             </div>
             <div style={{ flex: 1, overflow: "auto", background: "var(--bg-base)", borderRadius: 6, border: "1px solid var(--border)" }}>
-              {isGeneratingReport ? (
+              {isExporting ? (
                 <div style={{ color: "var(--accent)", display: "flex", alignItems: "center", gap: 8, padding: 24 }}>
                   <Sparkles size={14} style={{ animation: "spin 1.5s linear infinite" }} />
                   Generating brief with Claude… this may take some time.
@@ -1546,6 +1598,99 @@ export default function SessionDetailPage() {
               ) : (
                 <p style={{ padding: 24, color: "var(--text-muted)", fontSize: 13 }}>No report generated.</p>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Settings modal */}
+      {showSettings && settingsForm && (
+        <div className={styles.modal} onClick={() => setShowSettings(false)}>
+          <div className={styles.modalBox} style={{ maxWidth: 480, width: "92vw" }} onClick={(e) => e.stopPropagation()}>
+            <h2 className={styles.modalTitle}>Session Settings</h2>
+
+            <div className={styles.settingsSection}>
+              <div className={styles.settingsSectionTitle}>AI</div>
+              <label className={styles.label}>Export report type
+                <div className={styles.settingsToggle}>
+                  {[["ai", "AI Technical Brief"], ["full", "Full Raw Export"]].map(([val, lbl]) => (
+                    <button key={val}
+                      className={`${styles.settingsToggleBtn} ${settingsForm.exportMode === val ? styles.settingsToggleActive : ""}`}
+                      onClick={() => setSettingsForm((f) => ({ ...f, exportMode: val }))}>
+                      {lbl}
+                    </button>
+                  ))}
+                </div>
+              </label>
+              <label className={styles.label}>Analyze provider
+                <div className={styles.settingsToggle}>
+                  {[["local", "Local AI"], ["claude", "Claude"]].map(([val, lbl]) => (
+                    <button key={val}
+                      className={`${styles.settingsToggleBtn} ${settingsForm.analyzeProvider === val ? styles.settingsToggleActive : ""}`}
+                      onClick={() => setSettingsForm((f) => ({ ...f, analyzeProvider: val }))}>
+                      {lbl}
+                    </button>
+                  ))}
+                </div>
+              </label>
+              <label className={styles.label}>Report provider
+                <div className={styles.settingsToggle}>
+                  {[["local", "Local AI"], ["claude", "Claude"]].map(([val, lbl]) => (
+                    <button key={val}
+                      className={`${styles.settingsToggleBtn} ${settingsForm.reportProvider === val ? styles.settingsToggleActive : ""}`}
+                      onClick={() => setSettingsForm((f) => ({ ...f, reportProvider: val }))}>
+                      {lbl}
+                    </button>
+                  ))}
+                </div>
+              </label>
+            </div>
+
+            {campaign && (
+              <div className={styles.settingsSection}>
+                <div className={styles.settingsSectionTitle}>Agent</div>
+                <label className={styles.label}>Mode
+                  <select className="input" value={settingsForm.agentMode}
+                    onChange={(e) => setSettingsForm((f) => ({ ...f, agentMode: e.target.value }))}>
+                    <option value="approve_all">Approval Mode — every action requires sign-off</option>
+                    <option value="passive">Passive Mode — only passive recon runs freely</option>
+                    <option value="active">Active Mode — passive and active scans run freely</option>
+                    <option value="autonomous">Autonomous Mode — AI runs everything without approval</option>
+                  </select>
+                </label>
+              </div>
+            )}
+
+            <div className={styles.settingsSection}>
+              <div className={styles.settingsSectionTitle}>Session</div>
+              <label className={styles.label}>Name
+                <input className="input" value={settingsForm.name}
+                  onChange={(e) => setSettingsForm((f) => ({ ...f, name: e.target.value }))} />
+              </label>
+              <label className={styles.label}>Target
+                <input className="input" value={settingsForm.target}
+                  onChange={(e) => setSettingsForm((f) => ({ ...f, target: e.target.value }))} />
+              </label>
+              <label className={styles.label}>Scope
+                <input className="input" value={settingsForm.scope}
+                  onChange={(e) => setSettingsForm((f) => ({ ...f, scope: e.target.value }))} />
+              </label>
+              <label className={styles.label}>Engagement type
+                <select className="input" value={settingsForm.engagement_type}
+                  onChange={(e) => setSettingsForm((f) => ({ ...f, engagement_type: e.target.value }))}>
+                  <option value="external">External</option>
+                  <option value="internal">Internal</option>
+                  <option value="web">Web App</option>
+                </select>
+              </label>
+            </div>
+
+            <div className={styles.modalActions}>
+              <button className="btn btn-ghost" onClick={() => setShowSettings(false)}>Cancel</button>
+              <button className="btn btn-primary" onClick={saveSettings}
+                disabled={!settingsForm.name.trim() || !settingsForm.target.trim()}>
+                Save
+              </button>
             </div>
           </div>
         </div>

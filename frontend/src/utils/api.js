@@ -74,7 +74,7 @@ export const api = {
     delete: (path) => req(`/wordlists/?path=${encodeURIComponent(path)}`, { method: "DELETE" }),
   },
   ai: {
-    analyze: (runId) => req("/ai/analyze", { method: "POST", body: JSON.stringify({ run_id: runId }) }),
+    analyze: (runId, provider = "local") => req("/ai/analyze", { method: "POST", body: JSON.stringify({ run_id: runId, provider }) }),
   },
   campaigns: {
     list:    ()         => req("/campaigns/"),

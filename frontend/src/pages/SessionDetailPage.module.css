@@ -667,6 +667,7 @@
   font-size: 14px; color: var(--text-primary); margin-bottom: 20px; line-height: 1.5;
 }
 .modalTitle { font-size: 16px; font-weight: 600; margin-bottom: 20px; }
+.modalActions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px; }
 .form { display: flex; flex-direction: column; gap: 14px; }
 .label {
   display: flex; flex-direction: column; gap: 6px;
@@ -674,6 +675,29 @@
   text-transform: uppercase; letter-spacing: 0.05em;
 }
 .formActions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 6px; }
+
+.settingsSection {
+  display: flex; flex-direction: column; gap: 14px;
+  padding-bottom: 20px; margin-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+}
+.settingsSection:last-of-type { border-bottom: none; padding-bottom: 0; margin-bottom: 0; }
+.settingsSectionTitle {
+  font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.08em; color: var(--text-muted);
+}
+.settingsToggle {
+  display: flex; border: 1px solid var(--border); border-radius: 5px; overflow: hidden;
+}
+.settingsToggleBtn {
+  flex: 1; padding: 6px 12px; font-size: 12px; font-family: var(--font-ui);
+  font-weight: 500; color: var(--text-muted); background: transparent;
+  border: none; cursor: pointer; transition: color 0.15s, background 0.15s;
+}
+.settingsToggleBtn:hover { color: var(--text-primary); }
+.settingsToggleActive {
+  color: var(--accent); background: rgba(57, 211, 83, 0.1);
+}
 
 .iterationRow {
   display: flex;
