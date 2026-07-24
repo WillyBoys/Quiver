@@ -1347,6 +1347,7 @@
   margin-bottom: 10px;
 }
 .findingsHeader .panelTitle { margin-bottom: 0; }
+.findingsHeaderActions { display: flex; align-items: center; gap: 6px; }
 .findingsViewToggle {
   display: flex; gap: 2px;
   background: var(--bg-base); border-radius: 6px; padding: 2px;
@@ -1357,7 +1358,9 @@
   border: none; background: transparent; color: var(--text-muted); cursor: pointer;
   transition: background 0.12s, color 0.12s;
 }
+.viewBtn:hover { color: var(--accent); }
 .viewBtnActive { background: var(--bg-card); color: var(--text-primary); }
+.viewBtnActive:hover { color: var(--text-primary); }
 
 /* Chain-from label on a finding */
 .chainFromLabel {

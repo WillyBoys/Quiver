@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Play, Plus, Trash2, Flag, X, FolderOpen, Search, Download, Link2, Cpu, Pause, Settings, Sparkles, Pencil } from "lucide-react";
+import { ArrowLeft, Play, Plus, Trash2, X, FolderOpen, Search, Download, Link2, Cpu, Pause, Settings, Sparkles, Pencil, List, GitBranch } from "lucide-react";
 import { api, createRunSocket } from "../utils/api.js";
 import TerminalPane from "../components/terminal/TerminalPane.jsx";
 import ChecklistPane from "../components/checklist/ChecklistPane.jsx";
@@ -792,9 +792,6 @@ export default function SessionDetailPage() {
           {exportMode === "ai" ? <Sparkles size={13} /> : <Download size={13} />}
           {isExporting ? "Exporting…" : "Export Report"}
         </button>
-        <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => setShowFinding(true)}>
-          <Flag size={13} /> Log Finding
-        </button>
         <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={openSettings} title="Session settings">
           <Settings size={13} />
         </button>
@@ -1316,9 +1313,14 @@ export default function SessionDetailPage() {
           <div className={styles.panelSection}>
             <div className={styles.findingsHeader}>
               <h3 className={styles.panelTitle}>Findings ({session.findings?.length || 0})</h3>
-              <div className={styles.findingsViewToggle}>
-                <button className={`${styles.viewBtn} ${findingsView === "list" ? styles.viewBtnActive : ""}`} onClick={() => setFindingsView("list")}>List</button>
-                <button className={`${styles.viewBtn} ${findingsView === "chain" ? styles.viewBtnActive : ""}`} onClick={() => setFindingsView("chain")}>Chain</button>
+              <div className={styles.findingsHeaderActions}>
+                <div className={styles.findingsViewToggle}>
+                  <button className={styles.viewBtn} onClick={() => setShowFinding(true)} title="Log finding"><Plus size={11} /></button>
+                </div>
+                <div className={styles.findingsViewToggle}>
+                  <button className={`${styles.viewBtn} ${findingsView === "list" ? styles.viewBtnActive : ""}`} onClick={() => setFindingsView("list")} title="List view"><List size={11} /></button>
+                  <button className={`${styles.viewBtn} ${findingsView === "chain" ? styles.viewBtnActive : ""}`} onClick={() => setFindingsView("chain")} title="Chain view"><GitBranch size={11} /></button>
+                </div>
               </div>
             </div>
 
