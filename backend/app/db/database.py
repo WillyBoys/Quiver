@@ -72,6 +72,22 @@ async def init_db():
         except OperationalError as e:
             if "duplicate column" not in str(e).lower() and "already exists" not in str(e).lower():
                 logger.warning("Migration warning: %s", e)
+        # Ensure indexes exist on pre-index DBs
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_runs_session_id ON runs (session_id)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_campaigns_status ON campaigns (status)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_campaigns_session_id ON campaigns (session_id)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_approval_requests_campaign_id ON approval_requests (campaign_id)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_approval_requests_status ON approval_requests (status)"
+        ))
 
 
 async def get_db() -> AsyncSession:

@@ -1,6 +1,5 @@
 import json
 import re
-import shlex
 import uuid as _uuid_mod
 import asyncio
 import logging
@@ -389,7 +388,7 @@ async def _attempt_fix(campaign: Campaign, failed_run: Run, tool, provider: str)
             tool_id=retry_tool.id if retry_tool else "agent",
             tool_name=tool_name,
             command=command,
-            param_values={"_raw": raw[:1000], "_thought": thought, "_retry_of": failed_run.id, **parameters},
+            param_values={"_thought": thought, "_retry_of": failed_run.id, **parameters},
             reasoning=f"[retry] {reasoning}",
             status="running",
             started_at=datetime.now(timezone.utc),
@@ -603,7 +602,7 @@ async def run_campaign_agent(campaign_id: str) -> str:
             tool_id=tool.id if tool else "agent",
             tool_name=tool_name,
             command=command,
-            param_values={"_raw": raw[:1000], "_thought": thought, "_extra_flags": extra_flags, **parameters},
+            param_values={"_thought": thought, "_extra_flags": extra_flags, **parameters},
             reasoning=reasoning,
             status="running",
             started_at=datetime.now(timezone.utc),
@@ -668,9 +667,12 @@ async def run_campaign_loop(campaign_id: str) -> None:
         # Resolve per-campaign cap; None in DB means unlimited (use a safe ceiling of 500)
         async with AsyncSessionLocal() as db:
             _c = (await db.execute(select(Campaign).where(Campaign.id == campaign_id))).scalar_one_or_none()
-            MAX_ITERATIONS = (_c.max_iterations or DEFAULT_MAX_ITERATIONS) if _c else DEFAULT_MAX_ITERATIONS
-            if MAX_ITERATIONS <= 0:
-                MAX_ITERATIONS = 500  # "unlimited" sentinel
+            if _c is None:
+                MAX_ITERATIONS = DEFAULT_MAX_ITERATIONS
+            elif _c.max_iterations is None or _c.max_iterations <= 0:
+                MAX_ITERATIONS = 500  # None/0 = unlimited sentinel
+            else:
+                MAX_ITERATIONS = _c.max_iterations
 
         consecutive_dupes = 0
 

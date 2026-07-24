@@ -111,6 +111,9 @@ export default function SessionDetailPage() {
           }
         } catch { /* ignore */ }
       }
+    }).catch((err) => {
+      console.error("Failed to load session:", err);
+      navigate("/");
     });
     api.sessions.listReports(sessionId).then(setSavedReports).catch(() => {});
     api.tools.list().then(setTools);
@@ -264,7 +267,14 @@ export default function SessionDetailPage() {
     const cmd = shellCmd.trim();
     if (!cmd) return;
     setShellCmd("");
-    const run = await api.runs.create({ session_id: sessionId, command: cmd });
+    let run;
+    try {
+      run = await api.runs.create({ session_id: sessionId, command: cmd });
+    } catch (err) {
+      console.error("Failed to create run:", err);
+      setShellCmd(cmd);
+      return;
+    }
     setRuns((r) => [run, ...r]);
     // Swap the shell input tab out for the real run tab
     setOpenTabs((t) => t.includes(SHELL_TAB) ? t.map((id) => id === SHELL_TAB ? run.id : id) : [...t, run.id]);

@@ -9,7 +9,7 @@ class Run(Base):
     __tablename__ = "runs"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    session_id: Mapped[str] = mapped_column(String, ForeignKey("sessions.id"), nullable=False)
+    session_id: Mapped[str] = mapped_column(String, ForeignKey("sessions.id"), nullable=False, index=True)
     tool_id: Mapped[str] = mapped_column(String, ForeignKey("tools.id"), nullable=False)
     tool_name: Mapped[str] = mapped_column(String, nullable=False)   # snapshot at run time
     command: Mapped[str] = mapped_column(Text, nullable=False)        # exact command string

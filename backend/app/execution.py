@@ -113,6 +113,7 @@ async def execute_run_background(
     HARD_TIMEOUT = 2700   # 45 min total
 
     timed_out = None
+    MAX_OUTPUT_BYTES = 10 * 1024 * 1024  # 10 MB cap on buffered output
 
     try:
         process = await asyncio.create_subprocess_exec(
@@ -125,6 +126,7 @@ async def execute_run_background(
         _running_processes[run_id] = process
 
         hard_deadline = _time.monotonic() + HARD_TIMEOUT
+        total_output_bytes = 0
         while True:
             time_left_hard = hard_deadline - _time.monotonic()
             if time_left_hard <= 0:
@@ -141,7 +143,19 @@ async def execute_run_background(
                 break
             if not line_bytes:  # EOF — process exited
                 break
-            buf.append(line_bytes.decode("utf-8", errors="replace"))
+            line_str = line_bytes.decode("utf-8", errors="replace")
+            total_output_bytes += len(line_str)
+            if total_output_bytes > MAX_OUTPUT_BYTES:
+                buf.append("\n[OUTPUT TRUNCATED — 10 MB limit reached]\n")
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    try:
+                        process.kill()
+                    except Exception:
+                        pass
+                break
+            buf.append(line_str)
 
         if timed_out:
             label = "10-minute idle" if timed_out == "idle" else "45-minute hard"

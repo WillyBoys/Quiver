@@ -65,10 +65,27 @@ async def _warmup_ai() -> None:
         logger.warning("AI warmup skipped (%s) — model will load on first analyze", e)
 
 
+async def _reset_stale_campaigns():
+    """On startup, any campaign left in 'active' state was interrupted mid-run.
+    Reset to 'paused' so operators can restart deliberately."""
+    from app.models.campaign import Campaign
+    from app.db.database import AsyncSessionLocal
+    from sqlalchemy import select
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(Campaign).where(Campaign.status == "active"))
+        stale = result.scalars().all()
+        for c in stale:
+            c.status = "paused"
+        if stale:
+            await db.commit()
+            logger.warning("Startup: reset %d active campaign(s) to paused", len(stale))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Quiver API starting up")
     await init_db()
+    await _reset_stale_campaigns()
     await seed_default_tools()
     asyncio.create_task(_warmup_ai())
     await start_scheduler()
