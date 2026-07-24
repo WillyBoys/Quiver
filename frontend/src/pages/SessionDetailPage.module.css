@@ -93,12 +93,28 @@
   display: flex; flex: 1; overflow: hidden;
 }
 
+.resizeHandle {
+  width: 4px; flex-shrink: 0; cursor: col-resize;
+  background: var(--border);
+  transition: background 0.15s;
+  position: relative; z-index: 10;
+}
+.resizeHandle:hover, .resizeHandle:active { background: var(--accent-dim); }
+
+.resizeHandleH {
+  height: 4px; flex-shrink: 0; cursor: row-resize;
+  background: var(--border);
+  transition: background 0.15s;
+  position: relative; z-index: 10;
+}
+.resizeHandleH:hover, .resizeHandleH:active { background: var(--accent-dim); }
+
 /* Tool picker sidebar */
 .toolPicker {
-  width: 260px; min-width: 260px;
-  border-right: 1px solid var(--border);
+  border-right: none;
   display: flex; flex-direction: column;
   background: var(--bg-surface); overflow: hidden;
+  transition: width 0.2s ease, min-width 0.2s ease;
 }
 
 /* Sidebar view toggle (Tools / Checklist) */
@@ -351,7 +367,7 @@
 
 /* Right panel */
 .rightPanel {
-  width: 240px; min-width: 240px; border-left: 1px solid var(--border);
+  border-left: none;
   display: flex; flex-direction: column; overflow: hidden;
   background: var(--bg-surface);
 }
@@ -507,6 +523,7 @@
   border-bottom: 1px solid var(--border);
   display: flex; flex-direction: column; gap: 6px;
   flex-shrink: 0;
+  overflow: hidden;
 }
 
 .notesTitleRow {
@@ -529,7 +546,8 @@
   padding: 7px 10px;
   resize: none;
   width: 100%;
-  height: 90px;
+  flex: 1;
+  min-height: 0;
   transition: border-color 0.15s;
 }
 .notesArea:focus { outline: none; border-color: var(--accent); }

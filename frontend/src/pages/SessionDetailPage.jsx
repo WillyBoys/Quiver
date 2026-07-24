@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, Play, Plus, Trash2, X, FolderOpen, Search, Download, Link2, Cpu, Pause, Settings, Sparkles, Pencil, List, GitBranch } from "lucide-react";
 import { api, createRunSocket } from "../utils/api.js";
@@ -51,6 +51,11 @@ export default function SessionDetailPage() {
   const [agentSidebarView, setAgentSidebarView] = useState("reasoning"); // "reasoning" | "tools" | "checklist"
   const connectedRunIds = useRef(new Set());
   const openSocketsRef = useRef([]);
+  const [leftWidth, setLeftWidth] = useState(260);
+  const [rightWidth, setRightWidth] = useState(240);
+  const [notesSectionHeight, setNotesSectionHeight] = useState(130);
+  const [runSectionHeight, setRunSectionHeight] = useState(200);
+  const dragRef = useRef({ active: false, handle: null, startX: 0, startY: 0, startLeft: 0, startRight: 0, startHeight: 0 });
   const [showAgentSetup, setShowAgentSetup] = useState(false);
   const [agentForm, setAgentForm] = useState({ ai_provider: "claude", risk_level: "passive", max_iterations: "50", unlimited: false });
   const [scheduleMode, setScheduleMode] = useState("now"); // "now" | "later"
@@ -417,6 +422,34 @@ export default function SessionDetailPage() {
       }
     }
   }
+
+  const handleResizeMouseDown = useCallback((e, handle) => {
+    e.preventDefault();
+    dragRef.current = { active: true, handle, startX: e.clientX, startY: e.clientY, startLeft: leftWidth, startRight: rightWidth, startHeight: runSectionHeight, startNotesHeight: notesSectionHeight };
+  }, [leftWidth, rightWidth, runSectionHeight, notesSectionHeight]);
+
+  useEffect(() => {
+    const onMove = (e) => {
+      const d = dragRef.current;
+      if (!d.active) return;
+      if (d.handle === 'left') {
+        setLeftWidth(Math.max(160, Math.min(480, d.startLeft + (e.clientX - d.startX))));
+      } else if (d.handle === 'right') {
+        setRightWidth(Math.max(180, Math.min(480, d.startRight - (e.clientX - d.startX))));
+      } else if (d.handle === 'vert') {
+        setRunSectionHeight(Math.max(60, Math.min(600, d.startHeight + (e.clientY - d.startY))));
+      } else if (d.handle === 'notes') {
+        setNotesSectionHeight(Math.max(60, Math.min(400, d.startNotesHeight + (e.clientY - d.startY))));
+      }
+    };
+    const onUp = () => { dragRef.current.active = false; };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, []);
 
   function openSettings() {
     setSettingsForm({
@@ -880,7 +913,7 @@ export default function SessionDetailPage() {
 
       <div className={styles.workspace}>
         {/* Left: reasoning terminal (agent sessions) or tool picker / checklist (manual) */}
-        <aside className={styles.toolPicker}>
+        <aside className={styles.toolPicker} style={{ width: leftWidth, minWidth: leftWidth }}>
           {/* Unified toggle — Reasoning tab only appears when agent is active */}
           <div className={styles.sidebarToggle}>
             {session.campaign_id && (
@@ -1106,6 +1139,8 @@ export default function SessionDetailPage() {
           )}
         </aside>
 
+        <div className={styles.resizeHandle} onMouseDown={(e) => handleResizeMouseDown(e, 'left')} />
+
         {/* Center: terminal output */}
         <div className={styles.terminalColumn}>
           {/* Tab bar — always visible so + is always reachable */}
@@ -1263,10 +1298,12 @@ export default function SessionDetailPage() {
             })()}
         </div>
 
+        <div className={styles.resizeHandle} onMouseDown={(e) => handleResizeMouseDown(e, 'right')} />
+
         {/* Right panel */}
-        <aside className={styles.rightPanel}>
+        <aside className={styles.rightPanel} style={{ width: rightWidth, minWidth: rightWidth }}>
           {/* Session notes */}
-          <div className={styles.notesSection}>
+          <div className={styles.notesSection} style={{ height: notesSectionHeight, flexShrink: 0, flex: 'none' }}>
             <div className={styles.notesTitleRow}>
               <h3 className={styles.panelTitle}>Notes</h3>
               <span className={styles.saveIndicator}>{notesSaved ? "saved" : "saving…"}</span>
@@ -1279,7 +1316,9 @@ export default function SessionDetailPage() {
             />
           </div>
 
-          <div className={styles.panelSection}>
+          <div className={styles.resizeHandleH} onMouseDown={(e) => handleResizeMouseDown(e, 'notes')} />
+
+          <div className={styles.panelSection} style={{ height: runSectionHeight, flexShrink: 0, flex: 'none' }}>
             <h3 className={styles.panelTitle}>Run History</h3>
             <div className={styles.runList}>
               {runs.length === 0 && <p className={styles.empty}>No runs yet.</p>}
@@ -1309,6 +1348,8 @@ export default function SessionDetailPage() {
               })}
             </div>
           </div>
+
+          <div className={styles.resizeHandleH} onMouseDown={(e) => handleResizeMouseDown(e, 'vert')} />
 
           <div className={styles.panelSection}>
             <div className={styles.findingsHeader}>
