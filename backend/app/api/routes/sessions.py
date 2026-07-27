@@ -591,8 +591,58 @@ async def download_bloodhound_zip(session_id: str, db: AsyncSession = Depends(ge
 
 
 def _bloodhound_available(session_id: str) -> bool:
-    bh_dir = f"/data/bloodhound/{session_id}"
-    return bool(os.path.isdir(bh_dir) and glob.glob(os.path.join(bh_dir, "*.zip")))
+    new_dir = f"/data/{session_id}"
+    old_dir = f"/data/bloodhound/{session_id}"
+    return bool(glob.glob(f"{new_dir}/*.zip")) or bool(glob.glob(f"{old_dir}/*.zip"))
+
+
+def _fmt_size(n: int) -> str:
+    for unit in ("B", "KB", "MB", "GB"):
+        if n < 1024:
+            return f"{n:.0f} {unit}"
+        n /= 1024
+    return f"{n:.1f} GB"
+
+
+@router.get("/{session_id}/files")
+async def list_session_files(session_id: str, db: AsyncSession = Depends(get_db)):
+    import pathlib
+    data_dir = pathlib.Path(f"/data/{session_id}")
+    old_bh_dir = pathlib.Path(f"/data/bloodhound/{session_id}")
+    files = []
+    for base in (data_dir, old_bh_dir):
+        if base.is_dir():
+            for fp in sorted(base.rglob("*")):
+                if fp.is_file():
+                    stat = fp.stat()
+                    rel = str(fp.relative_to(base))
+                    # prefix with subdir name to avoid collisions between old/new paths
+                    name = rel if base == data_dir else f"bloodhound/{rel}"
+                    files.append({
+                        "name": name,
+                        "size_human": _fmt_size(stat.st_size),
+                        "created_at": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+                    })
+    return {"files": files}
+
+
+@router.get("/{session_id}/files/download/{filename:path}")
+async def download_session_file(session_id: str, filename: str):
+    import pathlib
+    # Support both new path and old bloodhound path
+    if filename.startswith("bloodhound/"):
+        base = pathlib.Path(f"/data/bloodhound/{session_id}")
+        rel = filename[len("bloodhound/"):]
+    else:
+        base = pathlib.Path(f"/data/{session_id}")
+        rel = filename
+    file_path = (base / rel).resolve()
+    # Security: must stay within base dir
+    if not str(file_path).startswith(str(base.resolve())):
+        raise HTTPException(status_code=403, detail="Invalid path")
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(str(file_path), filename=file_path.name)
 
 
 def _session_dict(s: Session) -> dict:

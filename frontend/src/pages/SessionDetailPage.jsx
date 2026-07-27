@@ -68,6 +68,9 @@ export default function SessionDetailPage() {
   const [showSettings, setShowSettings] = useState(false);
   const [settingsForm, setSettingsForm] = useState(null);
   const [showAiReport, setShowAiReport] = useState(false);
+  const [showFiles, setShowFiles] = useState(false);
+  const [sessionFiles, setSessionFiles] = useState([]);
+  const [filesLoading, setFilesLoading] = useState(false);
   const [savedReports, setSavedReports] = useState([]);
   const [selectedReport, setSelectedReport] = useState(null); // full report object with content
   const [editingReportId, setEditingReportId] = useState(null);   // content area title edit
@@ -433,6 +436,19 @@ export default function SessionDetailPage() {
       await api.sessions.downloadBloodhound(sessionId);
     } catch (err) {
       alert(err.message);
+    }
+  }
+
+  async function handleOpenFiles() {
+    setShowFiles(true);
+    setFilesLoading(true);
+    try {
+      const data = await api.sessions.listFiles(sessionId);
+      setSessionFiles(data.files || []);
+    } catch (err) {
+      setSessionFiles([]);
+    } finally {
+      setFilesLoading(false);
     }
   }
 
@@ -943,11 +959,9 @@ export default function SessionDetailPage() {
         <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={handleExport}>
           <FileText size={13} /> Reports
         </button>
-        {session.engagement_type === "internal" && session.bloodhound_available && (
-          <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={handleBloodhoundDownload} title="Download BloodHound collection data for import into BloodHound CE">
-            <Download size={13} /> BloodHound
-          </button>
-        )}
+        <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={handleOpenFiles} title="View and download session output files">
+          <FolderOpen size={13} /> Files
+        </button>
         <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={openSettings} title="Session settings">
           <Settings size={13} />
         </button>
@@ -2088,6 +2102,73 @@ export default function SessionDetailPage() {
                 disabled={!settingsForm.name.trim() || !settingsForm.target.trim()}>
                 Save
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Session files modal */}
+      {showFiles && (
+        <div className={styles.modal} onClick={() => setShowFiles(false)}>
+          <div className={styles.modalBox} style={{ maxWidth: 560, width: "92vw", maxHeight: "80vh", display: "flex", flexDirection: "column" }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, flexShrink: 0 }}>
+              <h2 className={styles.modalTitle} style={{ margin: 0, display: "flex", alignItems: "center", gap: 8 }}>
+                <FolderOpen size={15} style={{ color: "var(--accent)" }} /> Session Files
+              </h2>
+              <button className="btn btn-ghost" style={{ padding: "4px 8px" }} onClick={() => setShowFiles(false)}>
+                <X size={14} />
+              </button>
+            </div>
+            <p style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 16, flexShrink: 0 }}>
+              Output files written to disk during this engagement. Download any file for offline analysis.
+            </p>
+            <div style={{ flex: 1, overflowY: "auto" }}>
+              {filesLoading ? (
+                <p style={{ color: "var(--text-muted)", fontSize: 13, padding: "12px 0" }}>Loading…</p>
+              ) : sessionFiles.length === 0 ? (
+                <div style={{ textAlign: "center", padding: "32px 0", color: "var(--text-muted)" }}>
+                  <FolderOpen size={28} style={{ opacity: 0.3, marginBottom: 8 }} />
+                  <p style={{ fontSize: 13 }}>No output files yet.</p>
+                  <p style={{ fontSize: 12, marginTop: 4, opacity: 0.7 }}>Files created by tools during the engagement will appear here automatically.</p>
+                </div>
+              ) : (
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                  <thead>
+                    <tr style={{ borderBottom: "1px solid var(--border)" }}>
+                      <th style={{ textAlign: "left", padding: "6px 8px", color: "var(--text-muted)", fontWeight: 600, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.05em" }}>File</th>
+                      <th style={{ textAlign: "right", padding: "6px 8px", color: "var(--text-muted)", fontWeight: 600, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.05em" }}>Size</th>
+                      <th style={{ textAlign: "right", padding: "6px 8px", color: "var(--text-muted)", fontWeight: 600, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.05em" }}>Modified</th>
+                      <th style={{ width: 80 }}></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sessionFiles.map((f) => (
+                      <tr key={f.name} style={{ borderBottom: "1px solid var(--border)" }}>
+                        <td style={{ padding: "8px 8px", fontFamily: "var(--font-mono)", color: "var(--text-primary)", wordBreak: "break-all" }}>{f.name}</td>
+                        <td style={{ padding: "8px 8px", textAlign: "right", color: "var(--text-muted)", whiteSpace: "nowrap" }}>{f.size_human}</td>
+                        <td style={{ padding: "8px 8px", textAlign: "right", color: "var(--text-muted)", whiteSpace: "nowrap" }}>
+                          {new Date(f.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                        </td>
+                        <td style={{ padding: "8px 8px", textAlign: "right" }}>
+                          <button
+                            className="btn btn-ghost"
+                            style={{ fontSize: 11, padding: "3px 8px" }}
+                            onClick={() => api.sessions.downloadFile(sessionId, f.name)}
+                          >
+                            <Download size={11} /> Download
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+            <div style={{ marginTop: 16, flexShrink: 0, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={handleOpenFiles} disabled={filesLoading}>
+                ↺ Refresh
+              </button>
+              <button className="btn btn-ghost" onClick={() => setShowFiles(false)}>Close</button>
             </div>
           </div>
         </div>

@@ -75,6 +75,19 @@ export const api = {
       a.click();
       URL.revokeObjectURL(url);
     },
+    listFiles: (id) => fetch(`${BASE}/sessions/${id}/files`).then(r => r.json()),
+
+    downloadFile: async (id, filename) => {
+      const r = await fetch(`${BASE}/sessions/${id}/files/download/${encodeURIComponent(filename)}`);
+      if (!r.ok) throw new Error(await r.text());
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename.split("/").pop();
+      a.click();
+      URL.revokeObjectURL(url);
+    },
   },
   tools: {
     list: (category) => req(`/tools/${category ? `?category=${category}` : ""}`),

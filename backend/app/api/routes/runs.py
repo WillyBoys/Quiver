@@ -78,7 +78,7 @@ async def create_run(body: RunCreate, db: AsyncSession = Depends(get_db)):
             raise HTTPException(status_code=404, detail="Tool not found")
         extra_flags = body.extra_flags or ""
         if tool.name == "bloodhound-python":
-            bh_dir = f"/data/bloodhound/{body.session_id}"
+            bh_dir = f"/data/{body.session_id}"
             os.makedirs(bh_dir, exist_ok=True)
             extra_flags = f"-o {bh_dir} {extra_flags}".strip()
         cmd_list = build_command(tool, body.param_values, extra_flags)

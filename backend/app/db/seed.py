@@ -363,6 +363,7 @@ DEFAULT_TOOLS = [
         "parameters": [
             {"name": "dc", "flag": "-dc-ip", "placeholder": "10.10.10.1", "required": True, "description": "Domain controller IP"},
             {"name": "domain", "placeholder": "domain.local/", "required": True, "description": "Target domain with trailing slash"},
+            {"name": "outputfile", "flag": "-outputfile", "placeholder": "/data/<session_id>/asrep_hashes.txt", "required": False, "description": "Save hashes to file for john (use session output dir path from prompt)"},
         ],
         "agent_mode": "exploit",
         "workflow_tags": ["internal"],
@@ -377,6 +378,7 @@ DEFAULT_TOOLS = [
         "parameters": [
             {"name": "dc", "flag": "-dc-ip", "placeholder": "10.10.10.1", "required": True, "description": "Domain controller IP"},
             {"name": "target", "placeholder": "domain.local/user:password", "required": True, "description": "Auth string: domain.local/user:pass"},
+            {"name": "outputfile", "flag": "-outputfile", "placeholder": "/data/<session_id>/kerb_hashes.txt", "required": False, "description": "Save hashes to file for john (use session output dir path from prompt)"},
         ],
         "agent_mode": "exploit",
         "scope_types": ["ip"],
@@ -393,6 +395,7 @@ DEFAULT_TOOLS = [
             {"name": "target", "placeholder": "10.10.10.1", "required": True, "description": "Domain controller IP"},
             {"name": "username", "flag": "-u", "placeholder": "DOMAIN\\user", "required": False, "description": "Username for auth (omit for null session attempt)"},
             {"name": "password", "flag": "-p", "placeholder": "password", "required": False, "description": "Password"},
+            {"name": "outputdir", "flag": "-o", "placeholder": "/data/<session_id>/ldap", "required": False, "description": "Output directory for JSON/HTML dump files"},
         ],
         "agent_mode": "active",
         "scope_types": ["ip"],
@@ -701,7 +704,7 @@ DEFAULT_TOOLS = [
         "binary": "john",
         "default_flags": "",
         "parameters": [
-            {"name": "hashfile", "placeholder": "/tmp/hashes.txt", "required": True, "description": "File containing hashes to crack"},
+            {"name": "hashfile", "placeholder": "/data/<session_id>/hashes.txt", "required": True, "description": "File containing hashes to crack — use the session output dir path"},
             {"name": "wordlist", "flag": "--wordlist", "placeholder": "/wordlists/Passwords/Leaked-Databases/rockyou.txt", "required": False, "description": "Wordlist path"},
             {"name": "format", "flag": "--format", "placeholder": "nt", "required": False, "description": "Hash format: nt, krb5tgs, krb5asrep, sha512crypt"},
         ],
