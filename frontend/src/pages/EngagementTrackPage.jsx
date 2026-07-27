@@ -34,7 +34,8 @@ export default function EngagementTrackPage({ type, label, description, icon: Ic
   const [campaigns, setCampaigns] = useState([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
-  const [form, setForm] = useState({ name: "", target: "", scope: "" });
+  const [form, setForm] = useState({ name: "", targets: [], scope: "", initial_context: { domain: "", dc_ip: "", credentials: [], notes: "" } });
+  const [targetInput, setTargetInput] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   const load = useCallback(async () => {
@@ -55,11 +56,53 @@ export default function EngagementTrackPage({ type, label, description, icon: Ic
     return campaigns.find((c) => c.session_id === sessionId);
   }
 
+  function updateCtx(field, val) {
+    setForm(f => ({ ...f, initial_context: { ...f.initial_context, [field]: val } }));
+  }
+  function addCred() {
+    setForm(f => ({ ...f, initial_context: { ...f.initial_context, credentials: [...f.initial_context.credentials, { user: "", secret: "", type: "password" }] } }));
+  }
+  function updateCred(i, field, val) {
+    setForm(f => ({ ...f, initial_context: { ...f.initial_context, credentials: f.initial_context.credentials.map((c, idx) => idx === i ? { ...c, [field]: val } : c) } }));
+  }
+  function removeCred(i) {
+    setForm(f => ({ ...f, initial_context: { ...f.initial_context, credentials: f.initial_context.credentials.filter((_, idx) => idx !== i) } }));
+  }
+
+  function addTarget(raw) {
+    const val = (raw ?? targetInput).trim();
+    if (!val) return;
+    if (form.targets.includes(val)) { setTargetInput(""); return; }
+    setForm(f => ({ ...f, targets: [...f.targets, val] }));
+    setTargetInput("");
+  }
+  function removeTarget(val) {
+    setForm(f => ({ ...f, targets: f.targets.filter(t => t !== val) }));
+  }
+  function handleTargetPaste(e) {
+    e.preventDefault();
+    const text = e.clipboardData.getData("text");
+    const vals = text.split(/[\r\n,;]+/).map(v => v.trim()).filter(Boolean);
+    if (!vals.length) return;
+    setForm(f => {
+      const existing = new Set(f.targets);
+      return { ...f, targets: [...f.targets, ...vals.filter(v => !existing.has(v))] };
+    });
+    setTargetInput("");
+  }
+
   async function handleCreate(e) {
     e.preventDefault();
     setSubmitting(true);
     try {
-      const session = await api.sessions.create({ ...form, engagement_type: type });
+      const session = await api.sessions.create({
+        name: form.name,
+        target: form.targets[0] || "",
+        targets: form.targets.map(v => ({ id: crypto.randomUUID(), value: v })),
+        scope: form.scope,
+        engagement_type: type,
+        initial_context: form.initial_context,
+      });
       navigate(`/sessions/${session.id}`);
     } finally {
       setSubmitting(false);
@@ -98,29 +141,103 @@ export default function EngagementTrackPage({ type, label, description, icon: Ic
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
                 autoFocus
               />
-              <label className={styles.fieldLabel}>Primary Target</label>
-              <input
-                className={`${styles.input} ${styles.mono}`}
-                required
-                placeholder={type === "internal" ? "10.10.10.0/24 or DC01" : "target.com or 1.2.3.4"}
-                value={form.target}
-                onChange={(e) => setForm({ ...form, target: e.target.value })}
-              />
+              <label className={styles.fieldLabel}>Targets</label>
+              <div className={styles.targetChipContainer} onClick={() => document.getElementById("targetChipInput").focus()}>
+                {form.targets.map((t) => (
+                  <div key={t} className={styles.targetChip}>
+                    <span>{t}</span>
+                    <button type="button" className={styles.targetChipRemove} onClick={() => removeTarget(t)}>×</button>
+                  </div>
+                ))}
+                <input
+                  id="targetChipInput"
+                  className={styles.targetChipInput}
+                  placeholder={form.targets.length === 0 ? (type === "internal" ? "10.10.10.0/24, DC01…" : "target.com, 1.2.3.4…") : "Add another…"}
+                  value={targetInput}
+                  onChange={(e) => setTargetInput(e.target.value)}
+                  onPaste={handleTargetPaste}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") { e.preventDefault(); addTarget(); }
+                    if (e.key === ",") { e.preventDefault(); addTarget(); }
+                    if (e.key === "Backspace" && !targetInput && form.targets.length > 0) {
+                      removeTarget(form.targets[form.targets.length - 1]);
+                    }
+                  }}
+                />
+              </div>
               <label className={styles.fieldLabel}>
-                Scope Notes <span className={styles.optional}>(optional)</span>
+                Additional Context <span className={styles.optional}>(optional)</span>
               </label>
               <textarea
                 className={styles.textarea}
                 rows={2}
-                placeholder="What's in/out of scope…"
+                placeholder="Things to be aware of, exclusions, special instructions…"
                 value={form.scope}
                 onChange={(e) => setForm({ ...form, scope: e.target.value })}
               />
+              {type === "internal" && (
+                <>
+                  <div className={styles.ctxDivider}>Engagement Context <span className={styles.optional}>(optional)</span></div>
+                  <label className={styles.fieldLabel}>Domain Name</label>
+                  <input
+                    className={`${styles.input} ${styles.mono}`}
+                    placeholder="corp.local"
+                    value={form.initial_context.domain}
+                    onChange={(e) => updateCtx("domain", e.target.value)}
+                  />
+                  <label className={styles.fieldLabel}>Domain Controller IP</label>
+                  <input
+                    className={`${styles.input} ${styles.mono}`}
+                    placeholder="10.10.10.1"
+                    value={form.initial_context.dc_ip}
+                    onChange={(e) => updateCtx("dc_ip", e.target.value)}
+                  />
+                  <label className={styles.fieldLabel}>
+                    Known Credentials <span className={styles.optional}>(optional)</span>
+                  </label>
+                  {form.initial_context.credentials.map((cred, i) => (
+                    <div key={i} className={styles.credRow}>
+                      <input
+                        className={`${styles.input} ${styles.mono} ${styles.credUser}`}
+                        placeholder="username"
+                        value={cred.user}
+                        onChange={(e) => updateCred(i, "user", e.target.value)}
+                      />
+                      <input
+                        className={`${styles.input} ${styles.mono} ${styles.credSecret}`}
+                        placeholder="password or NT hash"
+                        value={cred.secret}
+                        onChange={(e) => updateCred(i, "secret", e.target.value)}
+                      />
+                      <select
+                        className={styles.credType}
+                        value={cred.type}
+                        onChange={(e) => updateCred(i, "type", e.target.value)}
+                      >
+                        <option value="password">password</option>
+                        <option value="hash">hash</option>
+                      </select>
+                      <button type="button" className={styles.credRemove} onClick={() => removeCred(i)}>×</button>
+                    </div>
+                  ))}
+                  <button type="button" className={styles.addCredBtn} onClick={addCred}>+ Add Credential</button>
+                  <label className={styles.fieldLabel}>
+                    Context Notes <span className={styles.optional}>(optional)</span>
+                  </label>
+                  <textarea
+                    className={styles.textarea}
+                    rows={2}
+                    placeholder="e.g. Internal user on the domain, no admin privileges…"
+                    value={form.initial_context.notes}
+                    onChange={(e) => updateCtx("notes", e.target.value)}
+                  />
+                </>
+              )}
               <div className={styles.modalActions}>
                 <button type="button" className={styles.ghostBtn} onClick={() => setCreating(false)}>
                   Cancel
                 </button>
-                <button type="submit" className={styles.primaryBtn} disabled={submitting}>
+                <button type="submit" className={styles.primaryBtn} disabled={submitting || form.targets.length === 0}>
                   {submitting ? "Creating…" : "Create Engagement"}
                 </button>
               </div>

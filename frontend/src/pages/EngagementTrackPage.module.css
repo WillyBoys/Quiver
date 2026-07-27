@@ -208,8 +208,11 @@
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: 8px;
-  width: 480px;
+  width: 520px;
   max-width: 95vw;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
 }
 
 .modalHeader {
@@ -240,6 +243,7 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
+  overflow-y: auto;
 }
 
 .fieldLabel {
@@ -271,6 +275,64 @@
 
 .input:focus { outline: none; border-color: var(--accent); }
 .mono { font-family: var(--font-mono); }
+
+/* Chip-style target input */
+
+.targetChipContainer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 6px 8px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  min-height: 38px;
+  align-items: center;
+  cursor: text;
+  box-sizing: border-box;
+}
+
+.targetChipContainer:focus-within { border-color: var(--accent); }
+
+.targetChip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px 2px 8px;
+  background: var(--accent-glow);
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.targetChipRemove {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 3px;
+  opacity: 0.6;
+  border-radius: 999px;
+}
+
+.targetChipRemove:hover { opacity: 1; }
+
+.targetChipInput {
+  border: none;
+  background: none;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: var(--font-mono);
+  outline: none;
+  flex: 1;
+  min-width: 100px;
+  padding: 1px 2px;
+}
 
 .textarea {
   width: 100%;
@@ -322,3 +384,77 @@
 }
 
 .ghostBtn:hover { color: var(--text-primary); }
+
+/* Engagement context section */
+
+.ctxDivider {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+  margin-top: 4px;
+}
+
+.credRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.credUser {
+  flex: 1.2;
+  min-width: 0;
+}
+
+.credSecret {
+  flex: 2;
+  min-width: 0;
+}
+
+.credType {
+  padding: 8px 6px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.credType:focus { outline: none; border-color: var(--accent); }
+
+.credRemove {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.credRemove:hover { color: #ef4444; }
+
+.addCredBtn {
+  align-self: flex-start;
+  background: none;
+  border: 1px dashed var(--border);
+  border-radius: 4px;
+  color: var(--text-muted);
+  font-size: 12px;
+  padding: 5px 12px;
+  cursor: pointer;
+  transition: border-color 0.12s, color 0.12s;
+}
+
+.addCredBtn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}

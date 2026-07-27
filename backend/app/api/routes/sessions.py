@@ -33,6 +33,7 @@ class SessionCreate(BaseModel):
     engagement_type: str = "external"  # external / internal / web
     notes: Optional[str] = ""
     targets: Optional[list] = None  # [{id, value}]; initialized from target if omitted
+    initial_context: Optional[dict] = None  # {domain, dc_ip, credentials:[{user,secret,type}], notes}
 
 
 class SessionUpdate(SessionCreate):
@@ -40,6 +41,7 @@ class SessionUpdate(SessionCreate):
     findings: Optional[list[Finding]] = None
     targets: Optional[list] = None
     campaign_id: Optional[str] = None
+    initial_context: Optional[dict] = None
 
 
 class NotesUpdate(BaseModel):
@@ -95,6 +97,7 @@ async def create_session(body: SessionCreate, db: AsyncSession = Depends(get_db)
         engagement_type=body.engagement_type,
         notes=body.notes,
         targets=targets,
+        initial_context=body.initial_context or {},
     )
     db.add(session)
     await db.commit()
@@ -117,6 +120,8 @@ async def update_session(session_id: str, body: SessionUpdate, db: AsyncSession 
         session.findings = [f.model_dump() for f in body.findings]
     if body.targets is not None:
         session.targets = body.targets
+    if body.initial_context is not None:
+        session.initial_context = body.initial_context
     await db.commit()
     return _session_dict(session)
 
@@ -299,6 +304,56 @@ def _build_ai_report_prompt(session, runs) -> str:
         sev_counts[s] = sev_counts.get(s, 0) + 1
     count_str = ", ".join(f"{sev_counts[s]} {s}" for s in _SEVERITY_ORDER if s in sev_counts) or "0 findings"
 
+    is_internal = session.engagement_type == "internal"
+    attack_surface_label = "Discovered Infrastructure" if is_internal else "Attack Surface"
+    attack_surface_hint = (
+        "[Bullet list of what was discovered: domain controllers, subnets, live hosts with open ports, "
+        "AD services (LDAP, SMB, Kerberos, WinRM). Include IP addresses, hostnames, and OS where known.]"
+        if is_internal else
+        "[Bullet list of what was discovered: open ports, exposed services, interesting endpoints. "
+        "Pull from tool outputs. Be specific — include port numbers, versions, URLs.]"
+    )
+
+    # Build artifact summary for all engagement types
+    raw_artifacts = session.artifacts or {}
+    artifact_lines = []
+    if raw_artifacts.get("hosts"):
+        artifact_lines.append(f"- Hosts: {', '.join(raw_artifacts['hosts'])}")
+    if raw_artifacts.get("users"):
+        artifact_lines.append(f"- Users discovered: {', '.join(raw_artifacts['users'])}")
+    if raw_artifacts.get("spns"):
+        artifact_lines.append(f"- SPNs: {', '.join(raw_artifacts['spns'])}")
+    for user, h in (raw_artifacts.get("hashes") or {}).items():
+        artifact_lines.append(f"- Hash ({user}): {h}")
+    for user, pw in (raw_artifacts.get("creds") or {}).items():
+        artifact_lines.append(f"- Credential ({user}): {pw}")
+    for note in (raw_artifacts.get("notes") or []):
+        artifact_lines.append(f"- Note: {note}")
+    artifacts_section = (
+        f"\nDISCOVERED ARTIFACTS (credentials, hashes, and hosts captured during the engagement):\n"
+        + ("\n".join(artifact_lines) if artifact_lines else "- (none captured)")
+        + "\n"
+    ) if artifact_lines else ""
+
+    attack_chain_hint = (
+        "[Describe the credential chain and lateral movement path. E.g. 'AS-REP roasting yielded hash for jsmith "
+        "→ cracked to Summer2024! → evil-winrm onto FILESERVER01 → secretsdump revealed administrator hash "
+        "→ pass-the-hash onto DC01 achieving domain compromise.' If no chain: write No credential chain established.]"
+        if is_internal else
+        "[If any findings chain together, describe the kill chain in 2-3 sentences per chain. "
+        "E.g. SQLi yielded admin JWT → used to access /api/Users → mass assignment escalated to admin role. "
+        "If no chains: write No multi-step chains identified.]"
+    )
+
+    coverage_hint = (
+        "[Bullet list of: hashes that were not cracked, attack paths not pursued (e.g. Responder/NTLM relay, "
+        "BloodHound paths), subnets not fully enumerated, tools that timed out, anything needing manual follow-up. "
+        "Be specific about what a reviewer should attempt by hand.]"
+        if is_internal else
+        "[Bullet list of: what wasn't tested, what timed out, what was blocked by scope, "
+        "what needs manual follow-up. Be specific about what a reviewer should check by hand.]"
+    )
+
     return f"""You are a senior penetration tester writing an internal technical brief for a colleague who will review these findings and write the final client report.
 
 This is NOT a client deliverable. Write for a technical reviewer, not an executive. Be terse and precise.
@@ -315,7 +370,7 @@ CONFIRMED FINDINGS (sorted critical → info):
 {findings_text}
 COVERAGE SUMMARY:
 {coverage_text}
-
+{artifacts_section}
 Write a technical brief in Markdown using EXACTLY this structure. Do not add sections, do not write for executives, do not include remediation advice (the reviewer will add that):
 
 # Technical Brief — {session.target}
@@ -329,8 +384,8 @@ Write a technical brief in Markdown using EXACTLY this structure. Do not add sec
 - **Finding count:** {count_str}
 - **Overall risk:** [one word: Critical / High / Medium / Low / Informational — based on highest confirmed severity]
 
-## Attack Surface
-[Bullet list of what was discovered: open ports, exposed services, interesting endpoints. Pull from tool outputs. Be specific — include port numbers, versions, URLs.]
+## {attack_surface_label}
+{attack_surface_hint}
 
 ## Findings
 
@@ -340,7 +395,7 @@ Write a technical brief in Markdown using EXACTLY this structure. Do not add sec
 | Field | Value |
 |-------|-------|
 | **Severity** | SEVERITY — CVSS range |
-| **Location** | specific URL, port, or service |
+| **Location** | specific URL, port, service, or host |
 | **Chains from** | prior finding title OR — |
 
 **Reproduction steps:**
@@ -357,11 +412,10 @@ Write a technical brief in Markdown using EXACTLY this structure. Do not add sec
 ---
 
 ## Attack Chains
-[If any findings chain together, describe the kill chain in 2-3 sentences per chain. E.g. "SQLi (Finding 1) yielded admin JWT → used to access /api/Users (Finding 2) → mass assignment on POST /api/Users escalated to admin role (Finding 3)."]
-[If no chains: write "No multi-step chains identified."]
+{attack_chain_hint}
 
 ## Coverage Gaps
-[Bullet list of: what wasn't tested, what timed out, what was blocked by scope, what needs manual follow-up. Be specific about what a reviewer should check by hand.]
+{coverage_hint}
 
 RULES:
 - Write only what the evidence supports. Do not invent findings.
@@ -556,6 +610,7 @@ def _session_dict(s: Session) -> dict:
         "artifacts": s.artifacts or {},
         "campaign_id": s.campaign_id or None,
         "bloodhound_available": _bloodhound_available(s.id),
+        "initial_context": s.initial_context or {},
         "created_at": s.created_at.isoformat(),
         "updated_at": s.updated_at.isoformat(),
     }

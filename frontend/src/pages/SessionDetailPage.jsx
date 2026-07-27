@@ -77,6 +77,7 @@ export default function SessionDetailPage() {
   const [sidebarView, setSidebarView] = useState("tools");   // "tools" | "checklist"
   const [artifacts, setArtifacts] = useState({});
   const [showArtifacts, setShowArtifacts] = useState(() => localStorage.getItem("quiver_show_artifacts") === "true");
+  const [infoBarHidden, setInfoBarHidden] = useState(false);
   const [shellCmd, setShellCmd] = useState("");
   const [workflowFilter, setWorkflowFilter] = useState("all"); // "all" | "external" | "internal" | "web"
   const [phaseChecks, setPhaseChecks] = useState({});
@@ -541,6 +542,7 @@ export default function SessionDetailPage() {
   }, []);
 
   function openSettings() {
+    const ic = session.initial_context || {};
     setSettingsForm({
       analyzeProvider,
       reportProvider,
@@ -549,25 +551,48 @@ export default function SessionDetailPage() {
       target: session.target || "",
       scope: session.scope || "",
       engagement_type: session.engagement_type || "external",
+      initial_context: {
+        domain: ic.domain || "",
+        dc_ip: ic.dc_ip || "",
+        credentials: ic.credentials || [],
+        notes: ic.notes || "",
+      },
     });
     setShowSettings(true);
+  }
+
+  function updateSettingsCtx(field, val) {
+    setSettingsForm(f => ({ ...f, initial_context: { ...f.initial_context, [field]: val } }));
+  }
+  function addSettingsCred() {
+    setSettingsForm(f => ({ ...f, initial_context: { ...f.initial_context, credentials: [...f.initial_context.credentials, { user: "", secret: "", type: "password" }] } }));
+  }
+  function updateSettingsCred(i, field, val) {
+    setSettingsForm(f => ({ ...f, initial_context: { ...f.initial_context, credentials: f.initial_context.credentials.map((c, idx) => idx === i ? { ...c, [field]: val } : c) } }));
+  }
+  function removeSettingsCred(i) {
+    setSettingsForm(f => ({ ...f, initial_context: { ...f.initial_context, credentials: f.initial_context.credentials.filter((_, idx) => idx !== i) } }));
   }
 
   async function saveSettings() {
     if (!settingsForm) return;
     setAnalyzeProvider(settingsForm.analyzeProvider);
     setReportProvider(settingsForm.reportProvider);
+    const ic = settingsForm.initial_context || {};
+    const prevIc = session.initial_context || {};
     const sessionChanged =
       settingsForm.name !== session.name ||
       settingsForm.target !== session.target ||
       settingsForm.scope !== session.scope ||
-      settingsForm.engagement_type !== session.engagement_type;
+      settingsForm.engagement_type !== session.engagement_type ||
+      JSON.stringify(ic) !== JSON.stringify(prevIc);
     if (sessionChanged) {
       const updated = await api.sessions.update(sessionId, {
         name: settingsForm.name,
         target: settingsForm.target,
         scope: settingsForm.scope,
         engagement_type: settingsForm.engagement_type,
+        initial_context: ic,
         notes: session.notes,
         status: session.status,
         findings: session.findings,
@@ -906,10 +931,14 @@ export default function SessionDetailPage() {
           <ArrowLeft size={14} /> {session.engagement_type === "internal" ? "Internal" : session.engagement_type === "web" ? "Web App" : "External"}
         </button>
         <div className={styles.sessionInfo}>
-          <div className={styles.sessionNameRow}>
-            <h1 className={styles.sessionName}>{session.name}</h1>
-          </div>
-          <code className={styles.target}>{session.target}</code>
+          <h1 className={styles.sessionName}>{session.name}</h1>
+          <span
+            className={`${styles.detailsToggle} ${campaign?.status === "awaiting_approval" ? styles.detailsToggleYellow : ""}`}
+            onClick={() => setInfoBarHidden(v => !v)}
+            title={infoBarHidden ? "Show details" : "Hide details"}
+          >
+            Details {infoBarHidden ? "▴" : "▾"}
+          </span>
         </div>
         <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={handleExport}>
           <FileText size={13} /> Reports
@@ -924,39 +953,51 @@ export default function SessionDetailPage() {
         </button>
       </div>
 
-      {/* AI Agent strip */}
-      <div className={`${styles.agentStrip} ${campaign?.status === "awaiting_approval" ? styles.agentStripAlert : ""}`}>
-        <Cpu size={13} style={{ color: campaign?.status === "awaiting_approval" ? "#f59e0b" : "var(--accent)", flexShrink: 0 }} />
-        {!campaign ? (
-          <>
-            <span className={styles.agentStripLabel}>No AI agent configured</span>
-            <button className={styles.agentStripBtn} onClick={() => { setShowAgentSetup(true); setScheduleMode("now"); setScheduledAt(""); }}>
-              <Settings size={11} /> Set up Agent
-            </button>
-          </>
-        ) : (
-          <>
-            <span className={campaign.status === "awaiting_approval" ? styles.agentStripLabelAlert : styles.agentStripLabel}>
-              {(() => {
-                const scheduled = getScheduledTime(campaign);
-                if (scheduled && campaign.status === "active") return `Scheduled — ${fmtScheduledTime(scheduled)}`;
-                if (campaign.status === "active")              return "Agent running";
-                if (campaign.status === "completed")           return "Agent completed";
-                if (campaign.status === "awaiting_approval")   return "⚠ Awaiting approval";
-                return "Agent paused — click Continue to run more iterations";
-              })()}
-            </span>
-            <span className={styles.agentStripProvider}>{campaign.ai_provider === "claude" ? "Claude" : "Local AI"}</span>
-            {campaign.status !== "completed" && (
-              <button className={styles.agentToggleBtn} onClick={handleAgentToggle}>
-                {campaign.status === "active"
-                  ? <><Pause size={11} /> Pause</>
-                  : <><Play size={11} /> Continue</>}
-              </button>
+      {/* Combined info bar: additional context (left) + agent status (right) */}
+      {!infoBarHidden && (
+        <div className={`${styles.infoBar} ${campaign?.status === "awaiting_approval" ? styles.infoBarAlert : ""}`}>
+          <div className={styles.infoBarScope}>
+            <span className={styles.infoBarScopeLabel}>Context</span>
+            {session.scope
+              ? <span className={styles.infoBarScopeText}>{session.scope}</span>
+              : <span className={styles.infoBarScopeEmpty}>No additional context</span>
+            }
+          </div>
+          <div className={styles.infoBarDivider} />
+          <div className={styles.infoBarAgent}>
+            <Cpu size={12} style={{ color: campaign?.status === "awaiting_approval" ? "#f59e0b" : "var(--accent)", flexShrink: 0 }} />
+            {!campaign ? (
+              <>
+                <span className={styles.infoBarStatus}>No agent configured</span>
+                <button className={styles.agentStripBtn} onClick={() => { setShowAgentSetup(true); setScheduleMode("now"); setScheduledAt(""); }}>
+                  <Settings size={11} /> Set up Agent
+                </button>
+              </>
+            ) : (
+              <>
+                <span className={campaign.status === "awaiting_approval" ? styles.infoBarStatusAlert : styles.infoBarStatus}>
+                  {(() => {
+                    const scheduled = getScheduledTime(campaign);
+                    if (scheduled && campaign.status === "active") return `Scheduled — ${fmtScheduledTime(scheduled)}`;
+                    if (campaign.status === "active")              return "Agent running";
+                    if (campaign.status === "completed")           return "Agent completed";
+                    if (campaign.status === "awaiting_approval")   return "⚠ Awaiting approval";
+                    return "Agent paused";
+                  })()}
+                </span>
+                <span className={styles.infoBarProvider}>{campaign.ai_provider === "claude" ? "Claude" : "Local AI"}</span>
+                {campaign.status !== "completed" && (
+                  <button className={styles.agentToggleBtn} onClick={handleAgentToggle}>
+                    {campaign.status === "active"
+                      ? <><Pause size={11} /> Pause</>
+                      : <><Play size={11} /> Continue</>}
+                  </button>
+                )}
+              </>
             )}
-          </>
-        )}
-      </div>
+          </div>
+        </div>
+      )}
 
       {/* Target bar */}
       <div className={styles.targetBar}>
@@ -1916,7 +1957,7 @@ export default function SessionDetailPage() {
       {/* Settings modal */}
       {showSettings && settingsForm && (
         <div className={styles.modal} onClick={() => setShowSettings(false)}>
-          <div className={styles.modalBox} style={{ maxWidth: 480, width: "92vw" }} onClick={(e) => e.stopPropagation()}>
+          <div className={styles.modalBox} style={{ maxWidth: 480, width: "92vw", maxHeight: "90vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
             <h2 className={styles.modalTitle}>Session Settings</h2>
 
             <div className={styles.settingsSection}>
@@ -1994,6 +2035,52 @@ export default function SessionDetailPage() {
                 </select>
               </label>
             </div>
+
+            {settingsForm.engagement_type === "internal" && (
+              <div className={styles.settingsSection}>
+                <div className={styles.settingsSectionTitle}>Engagement Context</div>
+                <label className={styles.label}>Domain Name
+                  <input className="input input-mono" placeholder="corp.local"
+                    value={settingsForm.initial_context.domain}
+                    onChange={(e) => updateSettingsCtx("domain", e.target.value)} />
+                </label>
+                <label className={styles.label}>Domain Controller IP
+                  <input className="input input-mono" placeholder="10.10.10.1"
+                    value={settingsForm.initial_context.dc_ip}
+                    onChange={(e) => updateSettingsCtx("dc_ip", e.target.value)} />
+                </label>
+                <div className={styles.label}>Known Credentials
+                  {settingsForm.initial_context.credentials.map((cred, i) => (
+                    <div key={i} style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                      <input className="input input-mono" style={{ flex: "1.2", minWidth: 0, fontSize: 12 }}
+                        placeholder="username"
+                        value={cred.user}
+                        onChange={(e) => updateSettingsCred(i, "user", e.target.value)} />
+                      <input className="input input-mono" style={{ flex: 2, minWidth: 0, fontSize: 12 }}
+                        placeholder="password or NT hash"
+                        value={cred.secret}
+                        onChange={(e) => updateSettingsCred(i, "secret", e.target.value)} />
+                      <select className="input" style={{ fontSize: 12, fontFamily: "var(--font-mono)", width: "auto" }}
+                        value={cred.type}
+                        onChange={(e) => updateSettingsCred(i, "type", e.target.value)}>
+                        <option value="password">password</option>
+                        <option value="hash">hash</option>
+                      </select>
+                      <button style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 18, padding: "0 4px" }}
+                        onClick={() => removeSettingsCred(i)}>×</button>
+                    </div>
+                  ))}
+                  <button style={{ marginTop: 8, background: "none", border: "1px dashed var(--border)", borderRadius: 4, color: "var(--text-muted)", fontSize: 12, padding: "5px 12px", cursor: "pointer" }}
+                    onClick={addSettingsCred}>+ Add Credential</button>
+                </div>
+                <label className={styles.label}>Context Notes
+                  <textarea className="input" rows={2}
+                    placeholder="e.g. Internal domain user, no admin privileges…"
+                    value={settingsForm.initial_context.notes}
+                    onChange={(e) => updateSettingsCtx("notes", e.target.value)} />
+                </label>
+              </div>
+            )}
 
             <div className={styles.modalActions}>
               <button className="btn btn-ghost" onClick={() => setShowSettings(false)}>Cancel</button>

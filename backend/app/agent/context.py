@@ -293,7 +293,26 @@ async def build_agent_prompt(campaign: Campaign, db: AsyncSession) -> str:
     actions_str = "\n".join(action_lines) or "  (none yet)"
     already_run_str = "\n".join(already_run_commands) if already_run_commands else "  (none)"
 
+    # Build initial context section (engineer-provided before engagement started)
+    ic = (sess.initial_context if sess else None) or {}
+    ic_lines = []
+    if ic.get("domain"):
+        ic_lines.append(f"  Domain: {ic['domain']}")
+    if ic.get("dc_ip"):
+        ic_lines.append(f"  Domain Controller: {ic['dc_ip']}")
+    for cred in ic.get("credentials") or []:
+        user = cred.get("user", "")
+        secret = cred.get("secret", "")
+        ctype = cred.get("type", "password")
+        if user and secret:
+            label = "Hash" if ctype == "hash" else "Credential"
+            ic_lines.append(f"  {label}: {user} → {secret}")
+    if ic.get("notes"):
+        ic_lines.append(f"  Notes: {ic['notes']}")
+    initial_context_str = "\n".join(ic_lines) if ic_lines else None
+
     # Build artifact summary (discovered users, creds, hosts — persisted across iterations)
+    # Also fold in initial_context credentials so phase gates work immediately when context is provided
     raw_artifacts = sess.artifacts if sess else {}
     artifacts_lines = []
     if raw_artifacts.get("hosts"):
@@ -308,6 +327,28 @@ async def build_agent_prompt(campaign: Campaign, db: AsyncSession) -> str:
         artifacts_lines.append(f"  Cred  {user}: {pw}")
     for note in (raw_artifacts.get("notes") or []):
         artifacts_lines.append(f"  Note: {note}")
+    # Fold in initial_context credentials so they appear in ARTIFACTS and satisfy phase gates
+    if ic.get("domain"):
+        dom_note = f"  Note: Domain: {ic['domain']}"
+        if dom_note not in artifacts_lines:
+            artifacts_lines.append(dom_note)
+    if ic.get("dc_ip"):
+        dc_host = f"  Hosts: {ic['dc_ip']} (DC — from initial context)"
+        if not any(ic["dc_ip"] in l for l in artifacts_lines):
+            artifacts_lines.append(dc_host)
+    for cred in ic.get("credentials") or []:
+        user = cred.get("user", "")
+        secret = cred.get("secret", "")
+        ctype = cred.get("type", "password")
+        if user and secret:
+            if ctype == "hash":
+                entry = f"  Hash  {user}: {secret} (from initial context)"
+                if not any(user in l and "Hash" in l for l in artifacts_lines):
+                    artifacts_lines.append(entry)
+            else:
+                entry = f"  Cred  {user}: {secret} (from initial context)"
+                if not any(user in l and "Cred" in l for l in artifacts_lines):
+                    artifacts_lines.append(entry)
     artifacts_str = "\n".join(artifacts_lines) or "  (none yet)"
 
     # Build existing findings list so agent can update instead of duplicating
@@ -330,12 +371,16 @@ async def build_agent_prompt(campaign: Campaign, db: AsyncSession) -> str:
     methodology_str = METHODOLOGY.get(engagement_type, METHODOLOGY["external"])
     eng_label = engagement_type.upper()
 
-    return f"""You are a penetration tester AI. Choose the single best NEXT action against the target.
+    context_section = (
+        f"\nENGAGEMENT CONTEXT (engineer-provided — treat as verified starting information):\n{initial_context_str}\n"
+        if initial_context_str else ""
+    )
 
-PRIMARY TARGET: {primary}
-SCOPE (only test these):
+    return f"""You are a penetration tester AI. Choose the single best NEXT action against the target scope.
+
+SCOPE (test all entries — work through each systematically):
 {scope_str}
-
+{context_section}
 ENGAGEMENT METHODOLOGY ({eng_label} — follow phases in order):
 {methodology_str}
 
@@ -355,26 +400,26 @@ COMMANDS ALREADY RUN — DO NOT REPEAT:
 {already_run_str}
 
 Reply with a SINGLE LINE of compact JSON — no markdown, no newlines inside the JSON:
-{{"thought":"2-3 sentences: what the previous results show and why you are choosing this tool","reasoning":"one sentence summary","tool_name":"binary","target":"{primary}","parameters":{{}},"extra_flags":""}}
+{{"thought":"2-3 sentences: what the previous results show and why you are choosing this tool","reasoning":"one sentence summary","tool_name":"binary","target":"<scope_entry>","parameters":{{}},"extra_flags":""}}
 
 To log a NEW finding confirmed by this step's output:
-{{"thought":"...","reasoning":"...","tool_name":"binary","target":"{primary}","parameters":{{}},"extra_flags":"","finding":{{"title":"Short descriptive title","severity":"critical|high|medium|low|info","notes":"What was found, where, why it matters, any evidence from output"}}}}
+{{"thought":"...","reasoning":"...","tool_name":"binary","target":"<scope_entry>","parameters":{{}},"extra_flags":"","finding":{{"title":"Short descriptive title","severity":"critical|high|medium|low|info","notes":"What was found, where, why it matters, any evidence from output"}}}}
 
 To ADD DETAIL to an existing finding (use the id from FINDINGS ALREADY LOGGED):
-{{"thought":"...","reasoning":"...","tool_name":"binary","target":"{primary}","parameters":{{}},"extra_flags":"","finding":{{"id":"existing-finding-uuid","title":"same title","severity":"critical|high|medium|low|info","notes":"Additional evidence or context to append"}}}}
+{{"thought":"...","reasoning":"...","tool_name":"binary","target":"<scope_entry>","parameters":{{}},"extra_flags":"","finding":{{"id":"existing-finding-uuid","title":"same title","severity":"critical|high|medium|low|info","notes":"Additional evidence or context to append"}}}}
 
 To show this finding was made possible by a prior one, add chains_from with the prior finding's title:
 {{"...","finding":{{"title":"RCE via deserialization","severity":"critical","notes":"...","chains_from":"SQL Injection Authentication Bypass"}}}}
 
 To store a discovered credential, user, hash, host, or SPN for use in later steps (appears in ARTIFACTS next iteration):
-{{"thought":"...","reasoning":"...","tool_name":"binary","target":"{primary}","parameters":{{}},"extra_flags":"","artifact":{{"type":"cred","user":"jsmith","value":"Summer2024!"}}}}
+{{"thought":"...","reasoning":"...","tool_name":"binary","target":"<scope_entry>","parameters":{{}},"extra_flags":"","artifact":{{"type":"cred","user":"jsmith","value":"Summer2024!"}}}}
 
 Or if all useful enumeration is complete:
 {{"reasoning":"why done","done":true}}
 
 RULES (follow all):
 - tool_name MUST be one of the binaries listed in TOOLS AVAILABLE above
-- target must be {primary!r} (or a specific discovered path/endpoint)
+- target must be one of the SCOPE entries above, or a specific discovered host/IP/endpoint found during enumeration
 - DO NOT use any command listed in COMMANDS ALREADY RUN
 - extra_flags: optional string of additional CLI flags to append; leave empty string if not needed
 - bash special rule: when tool_name is "bash", put the COMPLETE shell command in extra_flags. The bash tool requires human approval and is your escape hatch for custom probes, chained commands, or anything no other tool covers.
@@ -400,7 +445,7 @@ ERROR OUTPUT:
 TARGET: {primary}
 
 If the error reveals a simple fixable mistake (wrong flag, wrong path, missing argument, typo), return:
-{{"retry":true,"thought":"what went wrong and exactly how to fix it","tool_name":"binary","target":"{primary}","parameters":{{}},"extra_flags":"","reasoning":"one sentence"}}
+{{"retry":true,"thought":"what went wrong and exactly how to fix it","tool_name":"binary","target":"<scope_entry>","parameters":{{}},"extra_flags":"","reasoning":"one sentence"}}
 
 If the tool fundamentally cannot work against this target, or you cannot determine a fix, return:
 {{"retry":false,"reasoning":"why"}}
