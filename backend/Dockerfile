@@ -46,6 +46,16 @@ RUN git clone --depth=1 https://github.com/initstring/cloud_enum /opt/cloud_enum
     printf '#!/bin/sh\nexec python3 /opt/cloud_enum/cloud_enum.py "$@"\n' \
         > /usr/local/bin/cloud_enum && chmod +x /usr/local/bin/cloud_enum
 
+# nxc protocol wrappers — nxc SMB/LDAP/WinRM/MSSQL/RDP each get their own binary
+# so all five variants appear in the agent prompt independently (dedup is by binary name).
+RUN printf '#!/bin/sh\nexec nxc smb "$@"\n'   > /usr/local/bin/nxc-smb   && \
+    printf '#!/bin/sh\nexec nxc ldap "$@"\n'  > /usr/local/bin/nxc-ldap  && \
+    printf '#!/bin/sh\nexec nxc winrm "$@"\n' > /usr/local/bin/nxc-winrm && \
+    printf '#!/bin/sh\nexec nxc mssql "$@"\n' > /usr/local/bin/nxc-mssql && \
+    printf '#!/bin/sh\nexec nxc rdp "$@"\n'   > /usr/local/bin/nxc-rdp   && \
+    chmod +x /usr/local/bin/nxc-smb /usr/local/bin/nxc-ldap \
+             /usr/local/bin/nxc-winrm /usr/local/bin/nxc-mssql /usr/local/bin/nxc-rdp
+
 # Thin wrapper scripts — each gives the agent a distinct binary name for a common
 # curl/nc pattern, letting the seed add them as separate auto-approved tools without
 # changing the binary-keyed tool-prompt logic.
@@ -58,6 +68,13 @@ RUN printf '#!/bin/sh\nexec curl -si --max-time 15 "$@"\n'                      
     printf '#!/bin/sh\nexec nc -nv -w 5 "$@"\n'                                                                    > /usr/local/bin/nc-banner    && \
     chmod +x /usr/local/bin/curl-probe /usr/local/bin/curl-headers /usr/local/bin/curl-cors \
              /usr/local/bin/curl-json /usr/local/bin/curl-redirect /usr/local/bin/nc-banner
+
+# nmap-sweep — host discovery (ping sweep) gets its own binary so it doesn't collide
+# with nmap service-scan entries in the agent prompt dedup.
+# nuclei-network — network protocol CVE templates for internal host scanning.
+RUN printf '#!/bin/sh\nexec nmap -sn "$@"\n'                                           > /usr/local/bin/nmap-sweep     && \
+    printf '#!/bin/sh\nexec nuclei -t network/ -severity medium,high,critical "$@"\n' > /usr/local/bin/nuclei-network && \
+    chmod +x /usr/local/bin/nmap-sweep /usr/local/bin/nuclei-network
 
 # ── pipx ──────────────────────────────────────────────────────────────────────
 # pipx installs each Python CLI tool in its own isolated virtualenv and symlinks
@@ -90,6 +107,12 @@ RUN if grep -qvE '^\s*#|^\s*$' /tmp/user-pip.txt; then \
 
 # bbot — recursive attack surface mapping
 RUN pipx install bbot
+
+# certipy-ad — ADCS enumeration and ESC1-8 exploitation
+RUN pipx install certipy-ad
+
+# ldapdomaindump — structured AD object dump (users, groups, OUs, GPOs, computers)
+RUN pipx install ldapdomaindump
 
 # Full impacket suite (40+ scripts). The apt python3-impacket only ships ~5.
 # impacket's pip package names scripts as GetNPUsers.py etc. rather than the

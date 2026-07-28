@@ -44,6 +44,20 @@ DEFAULT_TOOLS = [
         "is_builtin": True,
     },
     {
+        "name": "nmap - Host Discovery",
+        "description": "Ping sweep to identify live hosts across a subnet — fast Phase 1 host discovery without port scanning or IDS-triggering service probes.",
+        "category": "recon",
+        "binary": "nmap-sweep",
+        "default_flags": "",
+        "parameters": [
+            {"name": "target", "placeholder": "10.10.10.0/24", "required": True, "description": "CIDR range or IP to sweep"},
+        ],
+        "agent_mode": "passive",
+        "scope_types": ["ip"],
+        "workflow_tags": ["internal", "external"],
+        "is_builtin": True,
+    },
+    {
         "name": "Masscan - Fast Port Scan",
         "description": "Extremely fast TCP port scanner — useful for large IP ranges where nmap would be too slow. Added via user-tools.txt as a Pattern A custom tool example.",
         "category": "recon",
@@ -80,7 +94,7 @@ DEFAULT_TOOLS = [
             {"name": "target", "placeholder": "target.com", "required": True, "description": "Domain"},
         ],
         "agent_mode": "passive",
-        "workflow_tags": ["external", "web"],
+        "workflow_tags": ["external", "web", "internal"],
         "is_builtin": True,
     },
     {
@@ -93,7 +107,7 @@ DEFAULT_TOOLS = [
             {"name": "domain", "flag": "-d", "placeholder": "target.com", "required": True, "description": "Target domain"},
         ],
         "agent_mode": "passive",
-        "workflow_tags": ["external", "web"],
+        "workflow_tags": ["external", "web", "internal"],
         "is_builtin": True,
     },
     {
@@ -302,10 +316,10 @@ DEFAULT_TOOLS = [
     },
     {
         "name": "netexec - SMB",
-        "description": "SMB host discovery, share enumeration, and credential validation across a subnet (install nxc manually via user-tools.txt or pipx)",
+        "description": "SMB host discovery, share enumeration, and credential validation across a subnet. Add -u/-p for auth, -H for pass-the-hash, --shares to list shares, --sam to dump SAM.",
         "category": "enum",
-        "binary": "nxc",
-        "default_flags": "smb",
+        "binary": "nxc-smb",
+        "default_flags": "",
         "parameters": [
             {"name": "target", "placeholder": "10.10.10.0/24", "required": True, "description": "Target IP or CIDR range"},
         ],
@@ -315,10 +329,10 @@ DEFAULT_TOOLS = [
     },
     {
         "name": "netexec - LDAP",
-        "description": "LDAP enumeration of Active Directory users, groups, and password policies (install nxc manually via user-tools.txt or pipx)",
+        "description": "LDAP enumeration of Active Directory users, groups, and password policies. Add -u/-p for authenticated queries.",
         "category": "enum",
-        "binary": "nxc",
-        "default_flags": "ldap --users --groups --pass-pol",
+        "binary": "nxc-ldap",
+        "default_flags": "--users --groups --pass-pol",
         "parameters": [
             {"name": "target", "placeholder": "10.10.10.1", "required": True, "description": "Domain controller IP"},
         ],
@@ -454,10 +468,10 @@ DEFAULT_TOOLS = [
     },
     {
         "name": "netexec - RDP",
-        "description": "Check RDP availability and test credentials across Windows hosts in a subnet",
+        "description": "Check RDP availability and test credentials across Windows hosts in a subnet. Add -u/-p or -H for pass-the-hash.",
         "category": "enum",
-        "binary": "nxc",
-        "default_flags": "rdp",
+        "binary": "nxc-rdp",
+        "default_flags": "",
         "parameters": [
             {"name": "target", "placeholder": "10.10.10.0/24", "required": True, "description": "Target IP or CIDR range"},
         ],
@@ -468,10 +482,10 @@ DEFAULT_TOOLS = [
     },
     {
         "name": "netexec - MSSQL",
-        "description": "Enumerate MSSQL instances and test authentication across a subnet",
+        "description": "Enumerate MSSQL instances and test authentication across a subnet. Use -x to execute commands if xp_cmdshell is enabled.",
         "category": "enum",
-        "binary": "nxc",
-        "default_flags": "mssql",
+        "binary": "nxc-mssql",
+        "default_flags": "",
         "parameters": [
             {"name": "target", "placeholder": "10.10.10.0/24", "required": True, "description": "Target IP or CIDR range"},
         ],
@@ -482,10 +496,10 @@ DEFAULT_TOOLS = [
     },
     {
         "name": "netexec - WinRM",
-        "description": "Check WinRM availability and test credentials against Windows hosts",
+        "description": "Check WinRM availability and test credentials against Windows hosts. Add -u/-p or -H for pass-the-hash.",
         "category": "enum",
-        "binary": "nxc",
-        "default_flags": "winrm",
+        "binary": "nxc-winrm",
+        "default_flags": "",
         "parameters": [
             {"name": "target", "placeholder": "10.10.10.0/24", "required": True, "description": "Target IP or CIDR range"},
         ],
@@ -585,6 +599,48 @@ DEFAULT_TOOLS = [
         "is_builtin": True,
     },
     {
+        "name": "impacket-smbexec",
+        "description": "SMB-based remote execution via a temporary service — alternative to psexec that avoids writing a binary to disk. Useful when psexec is blocked by AV/EDR.",
+        "category": "enum",
+        "binary": "impacket-smbexec",
+        "default_flags": "",
+        "parameters": [
+            {"name": "target", "placeholder": "DOMAIN/user:password@10.10.10.1", "required": True, "description": "Auth string: DOMAIN/user:pass@host (or use -hashes :<NT> for pass-the-hash)"},
+        ],
+        "agent_mode": "exploit",
+        "scope_types": ["ip"],
+        "workflow_tags": ["internal"],
+        "is_builtin": True,
+    },
+    {
+        "name": "impacket-Get-GPPPassword",
+        "description": "Find plaintext credentials stored in Group Policy Preferences (GPP) XML files in SYSVOL — a very common AD misconfiguration. Works via null session or with credentials.",
+        "category": "enum",
+        "binary": "impacket-Get-GPPPassword",
+        "default_flags": "",
+        "parameters": [
+            {"name": "target", "placeholder": "DOMAIN/user:password@10.10.10.1", "required": True, "description": "Auth string: DOMAIN/user:pass@DC (null session: DOMAIN/guest:@DC)"},
+        ],
+        "agent_mode": "active",
+        "scope_types": ["ip"],
+        "workflow_tags": ["internal"],
+        "is_builtin": True,
+    },
+    {
+        "name": "impacket-GetLAPSPassword",
+        "description": "Retrieve LAPS-managed local administrator passwords from Active Directory. Requires read permission on the ms-Mcs-AdmPwd attribute for the target computer object.",
+        "category": "enum",
+        "binary": "impacket-GetLAPSPassword",
+        "default_flags": "",
+        "parameters": [
+            {"name": "target", "placeholder": "DOMAIN/user:password@10.10.10.1", "required": True, "description": "Auth string: DOMAIN/user:pass@DC"},
+        ],
+        "agent_mode": "active",
+        "scope_types": ["ip"],
+        "workflow_tags": ["internal"],
+        "is_builtin": True,
+    },
+    {
         "name": "certipy",
         "description": "ADCS attack framework — enumerate certificate templates for ESC1-8 vulnerabilities, request certificates exploiting misconfigured templates, and authenticate with the resulting cert to get a TGT or NT hash.",
         "category": "enum",
@@ -613,7 +669,7 @@ DEFAULT_TOOLS = [
         ],
         "agent_mode": "active",
         "scope_types": [],
-        "workflow_tags": ["internal"],
+        "workflow_tags": ["internal", "external", "web"],
         "is_builtin": True,
     },
     {
@@ -661,6 +717,20 @@ DEFAULT_TOOLS = [
         ],
         "agent_mode": "active",
         "workflow_tags": ["web", "external"],
+        "is_builtin": True,
+    },
+    {
+        "name": "Nuclei - Network Scan",
+        "description": "Network protocol CVE templates — scans Windows hosts for known vulnerabilities: MS17-010 (EternalBlue), BlueKeep, PrintNightmare, SMB/RDP/MSSQL CVEs.",
+        "category": "vuln",
+        "binary": "nuclei-network",
+        "default_flags": "-severity medium,high,critical",
+        "parameters": [
+            {"name": "target", "flag": "-u", "placeholder": "10.10.10.1", "required": True, "description": "Target IP or hostname"},
+        ],
+        "agent_mode": "active",
+        "scope_types": ["ip"],
+        "workflow_tags": ["internal", "external"],
         "is_builtin": True,
     },
     {
@@ -819,7 +889,7 @@ DEFAULT_TOOLS = [
         ],
         "agent_mode": "active",
         "scope_types": [],
-        "workflow_tags": ["internal"],
+        "workflow_tags": ["internal", "external", "web"],
         "is_builtin": True,
     },
     {
