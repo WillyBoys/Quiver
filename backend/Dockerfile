@@ -15,8 +15,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     nmap sslscan \
     # SMB / Active Directory / SNMP
     smbclient samba-common-bin snmp enum4linux-ng \
+    netexec smbmap ldap-utils \
+    # Remote access / exploitation
+    evil-winrm responder \
     # Password attacks
-    hydra john \
+    hydra john hashcat \
     # Recon & exploit research
     dnsrecon exploitdb \
     # Impacket (apt subset kept because netexec/smbmap/certipy-ad declare it as a dep)
@@ -114,12 +117,17 @@ RUN pipx install certipy-ad
 # ldapdomaindump — structured AD object dump (users, groups, OUs, GPOs, computers)
 RUN pipx install ldapdomaindump
 
+# bloodhound-python — BloodHound AD data collector; dumps attack paths as JSON/ZIP for BloodHound CE
+# PyPI package is "bloodhound"; it installs the bloodhound-python binary.
+RUN pipx install bloodhound
+
 # Full impacket suite (40+ scripts). The apt python3-impacket only ships ~5.
 # impacket's pip package names scripts as GetNPUsers.py etc. rather than the
 # canonical impacket-GetNPUsers form — create symlinks so the agent finds them.
 RUN pipx install impacket && \
     for f in GetNPUsers GetUserSPNs psexec smbexec wmiexec lookupsid \
-              findDelegation ntlmrelayx secretsdump Get-GPPPassword GetLAPSPassword; do \
+              findDelegation ntlmrelayx secretsdump Get-GPPPassword GetLAPSPassword \
+              getST addcomputer; do \
       src="${PIPX_HOME}/venvs/impacket/bin/${f}.py"; \
       [ -f "$src" ] && ln -sf "$src" "${PIPX_BIN_DIR}/impacket-${f}" || true; \
     done
