@@ -16,32 +16,45 @@ MAX_RUNS = 10
 
 METHODOLOGY = {
     "external": """\
-Follow these phases IN ORDER. Use HISTORY to determine current phase, then act accordingly.
+Follow these phases IN ORDER. Use HISTORY and ARTIFACTS to determine your current phase.
+ALWAYS save discovered hosts, subdomains, credentials, and technology notes to ARTIFACTS — they persist across iterations and are your memory for chaining attacks.
 
 Phase 1 — Passive Recon & OSINT
-  Enumerate subdomains (subfinder, dnsx, amass), DNS records, certificate transparency logs.
+  Enumerate subdomains (bbot, dnsrecon), DNS records, and certificate transparency logs.
   Identify ASN/CIDR ranges, technologies, and any exposed credentials or sensitive info.
+  Save every confirmed live subdomain and IP as a host artifact.
+  Save domain, technology stack, and ASN context as note artifacts.
+  Save any leaked credentials or API keys to ARTIFACTS immediately — credential chaining starts here.
 
 Phase 2 — Active Service Discovery
   Full TCP port scan + UDP on critical ports (53, 161, 500, 1433, 3306, 5432).
   Banner-grab all open services; identify OS, software versions, running daemons.
+  Save every live host with its open ports and services as a host artifact (e.g. "10.0.0.1 — 22/ssh 80/http 443/https").
+  Save notable service versions and technology stack identifiers as note artifacts — they drive Phase 4 vuln selection.
 
-Phase 3 — Web Application Discovery
-  Enumerate vhosts, directories (gobuster/ffuf), detect web tech stack (whatweb).
-  Find login panels, admin interfaces, API endpoints, and exposed files (robots.txt, .env, .git).
+Phase 3 — Web Application Discovery (requires at least one host in ARTIFACTS)
+  Enumerate vhosts, directories (gobuster/ffuf/feroxbuster), detect web tech stack (whatweb/wafw00f).
+  Find login panels, admin interfaces, API endpoints, and exposed files (robots.txt, .env, .git, backup files).
+  Save any newly discovered hosts or subdomains found during web enumeration to ARTIFACTS.
+  Save credentials, API keys, or secrets found in exposed files to ARTIFACTS immediately.
 
-Phase 4 — Vulnerability Identification
-  Run nuclei templates against all discovered hosts and web surfaces.
-  Cross-reference identified versions against known CVEs. Test default credentials on services.
+Phase 4 — Vulnerability Identification (requires hosts in ARTIFACTS)
+  Run nuclei templates against all hosts in ARTIFACTS.
+  Cross-reference service versions from ARTIFACTS notes against known CVEs (sslscan, exploitdb).
+  Test default credentials on all identified services — save any successful login to ARTIFACTS as a cred artifact.
+  Check for secrets in source repositories and cloud storage (trufflehog, cloud_enum).
 
-Phase 5 — Exploitation & Validation
-  Exploit confirmed vulns with minimal-impact PoC (do not cause outages or data loss).
-  Attempt credential attacks: password spray, credential stuffing, brute-force with lockout awareness.
-  Probe for misconfigurations: open redirects, SSRF, XXE, directory traversal, file upload bypass.
+Phase 5 — Exploitation & Validation (requires findings logged or credentials in ARTIFACTS)
+  Exploit confirmed vulnerabilities with minimal-impact PoC (do not cause outages or data loss).
+  Use credentials from ARTIFACTS for authenticated testing, credential stuffing, and password spray — check lockout policy first.
+  Probe for misconfigurations: open redirects, SSRF, XXE, directory traversal, file upload bypass, CORS misconfiguration.
+  Save every credential, hash, API key, or session token discovered to ARTIFACTS the moment it is found.
 
-Phase 6 — Post-Exploitation
-  If foothold established: enumerate host, find credentials/sensitive files, document access level.
-  Check for lateral movement paths. Do not exfiltrate real data.""",
+Phase 6 — Post-Exploitation (requires credentials or foothold in ARTIFACTS)
+  Enumerate the compromised host; hunt for credentials and sensitive files.
+  Use credentials from ARTIFACTS to attempt access to other in-scope hosts (lateral movement).
+  Check for internal services reachable from the foothold that were not visible externally.
+  Save any newly discovered credentials to ARTIFACTS. Do not exfiltrate real data.""",
 
     "internal": """\
 Follow these phases IN ORDER. Use HISTORY and ARTIFACTS to determine your current phase.
