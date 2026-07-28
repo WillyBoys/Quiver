@@ -19,7 +19,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     hydra john \
     # Recon & exploit research
     dnsrecon exploitdb \
-    # Impacket suite (impacket-secretsdump, impacket-smbexec, etc.)
+    # Impacket (apt subset kept because netexec/smbmap/certipy-ad declare it as a dep)
     python3-impacket \
     && rm -rf /var/lib/apt/lists/*
 
@@ -59,6 +59,14 @@ RUN printf '#!/bin/sh\nexec curl -si --max-time 15 "$@"\n'                      
     chmod +x /usr/local/bin/curl-probe /usr/local/bin/curl-headers /usr/local/bin/curl-cors \
              /usr/local/bin/curl-json /usr/local/bin/curl-redirect /usr/local/bin/nc-banner
 
+# ── pipx ──────────────────────────────────────────────────────────────────────
+# pipx installs each Python CLI tool in its own isolated virtualenv and symlinks
+# the binary into PIPX_BIN_DIR. Tools never share Python packages with each other
+# or with apt, so adding a new tool can never break an existing one.
+ENV PIPX_HOME=/opt/pipx
+ENV PIPX_BIN_DIR=/usr/local/bin
+RUN pip install --no-cache-dir --break-system-packages pipx
+
 # User-added apt packages — edit user-tools.txt and run: docker-compose up --build backend
 COPY user-tools.txt /tmp/user-tools.txt
 RUN if grep -qvE '^\s*#|^\s*$' /tmp/user-tools.txt; then \
@@ -67,22 +75,36 @@ RUN if grep -qvE '^\s*#|^\s*$' /tmp/user-tools.txt; then \
       rm -rf /var/lib/apt/lists/*; \
     fi
 
-# User-added pip packages — edit user-pip.txt and run: docker-compose up --build backend
+# User-added Python tools — edit user-pip.txt and run: docker-compose up --build backend
+# Each package is installed via pipx into its own isolated venv. Use pip package names
+# or git+ URLs. No dependency conflicts are possible between tools.
 COPY user-pip.txt /tmp/user-pip.txt
 RUN if grep -qvE '^\s*#|^\s*$' /tmp/user-pip.txt; then \
       grep -vE '^\s*#|^\s*$' /tmp/user-pip.txt | sed 's/\s*#.*//' | \
-      xargs pip install --no-cache-dir --break-system-packages; \
+      while IFS= read -r pkg; do \
+        pipx install "$pkg" || echo "WARNING: pipx install $pkg failed, continuing"; \
+      done; \
     fi
 
-# pip tools not packaged in Kali
-RUN pip install --no-cache-dir --break-system-packages \
-    bbot
+# Built-in Python tools not in Kali apt ──────────────────────────────────────
 
+# bbot — recursive attack surface mapping
+RUN pipx install bbot
+
+# Full impacket suite (40+ scripts). The apt python3-impacket only ships ~5.
+# impacket's pip package names scripts as GetNPUsers.py etc. rather than the
+# canonical impacket-GetNPUsers form — create symlinks so the agent finds them.
+RUN pipx install impacket && \
+    for f in GetNPUsers GetUserSPNs psexec smbexec wmiexec lookupsid \
+              findDelegation ntlmrelayx secretsdump Get-GPPPassword GetLAPSPassword; do \
+      src="${PIPX_HOME}/venvs/impacket/bin/${f}.py"; \
+      [ -f "$src" ] && ln -sf "$src" "${PIPX_BIN_DIR}/impacket-${f}" || true; \
+    done
+
+# ── App venv ──────────────────────────────────────────────────────────────────
+# The FastAPI backend runs in its own venv, fully isolated from all pentest tools.
 WORKDIR /app
 
-# Use a virtualenv at /opt/venv — outside /app so the host volume mount doesn't wipe it.
-# Kali's system Python has pentest tool deps (uvicorn, fastapi, etc.) installed as apt
-# packages; isolating here prevents version conflicts.
 COPY requirements.txt /tmp/requirements.txt
 RUN python3 -m venv /opt/venv && \
     /opt/venv/bin/pip install --no-cache-dir -r /tmp/requirements.txt

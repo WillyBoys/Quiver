@@ -13,4 +13,10 @@
 # For tools not in apt (Go binaries, GitHub releases, pip packages),
 # add a RUN step to the Dockerfile instead.
 
-masscan  # fast large-scale port scanner — added as a Pattern A example
+masscan      # fast large-scale port scanner — added as a Pattern A example
+netexec      # netexec (binary: nxc) — AD Swiss army knife: SMB/LDAP/WinRM/RDP/MSSQL sweeps
+smbmap       # SMB share enumeration with per-share READ/WRITE access checks
+evil-winrm   # WinRM shell for lateral movement with password or NTLM hash
+responder    # LLMNR/NBT-NS/MDNS poisoner — captures NTLMv2 hashes (manual use only)
+hashcat      # hash cracking (CPU-only without GPU passthrough; complements john for rule-based attacks)
+ldap-utils   # provides ldapsearch for raw LDAP queries against Active Directory
