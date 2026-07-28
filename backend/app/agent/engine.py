@@ -1,5 +1,6 @@
 import json
 import re
+import shlex
 import uuid as _uuid_mod
 import asyncio
 import logging

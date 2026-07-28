@@ -66,25 +66,54 @@ async def _warmup_ai() -> None:
 
 
 async def _reset_stale_campaigns():
-    """On startup, any campaign left in 'active' state was interrupted mid-run.
-    Reset to 'paused' so operators can restart deliberately."""
+    """On startup, reset interrupted campaigns so operators can restart deliberately.
+
+    - "active" → "paused": loop was mid-run when the process died
+    - "awaiting_approval" → "paused": the background resume task is gone; the
+      approval (if still pending) will re-surface immediately when the user
+      re-triggers the campaign, and will go through the fixed approval path
+    """
     from app.models.campaign import Campaign
     from app.db.database import AsyncSessionLocal
-    from sqlalchemy import select
+    from sqlalchemy import select, or_
     async with AsyncSessionLocal() as db:
-        result = await db.execute(select(Campaign).where(Campaign.status == "active"))
+        result = await db.execute(
+            select(Campaign).where(
+                or_(Campaign.status == "active", Campaign.status == "awaiting_approval")
+            )
+        )
         stale = result.scalars().all()
         for c in stale:
             c.status = "paused"
         if stale:
             await db.commit()
-            logger.warning("Startup: reset %d active campaign(s) to paused", len(stale))
+            logger.warning("Startup: reset %d interrupted campaign(s) to paused", len(stale))
+
+
+async def _reset_stale_runs():
+    """On startup, mark any run still in 'running' status as 'error'.
+    These are runs whose subprocess died when the backend process did."""
+    from app.models.run import Run
+    from app.db.database import AsyncSessionLocal
+    from sqlalchemy import select
+    from datetime import datetime, timezone
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(Run).where(Run.status == "running"))
+        stale = result.scalars().all()
+        for r in stale:
+            r.status = "error"
+            r.output = (r.output or "") + "\n[run interrupted by backend restart]"
+            r.finished_at = datetime.now(timezone.utc)
+        if stale:
+            await db.commit()
+            logger.warning("Startup: marked %d interrupted run(s) as error", len(stale))
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Quiver API starting up")
     await init_db()
+    await _reset_stale_runs()
     await _reset_stale_campaigns()
     await seed_default_tools()
     asyncio.create_task(_warmup_ai())

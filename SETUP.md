@@ -163,6 +163,44 @@ The **Remote** tab in the sidebar has an interactive command generator — enter
 
 ---
 
+## Windows / WSL2
+
+Quiver is developed on macOS/Linux but works on Windows via **WSL2 + Docker Desktop**. A few things to know before you start:
+
+### Data directory must be on the WSL2 native filesystem
+
+**This is the most important Windows-specific requirement.** SQLite relies on filesystem-level file locking (`fcntl`) for write safety. The Windows filesystem (accessible under `/mnt/c/`, `/mnt/d/`, etc.) does not implement `fcntl` correctly — SQLite commits can silently fail, causing campaigns to get stuck and database corruption over time.
+
+Keep the entire `Quiver/` project directory on the WSL2 native filesystem (e.g. `~/projects/Quiver`, not `/mnt/c/Users/yourname/Quiver`). Access it from Windows Explorer via the `\\wsl$\Ubuntu\home\yourname\projects\Quiver` path if needed.
+
+```bash
+# Good — native WSL2 filesystem
+~/projects/Quiver/pentest-platform
+
+# Bad — Windows-mounted filesystem (SQLite will misbehave)
+/mnt/c/Users/yourname/Quiver/pentest-platform
+```
+
+### Docker Desktop memory
+
+Ollama needs enough RAM to load the local AI model. Set Docker Desktop to at least **8 GB memory** in Settings → Resources → Memory. The default (2 GB) will cause the model to fail silently.
+
+### .env line endings
+
+If you edit `.env` in a Windows text editor (Notepad, VS Code with Windows line endings), the file may get CRLF (`\r\n`) line endings. Docker reads `.env` inside a Linux container — CRLF in `.env` causes environment variables to be set with a trailing `\r`, which breaks API key validation and Anthropic client initialization.
+
+Open `.env` in an editor that saves with LF line endings (VS Code: click the `CRLF`/`LF` indicator in the status bar → select LF), or convert in WSL:
+
+```bash
+sed -i 's/\r//' .env
+```
+
+### tunnel.sh
+
+`tunnel.sh` uses bash and SSH features that don't work in Windows CMD or PowerShell. Run it from your **WSL2 terminal**, not a Windows terminal.
+
+---
+
 ## Data Persistence
 
 Session data, tool runs, findings, campaigns, wordlists, and approval history are stored in a SQLite database at `./data/pentest.db` on your host. The database survives container restarts and rebuilds.

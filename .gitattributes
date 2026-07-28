@@ -1,0 +1,29 @@
+# Force LF line endings for all text files checked out on Windows.
+# Shell scripts and Dockerfiles with CRLF line endings break when
+# executed inside Linux containers — bash interprets the trailing \r
+# as part of the command, causing "command not found" errors.
+
+* text=auto eol=lf
+
+# Explicitly force LF for file types that must never get CRLF
+*.sh        text eol=lf
+*.py        text eol=lf
+Dockerfile* text eol=lf
+*.env*      text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.json      text eol=lf
+*.md        text eol=lf
+*.txt       text eol=lf
+*.sql       text eol=lf
+
+# Binary files — never line-ending convert
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.ico       binary
+*.db        binary
+*.sqlite    binary
+*.gz        binary
+*.zip       binary
