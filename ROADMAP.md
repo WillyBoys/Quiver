@@ -32,14 +32,18 @@ Network and infrastructure attack surface enumeration from the perspective of an
 Post-access enumeration and lateral movement from the perspective of an attacker already inside the network.
 
 **What it covers:**
-- SMB enumeration and share discovery (enum4linux-ng, smbclient, netexec)
-- Active Directory enumeration (kerbrute, impacket-GetNPUsers, netexec LDAP)
-- Credential attacks (hydra, john)
+- Network discovery and host sweep (nmap, nmap-sweep, nuclei-network)
+- SMB/share enumeration (enum4linux-ng, smbclient, smbmap, netexec SMB/LDAP/WinRM/RDP/MSSQL)
+- Active Directory enumeration (kerbrute, ldapdomaindump, ldapsearch, rpcclient, bloodhound-python)
+- Credential access: AS-REP roasting, Kerberoasting, secretsdump, GPP/LAPS retrieval (full impacket suite — 13 tools)
+- ADCS exploitation (certipy — ESC1-8 enumeration and attack chain)
+- Kerberos delegation attacks (impacket-findDelegation, getST, addcomputer for RBCD)
+- Lateral movement: evil-winrm, psexec, smbexec, wmiexec, pass-the-hash
+- Offline cracking: john, hashcat
+- NTLM relay (Responder + ntlmrelayx — manual-only, agent-aware)
 - SNMP enumeration (snmpwalk)
-- Secret dumping with valid credentials (impacket-secretsdump)
-- Exploit research (searchsploit)
 
-**Status:** Tools present, campaign agent prompting needs to be tuned for internal/post-compromise context (AD attack chains, lateral movement reasoning, credential reuse).
+**Status:** Built — pending field validation. The tool coverage, 6-phase methodology, ARTIFACTS-based phase gating, and credential chaining are all implemented, but the agent has not yet been tested against a real AD environment. Expect rough edges and edge cases to surface during first engagements.
 
 ---
 
@@ -68,7 +72,7 @@ This is what differentiates Quiver from running Shannon and a network scanner in
 - **Session management** — one session per engagement; tracks target, scope, notes, status
 - **Findings tracker** — log findings with severity; attach tool runs as evidence; agent deduplicates and updates existing findings; attack chain step numbering
 - **Engagement checklists** — phase-based checklist per engagement type
-- **Tool registry** — 33 built-in tools; add custom tools via UI or config; per-tool agent mode (Auto/Approve/Never)
+- **Tool registry** — 65 built-in tools; add custom tools via UI or config; per-tool agent mode (Auto/Approve/Never)
 - **Activity log** — full audit trail of every command run, timestamped; searchable, exportable
 - **Scheduled campaigns** — cron-based recurring assessments and one-shot datetime triggers
 - **Shannon integration** — Shannon runs as Docker services in the same compose stack; Quiver UI exposes scan management, progress tracking, and deliverable viewing
@@ -79,7 +83,6 @@ This is what differentiates Quiver from running Shannon and a network scanner in
 - **Resizable workspace panels** — all three columns and the right-panel sections (Notes, Run History, Findings) are drag-resizable; main nav sidebar is collapsible to icon-only
 
 ### In Progress / Planned
-- **Internal campaign tuning** — prompt and context improvements for AD/lateral movement reasoning; tools are present but agent prompting needs refinement for post-compromise context (AD attack chains, lateral movement reasoning, credential reuse)
 - **Shannon finding import** — structured import of Shannon deliverables into Quiver session findings layer
 - **Client/project management** — track multiple clients and engagements, status at a glance
 - **Remediation retesting** — store original PoC; rerun to verify fix after client remediation

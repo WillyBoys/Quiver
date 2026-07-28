@@ -22,17 +22,17 @@ Quiver's agent handles network and infrastructure testing. For web application d
  ┌─────────────────────┐   ┌──────────────────────┐   ┌──────────────────────┐
  │      EXTERNAL       │   │       INTERNAL       │   │       WEB APP        │
  │    Quiver Agent     │   │    Quiver Agent      │   │ Shannon (integrated) │
- │─────────────────────│   │  (prompt tuning WIP) │   │──────────────────────│
- │ nmap · nuclei       │   │──────────────────────│   │ 19 parallel vuln     │
- │ gobuster · ffuf     │   │ AD enumeration       │   │ agents (SQLi, XSS,   │
- │ nikto · whatweb     │   │ SMB · LDAP · Kerb.   │   │ SSRF, auth, authz,   │
- │ cloud_enum          │   │ Credential attacks   │   │ injection, +13 more) │
- │ trufflehog          │   │ Lateral movement     │   │                      │
- │ sqlmap · wafw00f    │   │ impacket suite       │   │ Playwright browser   │
- │ sslscan · bbot      │   │ netexec · hydra      │   │ Authenticated flows  │
- │                     │   │ john · snmpwalk      │   │ TOTP / 2FA support   │
- │ External attack     │   │                      │   │ Source code          │
- │ surface             │   │ Post-access enum     │   │ analysis (optional)  │
+ │─────────────────────│   │──────────────────────│   │──────────────────────│
+ │ nmap · nuclei       │   │ nmap · nxc (5 proto) │   │ 19 parallel vuln     │
+ │ gobuster · ffuf     │   │ enum4linux · smbmap  │   │ agents (SQLi, XSS,   │
+ │ nikto · whatweb     │   │ bloodhound · kerbrute│   │ SSRF, auth, authz,   │
+ │ cloud_enum          │   │ impacket suite (13+) │   │ injection, +13 more) │
+ │ trufflehog          │   │ certipy · ldapdump   │   │                      │
+ │ sqlmap · wafw00f    │   │ evil-winrm · john    │   │ Playwright browser   │
+ │ sslscan · bbot      │   │ hashcat · hydra      │   │ Authenticated flows  │
+ │                     │   │ responder · rpcclient│   │ TOTP / 2FA support   │
+ │ External attack     │   │ Full AD kill chain   │   │ Source code          │
+ │ surface             │   │ beta: field testing  │   │ analysis (optional)  │
  └─────────────────────┘   └──────────────────────┘   └──────────────────────┘
 ```
 
@@ -51,7 +51,7 @@ docker-compose up --build
 
 Open [http://localhost:3000](http://localhost:3000).
 
-All pentest tools and dependencies are bundled in the Docker image. 33 tools are pre-configured and ready on first boot.
+All pentest tools and dependencies are bundled in the Docker image. 65 tools are pre-configured and ready on first boot.
 
 > **First-run note:** On startup, Quiver pulls the `qwen2.5:7b` local AI model (~4.7 GB). This happens once — the model is cached in a Docker volume. Watch progress with `docker logs -f quiver_ai_init`.
 
