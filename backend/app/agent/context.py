@@ -44,37 +44,47 @@ Phase 6 — Post-Exploitation
   Check for lateral movement paths. Do not exfiltrate real data.""",
 
     "internal": """\
-Follow these phases IN ORDER. Use HISTORY to determine current phase, then act accordingly.
+Follow these phases IN ORDER. Use HISTORY and ARTIFACTS to determine your current phase.
+ALWAYS save discovered usernames, hashes, creds, hosts, and SPNs to ARTIFACTS — they persist across iterations and are your memory for chaining attacks.
 
 Phase 1 — Network Discovery
-  Host discovery across all subnets (nmap ping sweep). Full port scan of live hosts.
-  Identify domain controllers, file servers, databases, and critical infrastructure nodes.
+  Sweep all subnets in SCOPE to identify live hosts. Full TCP port scan of discovered hosts.
+  Identify domain controllers by open ports: 88 (Kerberos), 389/636 (LDAP), 445 (SMB).
+  Note Windows services on all hosts: 5985/5986 (WinRM), 3389 (RDP), 1433 (MSSQL) — each is a potential lateral movement path.
+  Save every live host and domain/DC info to ARTIFACTS.
 
-Phase 2 — Service & AD Enumeration
-  SMB: enumerate shares, null sessions, file permissions, sensitive file names.
-  LDAP: dump users, groups, OUs, GPOs, SPNs, trust relationships. Identify privileged accounts.
-  RPC/NetBIOS enumeration. Test for unauthenticated or guest access on all services.
+Phase 2 — AD & Service Enumeration
+  Start with null/anonymous sessions — many environments leak user lists, password policy, and share listings without credentials.
+  Hunt SMB shares on every live host — scripts, configs, and Group Policy Preferences (GPP) files in SYSVOL frequently contain plaintext credentials.
+  Enumerate domain users via Kerberos (no lockout risk) or SID brute-force if no wordlist is available.
+  With valid credentials: dump LDAP objects, check LAPS passwords, retrieve SYSVOL contents.
+  Save every discovered username and SPN to ARTIFACTS — they unlock Phase 3.
 
-Phase 3 — Credential Access
-  Kerberoasting: request TGS tickets for all SPN accounts; crack offline.
-  AS-REP Roasting: find accounts with preauthentication disabled; crack hashes.
-  Password spraying: test common/seasonal passwords against domain accounts (lockout-safe).
-  Check shares/scripts/GPP for cleartext credentials. Responder/LLMNR poisoning if applicable.
+Phase 3 — Credential Access (requires at least one user in ARTIFACTS)
+  AS-REP roasting: request hashes for accounts with pre-authentication disabled — no credentials needed.
+  Kerberoasting: request TGS tickets for SPN accounts — needs any valid domain credential.
+  Write hash output files to SESSION OUTPUT DIR so john can crack them; save cracked credentials to ARTIFACTS.
+  Secretsdump: if any credentials exist in ARTIFACTS, this is often the highest-yield move — dumps SAM, LSA secrets, and with the right rights: all NTDS hashes via DCSync.
+  GPP/SYSVOL: check NETLOGON and SYSVOL shares for XML, batch, and ini files containing embedded credentials.
+  Password spraying: last resort — check lockout policy from ARTIFACTS first and stay well under the threshold.
+  SMB signing: if signing is disabled across hosts, flag for NTLM relay. Responder and ntlmrelayx require manual execution from a host on the target subnet.
 
-Phase 4 — Lateral Movement
-  Pass-the-Hash / Pass-the-Ticket with obtained credentials.
-  WMI, SMBExec, PSExec remote execution. RDP/WinRM if creds allow.
-  Exploit trust relationships and misconfigured delegations (unconstrained, resource-based).
+Phase 4 — Lateral Movement (requires credentials or hashes in ARTIFACTS)
+  Validate credentials across all discovered hosts before attempting access.
+  WinRM, SMB exec, WMI, RDP, and MSSQL are all potential entry points — what works depends on which ports were open in Phase 1.
+  Pass-the-hash works wherever NTLM authentication is accepted.
+  Save any newly discovered credentials, hashes, or privileged access to ARTIFACTS.
 
 Phase 5 — Privilege Escalation
-  Local privesc: unquoted service paths, weak ACLs, token impersonation, always-install-elevated.
-  AD privesc: DCSync rights, WriteDACL/GenericAll on privileged objects, shadow credentials.
-  BloodHound shortest-path analysis. Kerberoast higher-privileged SPN accounts.
+  BloodHound maps the full AD attack graph — look for paths to Domain Admin via ACL abuse, group membership, or object control (WriteDACL, GenericAll, GenericWrite).
+  ADCS: enumerate certificate templates for misconfigurations (ESC1-8) — a vulnerable template can yield Domain Admin equivalent without touching credentials.
+  Delegation: unconstrained delegation on any host is a significant escalation path; constrained delegation may allow impersonation to specific services.
+  If any account has DS-Replication rights, DCSync to dump all domain hashes directly.
 
-Phase 6 — Domain Dominance & Data Exfiltration
-  Domain Admin acquisition and Golden/Silver ticket creation.
-  Locate sensitive data: credential stores, PII, source code, financial records.
-  Document complete attack path from initial access to domain dominance.""",
+Phase 6 — Domain Dominance
+  Achieve Domain Admin. Dump NTDS.dit via DCSync to capture all domain hashes.
+  Document the full attack chain: initial access → enumeration → credential → lateral → DA.
+  Save DA credentials to ARTIFACTS.""",
 
     "web": """\
 Follow OWASP Top 10 phases IN ORDER. Use HISTORY to determine current phase, then act accordingly.
@@ -182,6 +192,7 @@ async def build_agent_prompt(campaign: Campaign, db: AsyncSession) -> str:
     primary = _primary_target(scope, kind)
 
     scope_str = "\n".join(f"  - {s}" for s in scope)
+    data_dir = f"/data/{sess.id}" if sess else "/data/session"
 
     # Filter tools by scope_type and agent_mode.
     # A tool matches if its scope_types list contains `kind`, OR if scope_types is
@@ -194,6 +205,9 @@ async def build_agent_prompt(campaign: Campaign, db: AsyncSession) -> str:
             continue
         scopes = t.scope_types or []
         if scopes and kind not in scopes:
+            continue
+        tags = t.workflow_tags or []
+        if tags and engagement_type not in tags:
             continue
         if t.binary not in seen_binaries:
             seen_binaries.add(t.binary)
@@ -242,6 +256,64 @@ async def build_agent_prompt(campaign: Campaign, db: AsyncSession) -> str:
     actions_str = "\n".join(action_lines) or "  (none yet)"
     already_run_str = "\n".join(already_run_commands) if already_run_commands else "  (none)"
 
+    # Build initial context section (engineer-provided before engagement started)
+    ic = (sess.initial_context if sess else None) or {}
+    ic_lines = []
+    if ic.get("domain"):
+        ic_lines.append(f"  Domain: {ic['domain']}")
+    if ic.get("dc_ip"):
+        ic_lines.append(f"  Domain Controller: {ic['dc_ip']}")
+    for cred in ic.get("credentials") or []:
+        user = cred.get("user", "")
+        secret = cred.get("secret", "")
+        ctype = cred.get("type", "password")
+        if user and secret:
+            label = "Hash" if ctype == "hash" else "Credential"
+            ic_lines.append(f"  {label}: {user} → {secret}")
+    if ic.get("notes"):
+        ic_lines.append(f"  Notes: {ic['notes']}")
+    initial_context_str = "\n".join(ic_lines) if ic_lines else None
+
+    # Build artifact summary (discovered users, creds, hosts — persisted across iterations)
+    # Also fold in initial_context credentials so phase gates work immediately when context is provided
+    raw_artifacts = sess.artifacts if sess else {}
+    artifacts_lines = []
+    if raw_artifacts.get("hosts"):
+        artifacts_lines.append("  Hosts: " + ", ".join(raw_artifacts["hosts"]))
+    if raw_artifacts.get("users"):
+        artifacts_lines.append("  Users: " + ", ".join(raw_artifacts["users"]))
+    if raw_artifacts.get("spns"):
+        artifacts_lines.append("  SPNs: " + ", ".join(raw_artifacts["spns"]))
+    for user, h in (raw_artifacts.get("hashes") or {}).items():
+        artifacts_lines.append(f"  Hash  {user}: {h}")
+    for user, pw in (raw_artifacts.get("creds") or {}).items():
+        artifacts_lines.append(f"  Cred  {user}: {pw}")
+    for note in (raw_artifacts.get("notes") or []):
+        artifacts_lines.append(f"  Note: {note}")
+    # Fold in initial_context credentials so they appear in ARTIFACTS and satisfy phase gates
+    if ic.get("domain"):
+        dom_note = f"  Note: Domain: {ic['domain']}"
+        if dom_note not in artifacts_lines:
+            artifacts_lines.append(dom_note)
+    if ic.get("dc_ip"):
+        dc_host = f"  Hosts: {ic['dc_ip']} (DC — from initial context)"
+        if not any(ic["dc_ip"] in l for l in artifacts_lines):
+            artifacts_lines.append(dc_host)
+    for cred in ic.get("credentials") or []:
+        user = cred.get("user", "")
+        secret = cred.get("secret", "")
+        ctype = cred.get("type", "password")
+        if user and secret:
+            if ctype == "hash":
+                entry = f"  Hash  {user}: {secret} (from initial context)"
+                if not any(user in l and "Hash" in l for l in artifacts_lines):
+                    artifacts_lines.append(entry)
+            else:
+                entry = f"  Cred  {user}: {secret} (from initial context)"
+                if not any(user in l and "Cred" in l for l in artifacts_lines):
+                    artifacts_lines.append(entry)
+    artifacts_str = "\n".join(artifacts_lines) or "  (none yet)"
+
     # Build existing findings list so agent can update instead of duplicating
     existing_findings = sess.findings if sess else []
     if existing_findings:
@@ -262,12 +334,17 @@ async def build_agent_prompt(campaign: Campaign, db: AsyncSession) -> str:
     methodology_str = METHODOLOGY.get(engagement_type, METHODOLOGY["external"])
     eng_label = engagement_type.upper()
 
-    return f"""You are a penetration tester AI. Choose the single best NEXT action against the target.
+    context_section = (
+        f"\nENGAGEMENT CONTEXT (engineer-provided — treat as verified starting information):\n{initial_context_str}\n"
+        if initial_context_str else ""
+    )
 
-PRIMARY TARGET: {primary}
-SCOPE (only test these):
+    return f"""You are a penetration tester AI. Choose the single best NEXT action against the target scope.
+
+SCOPE (test all entries — work through each systematically):
 {scope_str}
-
+SESSION OUTPUT DIR (write all tool output files here — use this path for -outputfile flags and any file redirects): {data_dir}/
+{context_section}
 ENGAGEMENT METHODOLOGY ({eng_label} — follow phases in order):
 {methodology_str}
 
@@ -277,6 +354,9 @@ TOOLS AVAILABLE (use binary name as tool_name):
 FINDINGS ALREADY LOGGED (id | severity | title):
 {findings_str}
 
+ARTIFACTS (discovered credentials, hosts, and users — use these in subsequent commands):
+{artifacts_str}
+
 HISTORY (oldest first — read this to understand what was found and which phase you are in):
 {actions_str}
 
@@ -284,28 +364,32 @@ COMMANDS ALREADY RUN — DO NOT REPEAT:
 {already_run_str}
 
 Reply with a SINGLE LINE of compact JSON — no markdown, no newlines inside the JSON:
-{{"thought":"2-3 sentences: what the previous results show and why you are choosing this tool","reasoning":"one sentence summary","tool_name":"binary","target":"{primary}","parameters":{{}},"extra_flags":""}}
+{{"thought":"2-3 sentences: what the previous results show and why you are choosing this tool","reasoning":"one sentence summary","tool_name":"binary","target":"<scope_entry>","parameters":{{}},"extra_flags":""}}
 
 To log a NEW finding confirmed by this step's output:
-{{"thought":"...","reasoning":"...","tool_name":"binary","target":"{primary}","parameters":{{}},"extra_flags":"","finding":{{"title":"Short descriptive title","severity":"critical|high|medium|low|info","notes":"What was found, where, why it matters, any evidence from output"}}}}
+{{"thought":"...","reasoning":"...","tool_name":"binary","target":"<scope_entry>","parameters":{{}},"extra_flags":"","finding":{{"title":"Short descriptive title","severity":"critical|high|medium|low|info","notes":"What was found, where, why it matters, any evidence from output"}}}}
 
 To ADD DETAIL to an existing finding (use the id from FINDINGS ALREADY LOGGED):
-{{"thought":"...","reasoning":"...","tool_name":"binary","target":"{primary}","parameters":{{}},"extra_flags":"","finding":{{"id":"existing-finding-uuid","title":"same title","severity":"critical|high|medium|low|info","notes":"Additional evidence or context to append"}}}}
+{{"thought":"...","reasoning":"...","tool_name":"binary","target":"<scope_entry>","parameters":{{}},"extra_flags":"","finding":{{"id":"existing-finding-uuid","title":"same title","severity":"critical|high|medium|low|info","notes":"Additional evidence or context to append"}}}}
 
 To show this finding was made possible by a prior one, add chains_from with the prior finding's title:
 {{"...","finding":{{"title":"RCE via deserialization","severity":"critical","notes":"...","chains_from":"SQL Injection Authentication Bypass"}}}}
+
+To store a discovered credential, user, hash, host, or SPN for use in later steps (appears in ARTIFACTS next iteration):
+{{"thought":"...","reasoning":"...","tool_name":"binary","target":"<scope_entry>","parameters":{{}},"extra_flags":"","artifact":{{"type":"cred","user":"jsmith","value":"Summer2024!"}}}}
 
 Or if all useful enumeration is complete:
 {{"reasoning":"why done","done":true}}
 
 RULES (follow all):
 - tool_name MUST be one of the binaries listed in TOOLS AVAILABLE above
-- target must be {primary!r} (or a specific discovered path/endpoint)
+- target must be one of the SCOPE entries above, or a specific discovered host/IP/endpoint found during enumeration
 - DO NOT use any command listed in COMMANDS ALREADY RUN
 - extra_flags: optional string of additional CLI flags to append; leave empty string if not needed
 - bash special rule: when tool_name is "bash", put the COMPLETE shell command in extra_flags. The bash tool requires human approval and is your escape hatch for custom probes, chained commands, or anything no other tool covers.
 - finding: ONLY include when the CURRENT step's output confirms a real vulnerability. Prefer updating an existing finding (with its id) over creating a near-duplicate.
 - chains_from: optional — only set when the current finding directly depended on a prior finding to be exploitable.
+- artifact: ONLY include when the current step's output reveals something worth storing for later (credentials, hashes, usernames, hosts, SPNs). Types: "user" (value=username), "hash" (user=username, value=full-hash-string), "cred" (user=username, value=plaintext-password), "host" (value="IP description"), "spn" (value=full-SPN-string), "note" (value=domain-level-info). For hash and cred, include a "user" key. Omit artifact if nothing new was found.
 - Reply with exactly one line of JSON, no line breaks inside"""
 
 
@@ -325,7 +409,7 @@ ERROR OUTPUT:
 TARGET: {primary}
 
 If the error reveals a simple fixable mistake (wrong flag, wrong path, missing argument, typo), return:
-{{"retry":true,"thought":"what went wrong and exactly how to fix it","tool_name":"binary","target":"{primary}","parameters":{{}},"extra_flags":"","reasoning":"one sentence"}}
+{{"retry":true,"thought":"what went wrong and exactly how to fix it","tool_name":"binary","target":"<scope_entry>","parameters":{{}},"extra_flags":"","reasoning":"one sentence"}}
 
 If the tool fundamentally cannot work against this target, or you cannot determine a fix, return:
 {{"retry":false,"reasoning":"why"}}

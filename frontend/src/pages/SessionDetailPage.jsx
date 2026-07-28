@@ -55,7 +55,8 @@ export default function SessionDetailPage() {
   const [rightWidth, setRightWidth] = useState(240);
   const [notesSectionHeight, setNotesSectionHeight] = useState(130);
   const [runSectionHeight, setRunSectionHeight] = useState(200);
-  const dragRef = useRef({ active: false, handle: null, startX: 0, startY: 0, startLeft: 0, startRight: 0, startHeight: 0 });
+  const [artifactBoxHeight, setArtifactBoxHeight] = useState(150);
+  const dragRef = useRef({ active: false, handle: null, startX: 0, startY: 0, startLeft: 0, startRight: 0, startHeight: 0, startNotesHeight: 0, startArtifactHeight: 0 });
   const [showAgentSetup, setShowAgentSetup] = useState(false);
   const [agentForm, setAgentForm] = useState({ ai_provider: "claude", risk_level: "passive", max_iterations: "50", unlimited: false });
   const [scheduleMode, setScheduleMode] = useState("now"); // "now" | "later"
@@ -67,6 +68,9 @@ export default function SessionDetailPage() {
   const [showSettings, setShowSettings] = useState(false);
   const [settingsForm, setSettingsForm] = useState(null);
   const [showAiReport, setShowAiReport] = useState(false);
+  const [showFiles, setShowFiles] = useState(false);
+  const [sessionFiles, setSessionFiles] = useState([]);
+  const [filesLoading, setFilesLoading] = useState(false);
   const [savedReports, setSavedReports] = useState([]);
   const [selectedReport, setSelectedReport] = useState(null); // full report object with content
   const [editingReportId, setEditingReportId] = useState(null);   // content area title edit
@@ -74,6 +78,9 @@ export default function SessionDetailPage() {
   const [sidebarEditId, setSidebarEditId] = useState(null);        // sidebar inline edit
   const [sidebarEditName, setSidebarEditName] = useState("");
   const [sidebarView, setSidebarView] = useState("tools");   // "tools" | "checklist"
+  const [artifacts, setArtifacts] = useState({});
+  const [showArtifacts, setShowArtifacts] = useState(() => localStorage.getItem("quiver_show_artifacts") === "true");
+  const [infoBarHidden, setInfoBarHidden] = useState(false);
   const [shellCmd, setShellCmd] = useState("");
   const [workflowFilter, setWorkflowFilter] = useState("all"); // "all" | "external" | "internal" | "web"
   const [phaseChecks, setPhaseChecks] = useState({});
@@ -85,6 +92,7 @@ export default function SessionDetailPage() {
   useEffect(() => {
     api.sessions.get(sessionId).then(async (s) => {
       setSession(s);
+      setArtifacts(s.artifacts || {});
       setNotesValue(s.notes || "");
       setPhaseChecks(s.checklist_state?.phase_checks || {});
       setCustomItems(s.checklist_state?.custom_items || []);
@@ -183,9 +191,10 @@ export default function SessionDetailPage() {
     const interval = setInterval(() => {
       api.runs.listForSession(sessionId).then((r) => { setRuns(r); connectNewRunningRuns(r); });
       api.campaigns.get(campaignId).then(setCampaign);
-      // Merge only findings + checklist from the server so in-progress notes edits aren't clobbered
+      // Merge only findings + checklist + artifacts from the server so in-progress notes edits aren't clobbered
       api.sessions.get(sessionId).then((fresh) => {
         setSession((prev) => prev ? { ...prev, findings: fresh.findings, checklist_state: fresh.checklist_state } : prev);
+        setArtifacts(fresh.artifacts || {});
       });
     }, 4000);
     return () => {
@@ -198,17 +207,19 @@ export default function SessionDetailPage() {
 
   const enabledTools = useMemo(() => tools.filter((t) => t.enabled), [tools]);
   const filteredTools = useMemo(() => {
+    let list = workflowFilter !== "all"
+      ? enabledTools.filter((t) => (t.workflow_tags || []).includes(workflowFilter))
+      : enabledTools;
     if (toolSearch.trim()) {
       const q = toolSearch.toLowerCase();
-      return enabledTools.filter(
+      return list.filter(
         (t) => t.name.toLowerCase().includes(q) ||
                t.binary.toLowerCase().includes(q) ||
                (t.category || "").toLowerCase().includes(q)
       );
     }
-    let list = selectedCat === "all" ? enabledTools : enabledTools.filter((t) => t.category === selectedCat);
-    if (workflowFilter !== "all") {
-      list = list.filter((t) => (t.workflow_tags || []).includes(workflowFilter));
+    if (selectedCat !== "all") {
+      list = list.filter((t) => t.category === selectedCat);
     }
     return list;
   }, [enabledTools, selectedCat, workflowFilter, toolSearch]);
@@ -420,6 +431,27 @@ export default function SessionDetailPage() {
     }
   }
 
+  async function handleBloodhoundDownload() {
+    try {
+      await api.sessions.downloadBloodhound(sessionId);
+    } catch (err) {
+      alert(err.message);
+    }
+  }
+
+  async function handleOpenFiles() {
+    setShowFiles(true);
+    setFilesLoading(true);
+    try {
+      const data = await api.sessions.listFiles(sessionId);
+      setSessionFiles(data.files || []);
+    } catch (err) {
+      setSessionFiles([]);
+    } finally {
+      setFilesLoading(false);
+    }
+  }
+
   async function downloadFullReport() {
     setIsExporting(true);
     try {
@@ -497,8 +529,8 @@ export default function SessionDetailPage() {
 
   const handleResizeMouseDown = useCallback((e, handle) => {
     e.preventDefault();
-    dragRef.current = { active: true, handle, startX: e.clientX, startY: e.clientY, startLeft: leftWidth, startRight: rightWidth, startHeight: runSectionHeight, startNotesHeight: notesSectionHeight };
-  }, [leftWidth, rightWidth, runSectionHeight, notesSectionHeight]);
+    dragRef.current = { active: true, handle, startX: e.clientX, startY: e.clientY, startLeft: leftWidth, startRight: rightWidth, startHeight: runSectionHeight, startNotesHeight: notesSectionHeight, startArtifactHeight: artifactBoxHeight };
+  }, [leftWidth, rightWidth, runSectionHeight, notesSectionHeight, artifactBoxHeight]);
 
   useEffect(() => {
     const onMove = (e) => {
@@ -512,6 +544,8 @@ export default function SessionDetailPage() {
         setRunSectionHeight(Math.max(60, Math.min(600, d.startHeight + (e.clientY - d.startY))));
       } else if (d.handle === 'notes') {
         setNotesSectionHeight(Math.max(60, Math.min(400, d.startNotesHeight + (e.clientY - d.startY))));
+      } else if (d.handle === 'artifact') {
+        setArtifactBoxHeight(Math.max(60, Math.min(400, d.startArtifactHeight - (e.clientY - d.startY))));
       }
     };
     const onUp = () => { dragRef.current.active = false; };
@@ -524,6 +558,7 @@ export default function SessionDetailPage() {
   }, []);
 
   function openSettings() {
+    const ic = session.initial_context || {};
     setSettingsForm({
       analyzeProvider,
       reportProvider,
@@ -532,25 +567,48 @@ export default function SessionDetailPage() {
       target: session.target || "",
       scope: session.scope || "",
       engagement_type: session.engagement_type || "external",
+      initial_context: {
+        domain: ic.domain || "",
+        dc_ip: ic.dc_ip || "",
+        credentials: ic.credentials || [],
+        notes: ic.notes || "",
+      },
     });
     setShowSettings(true);
+  }
+
+  function updateSettingsCtx(field, val) {
+    setSettingsForm(f => ({ ...f, initial_context: { ...f.initial_context, [field]: val } }));
+  }
+  function addSettingsCred() {
+    setSettingsForm(f => ({ ...f, initial_context: { ...f.initial_context, credentials: [...f.initial_context.credentials, { user: "", secret: "", type: "password" }] } }));
+  }
+  function updateSettingsCred(i, field, val) {
+    setSettingsForm(f => ({ ...f, initial_context: { ...f.initial_context, credentials: f.initial_context.credentials.map((c, idx) => idx === i ? { ...c, [field]: val } : c) } }));
+  }
+  function removeSettingsCred(i) {
+    setSettingsForm(f => ({ ...f, initial_context: { ...f.initial_context, credentials: f.initial_context.credentials.filter((_, idx) => idx !== i) } }));
   }
 
   async function saveSettings() {
     if (!settingsForm) return;
     setAnalyzeProvider(settingsForm.analyzeProvider);
     setReportProvider(settingsForm.reportProvider);
+    const ic = settingsForm.initial_context || {};
+    const prevIc = session.initial_context || {};
     const sessionChanged =
       settingsForm.name !== session.name ||
       settingsForm.target !== session.target ||
       settingsForm.scope !== session.scope ||
-      settingsForm.engagement_type !== session.engagement_type;
+      settingsForm.engagement_type !== session.engagement_type ||
+      JSON.stringify(ic) !== JSON.stringify(prevIc);
     if (sessionChanged) {
       const updated = await api.sessions.update(sessionId, {
         name: settingsForm.name,
         target: settingsForm.target,
         scope: settingsForm.scope,
         engagement_type: settingsForm.engagement_type,
+        initial_context: ic,
         notes: session.notes,
         status: session.status,
         findings: session.findings,
@@ -658,14 +716,15 @@ export default function SessionDetailPage() {
       const scheduleIso = isScheduled ? new Date(scheduledAt).toISOString() : null;
 
       const newCampaign = await api.campaigns.create({
-        name:           `${session.name} — AI Agent`,
-        description:    "",
-        target_scope:   targetScope.length ? targetScope : [session.target],
-        ai_provider:    agentForm.ai_provider,
-        risk_level:     agentForm.risk_level,
-        schedule:       scheduleIso,
-        session_id:     sessionId,
-        max_iterations: agentForm.unlimited ? null : (parseInt(agentForm.max_iterations) || 50),
+        name:            `${session.name} — AI Agent`,
+        description:     "",
+        target_scope:    targetScope.length ? targetScope : [session.target],
+        ai_provider:     agentForm.ai_provider,
+        risk_level:      agentForm.risk_level,
+        engagement_type: session.engagement_type || "external",
+        schedule:        scheduleIso,
+        session_id:      sessionId,
+        max_iterations:  agentForm.unlimited ? null : (parseInt(agentForm.max_iterations) || 50),
       });
       // Link back to session so the session knows its campaign
       await api.sessions.update(sessionId, { ...session, campaign_id: newCampaign.id });
@@ -888,52 +947,71 @@ export default function SessionDetailPage() {
           <ArrowLeft size={14} /> {session.engagement_type === "internal" ? "Internal" : session.engagement_type === "web" ? "Web App" : "External"}
         </button>
         <div className={styles.sessionInfo}>
-          <div className={styles.sessionNameRow}>
-            <h1 className={styles.sessionName}>{session.name}</h1>
-          </div>
-          <code className={styles.target}>{session.target}</code>
+          <h1 className={styles.sessionName}>{session.name}</h1>
+          <span
+            className={`${styles.detailsToggle} ${campaign?.status === "awaiting_approval" ? styles.detailsToggleYellow : ""}`}
+            onClick={() => setInfoBarHidden(v => !v)}
+            title={infoBarHidden ? "Show details" : "Hide details"}
+          >
+            Details {infoBarHidden ? "▴" : "▾"}
+          </span>
         </div>
         <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={handleExport}>
           <FileText size={13} /> Reports
+        </button>
+        <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={handleOpenFiles} title="View and download session output files">
+          <FolderOpen size={13} /> Files
         </button>
         <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={openSettings} title="Session settings">
           <Settings size={13} />
         </button>
       </div>
 
-      {/* AI Agent strip */}
-      <div className={`${styles.agentStrip} ${campaign?.status === "awaiting_approval" ? styles.agentStripAlert : ""}`}>
-        <Cpu size={13} style={{ color: campaign?.status === "awaiting_approval" ? "#f59e0b" : "var(--accent)", flexShrink: 0 }} />
-        {!campaign ? (
-          <>
-            <span className={styles.agentStripLabel}>No AI agent configured</span>
-            <button className={styles.agentStripBtn} onClick={() => { setShowAgentSetup(true); setScheduleMode("now"); setScheduledAt(""); }}>
-              <Settings size={11} /> Set up Agent
-            </button>
-          </>
-        ) : (
-          <>
-            <span className={campaign.status === "awaiting_approval" ? styles.agentStripLabelAlert : styles.agentStripLabel}>
-              {(() => {
-                const scheduled = getScheduledTime(campaign);
-                if (scheduled && campaign.status === "active") return `Scheduled — ${fmtScheduledTime(scheduled)}`;
-                if (campaign.status === "active")              return "Agent running";
-                if (campaign.status === "completed")           return "Agent completed";
-                if (campaign.status === "awaiting_approval")   return "⚠ Awaiting approval";
-                return "Agent paused — click Continue to run more iterations";
-              })()}
-            </span>
-            <span className={styles.agentStripProvider}>{campaign.ai_provider === "claude" ? "Claude" : "Local AI"}</span>
-            {campaign.status !== "completed" && (
-              <button className={styles.agentToggleBtn} onClick={handleAgentToggle}>
-                {campaign.status === "active"
-                  ? <><Pause size={11} /> Pause</>
-                  : <><Play size={11} /> Continue</>}
-              </button>
+      {/* Combined info bar: additional context (left) + agent status (right) */}
+      {!infoBarHidden && (
+        <div className={`${styles.infoBar} ${campaign?.status === "awaiting_approval" ? styles.infoBarAlert : ""}`}>
+          <div className={styles.infoBarScope}>
+            <span className={styles.infoBarScopeLabel}>Context</span>
+            {session.scope
+              ? <span className={styles.infoBarScopeText}>{session.scope}</span>
+              : <span className={styles.infoBarScopeEmpty}>No additional context</span>
+            }
+          </div>
+          <div className={styles.infoBarDivider} />
+          <div className={styles.infoBarAgent}>
+            <Cpu size={12} style={{ color: campaign?.status === "awaiting_approval" ? "#f59e0b" : "var(--accent)", flexShrink: 0 }} />
+            {!campaign ? (
+              <>
+                <span className={styles.infoBarStatus}>No agent configured</span>
+                <button className={styles.agentStripBtn} onClick={() => { setShowAgentSetup(true); setScheduleMode("now"); setScheduledAt(""); }}>
+                  <Settings size={11} /> Set up Agent
+                </button>
+              </>
+            ) : (
+              <>
+                <span className={campaign.status === "awaiting_approval" ? styles.infoBarStatusAlert : styles.infoBarStatus}>
+                  {(() => {
+                    const scheduled = getScheduledTime(campaign);
+                    if (scheduled && campaign.status === "active") return `Scheduled — ${fmtScheduledTime(scheduled)}`;
+                    if (campaign.status === "active")              return "Agent running";
+                    if (campaign.status === "completed")           return "Agent completed";
+                    if (campaign.status === "awaiting_approval")   return "⚠ Awaiting approval";
+                    return "Agent paused";
+                  })()}
+                </span>
+                <span className={styles.infoBarProvider}>{campaign.ai_provider === "claude" ? "Claude" : "Local AI"}</span>
+                {campaign.status !== "completed" && (
+                  <button className={styles.agentToggleBtn} onClick={handleAgentToggle}>
+                    {campaign.status === "active"
+                      ? <><Pause size={11} /> Pause</>
+                      : <><Play size={11} /> Continue</>}
+                  </button>
+                )}
+              </>
             )}
-          </>
-        )}
-      </div>
+          </div>
+        </div>
+      )}
 
       {/* Target bar */}
       <div className={styles.targetBar}>
@@ -1066,6 +1144,78 @@ export default function SessionDetailPage() {
                 );
               })}
             </div>
+          )}
+
+          {/* Artifact store box — shown below reasoning when enabled in settings */}
+          {showArtifacts && session.campaign_id && agentSidebarView === "reasoning" && (
+            <>
+              <div className={styles.resizeHandleH} onMouseDown={(e) => handleResizeMouseDown(e, 'artifact')} />
+              <div className={styles.artifactBox} style={{ height: artifactBoxHeight }}>
+                <div className={styles.artifactBoxHeader}>AI Artifacts</div>
+                <div className={styles.artifactBoxScroll}>
+                  {(() => {
+                    const hasArtifacts =
+                      (artifacts.hosts  || []).length > 0 ||
+                      (artifacts.users  || []).length > 0 ||
+                      (artifacts.spns   || []).length > 0 ||
+                      (artifacts.notes  || []).length > 0 ||
+                      Object.keys(artifacts.hashes || {}).length > 0 ||
+                      Object.keys(artifacts.creds  || {}).length > 0;
+                    if (!hasArtifacts) return <p className={styles.artifactEmpty}>No artifacts yet.</p>;
+                    return (
+                      <>
+                        {(artifacts.hosts || []).length > 0 && (
+                          <div className={styles.artifactSection}>
+                            <div className={styles.artifactSectionLabel}>Hosts</div>
+                            {artifacts.hosts.map((h, i) => <div key={i} className={styles.artifactItem}><code>{h}</code></div>)}
+                          </div>
+                        )}
+                        {(artifacts.users || []).length > 0 && (
+                          <div className={styles.artifactSection}>
+                            <div className={styles.artifactSectionLabel}>Users</div>
+                            {artifacts.users.map((u, i) => <div key={i} className={styles.artifactItem}><code>{u}</code></div>)}
+                          </div>
+                        )}
+                        {(artifacts.spns || []).length > 0 && (
+                          <div className={styles.artifactSection}>
+                            <div className={styles.artifactSectionLabel}>SPNs</div>
+                            {artifacts.spns.map((s, i) => <div key={i} className={styles.artifactItem}><code className={styles.artifactMono}>{s}</code></div>)}
+                          </div>
+                        )}
+                        {Object.keys(artifacts.hashes || {}).length > 0 && (
+                          <div className={styles.artifactSection}>
+                            <div className={styles.artifactSectionLabel}>Hashes</div>
+                            {Object.entries(artifacts.hashes).map(([user, hash]) => (
+                              <div key={user} className={styles.artifactItemKV}>
+                                <span className={styles.artifactKey}>{user}</span>
+                                <code className={styles.artifactHash}>{hash.length > 44 ? hash.slice(0, 44) + "…" : hash}</code>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {Object.keys(artifacts.creds || {}).length > 0 && (
+                          <div className={styles.artifactSection}>
+                            <div className={styles.artifactSectionLabel}>Credentials</div>
+                            {Object.entries(artifacts.creds).map(([user, pass_]) => (
+                              <div key={user} className={styles.artifactItemKV}>
+                                <span className={styles.artifactKey}>{user}</span>
+                                <code>{pass_}</code>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {(artifacts.notes || []).length > 0 && (
+                          <div className={styles.artifactSection}>
+                            <div className={styles.artifactSectionLabel}>Notes</div>
+                            {artifacts.notes.map((n, i) => <div key={i} className={styles.artifactItem}>{n}</div>)}
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
+                </div>
+              </div>
+            </>
           )}
 
           {/* Checklist view */}
@@ -1821,7 +1971,7 @@ export default function SessionDetailPage() {
       {/* Settings modal */}
       {showSettings && settingsForm && (
         <div className={styles.modal} onClick={() => setShowSettings(false)}>
-          <div className={styles.modalBox} style={{ maxWidth: 480, width: "92vw" }} onClick={(e) => e.stopPropagation()}>
+          <div className={styles.modalBox} style={{ maxWidth: 480, width: "92vw", maxHeight: "90vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
             <h2 className={styles.modalTitle}>Session Settings</h2>
 
             <div className={styles.settingsSection}>
@@ -1843,6 +1993,17 @@ export default function SessionDetailPage() {
                     <button key={val}
                       className={`${styles.settingsToggleBtn} ${settingsForm.reportProvider === val ? styles.settingsToggleActive : ""}`}
                       onClick={() => setSettingsForm((f) => ({ ...f, reportProvider: val }))}>
+                      {lbl}
+                    </button>
+                  ))}
+                </div>
+              </label>
+              <label className={styles.label}>AI artifacts
+                <div className={styles.settingsToggle}>
+                  {[["false", "Hidden"], ["true", "Visible"]].map(([val, lbl]) => (
+                    <button key={val}
+                      className={`${styles.settingsToggleBtn} ${String(showArtifacts) === val ? styles.settingsToggleActive : ""}`}
+                      onClick={() => { const on = val === "true"; setShowArtifacts(on); localStorage.setItem("quiver_show_artifacts", String(on)); }}>
                       {lbl}
                     </button>
                   ))}
@@ -1889,12 +2050,125 @@ export default function SessionDetailPage() {
               </label>
             </div>
 
+            {settingsForm.engagement_type === "internal" && (
+              <div className={styles.settingsSection}>
+                <div className={styles.settingsSectionTitle}>Engagement Context</div>
+                <label className={styles.label}>Domain Name
+                  <input className="input input-mono" placeholder="corp.local"
+                    value={settingsForm.initial_context.domain}
+                    onChange={(e) => updateSettingsCtx("domain", e.target.value)} />
+                </label>
+                <label className={styles.label}>Domain Controller IP
+                  <input className="input input-mono" placeholder="10.10.10.1"
+                    value={settingsForm.initial_context.dc_ip}
+                    onChange={(e) => updateSettingsCtx("dc_ip", e.target.value)} />
+                </label>
+                <div className={styles.label}>Known Credentials
+                  {settingsForm.initial_context.credentials.map((cred, i) => (
+                    <div key={i} style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                      <input className="input input-mono" style={{ flex: "1.2", minWidth: 0, fontSize: 12 }}
+                        placeholder="username"
+                        value={cred.user}
+                        onChange={(e) => updateSettingsCred(i, "user", e.target.value)} />
+                      <input className="input input-mono" style={{ flex: 2, minWidth: 0, fontSize: 12 }}
+                        placeholder="password or NT hash"
+                        value={cred.secret}
+                        onChange={(e) => updateSettingsCred(i, "secret", e.target.value)} />
+                      <select className="input" style={{ fontSize: 12, fontFamily: "var(--font-mono)", width: "auto" }}
+                        value={cred.type}
+                        onChange={(e) => updateSettingsCred(i, "type", e.target.value)}>
+                        <option value="password">password</option>
+                        <option value="hash">hash</option>
+                      </select>
+                      <button style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 18, padding: "0 4px" }}
+                        onClick={() => removeSettingsCred(i)}>×</button>
+                    </div>
+                  ))}
+                  <button style={{ marginTop: 8, background: "none", border: "1px dashed var(--border)", borderRadius: 4, color: "var(--text-muted)", fontSize: 12, padding: "5px 12px", cursor: "pointer" }}
+                    onClick={addSettingsCred}>+ Add Credential</button>
+                </div>
+                <label className={styles.label}>Context Notes
+                  <textarea className="input" rows={2}
+                    placeholder="e.g. Internal domain user, no admin privileges…"
+                    value={settingsForm.initial_context.notes}
+                    onChange={(e) => updateSettingsCtx("notes", e.target.value)} />
+                </label>
+              </div>
+            )}
+
             <div className={styles.modalActions}>
               <button className="btn btn-ghost" onClick={() => setShowSettings(false)}>Cancel</button>
               <button className="btn btn-primary" onClick={saveSettings}
                 disabled={!settingsForm.name.trim() || !settingsForm.target.trim()}>
                 Save
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Session files modal */}
+      {showFiles && (
+        <div className={styles.modal} onClick={() => setShowFiles(false)}>
+          <div className={styles.modalBox} style={{ maxWidth: 560, width: "92vw", maxHeight: "80vh", display: "flex", flexDirection: "column" }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, flexShrink: 0 }}>
+              <h2 className={styles.modalTitle} style={{ margin: 0, display: "flex", alignItems: "center", gap: 8 }}>
+                <FolderOpen size={15} style={{ color: "var(--accent)" }} /> Session Files
+              </h2>
+              <button className="btn btn-ghost" style={{ padding: "4px 8px" }} onClick={() => setShowFiles(false)}>
+                <X size={14} />
+              </button>
+            </div>
+            <p style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 16, flexShrink: 0 }}>
+              Output files written to disk during this engagement. Download any file for offline analysis.
+            </p>
+            <div style={{ flex: 1, overflowY: "auto" }}>
+              {filesLoading ? (
+                <p style={{ color: "var(--text-muted)", fontSize: 13, padding: "12px 0" }}>Loading…</p>
+              ) : sessionFiles.length === 0 ? (
+                <div style={{ textAlign: "center", padding: "32px 0", color: "var(--text-muted)" }}>
+                  <FolderOpen size={28} style={{ opacity: 0.3, marginBottom: 8 }} />
+                  <p style={{ fontSize: 13 }}>No output files yet.</p>
+                  <p style={{ fontSize: 12, marginTop: 4, opacity: 0.7 }}>Files created by tools during the engagement will appear here automatically.</p>
+                </div>
+              ) : (
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                  <thead>
+                    <tr style={{ borderBottom: "1px solid var(--border)" }}>
+                      <th style={{ textAlign: "left", padding: "6px 8px", color: "var(--text-muted)", fontWeight: 600, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.05em" }}>File</th>
+                      <th style={{ textAlign: "right", padding: "6px 8px", color: "var(--text-muted)", fontWeight: 600, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.05em" }}>Size</th>
+                      <th style={{ textAlign: "right", padding: "6px 8px", color: "var(--text-muted)", fontWeight: 600, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.05em" }}>Modified</th>
+                      <th style={{ width: 80 }}></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sessionFiles.map((f) => (
+                      <tr key={f.name} style={{ borderBottom: "1px solid var(--border)" }}>
+                        <td style={{ padding: "8px 8px", fontFamily: "var(--font-mono)", color: "var(--text-primary)", wordBreak: "break-all" }}>{f.name}</td>
+                        <td style={{ padding: "8px 8px", textAlign: "right", color: "var(--text-muted)", whiteSpace: "nowrap" }}>{f.size_human}</td>
+                        <td style={{ padding: "8px 8px", textAlign: "right", color: "var(--text-muted)", whiteSpace: "nowrap" }}>
+                          {new Date(f.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                        </td>
+                        <td style={{ padding: "8px 8px", textAlign: "right" }}>
+                          <button
+                            className="btn btn-ghost"
+                            style={{ fontSize: 11, padding: "3px 8px" }}
+                            onClick={() => api.sessions.downloadFile(sessionId, f.name)}
+                          >
+                            <Download size={11} /> Download
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+            <div style={{ marginTop: 16, flexShrink: 0, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={handleOpenFiles} disabled={filesLoading}>
+                ↺ Refresh
+              </button>
+              <button className="btn btn-ghost" onClick={() => setShowFiles(false)}>Close</button>
             </div>
           </div>
         </div>

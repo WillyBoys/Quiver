@@ -141,14 +141,14 @@ docker-compose up --build backend
 - **user-pip.txt** — clean, no Dockerfile editing. Best for self-contained PyPI packages or simple git+ installs.
 - **Dockerfile `RUN pip install`** — necessary when the pip install must be combined with other steps (apt deps first, wrapper scripts, etc.), or when installation order relative to other tools matters.
 
-**Example — bloodhound-python** (AD data collection):
+**Example — sublist3r** (passive subdomain enumeration):
 
 ```
 # backend/user-pip.txt
-bloodhound
+sublist3r
 ```
 
-This installs the `bloodhound` Python package providing the `bloodhound-python` command for collecting AD data from Linux. Note this is the ingestor only — you still need a BloodHound CE instance separately to visualize the data.
+This installs the `sublist3r` Python package providing the `sublist3r` command for passive subdomain discovery using search engines and DNS brute-force.
 
 **Cautions:**
 - Large git+ installs (e.g. NetExec with its full dependency tree) can significantly increase build time. Expect 3–5 minutes for complex tools.

@@ -28,7 +28,6 @@ The React frontend uses Vite HMR — frontend changes reflect in the browser imm
 ## Where Contributions Are Welcome
 
 **High value:**
-- Internal campaign agent tuning — improving the LLM prompting for AD/lateral movement context
 - Shannon finding import — structured import of Shannon deliverables into the Quiver session findings layer
 - New tool integrations — see [Custom Tools](CUSTOM_TOOLS.md) for how tool registration works
 

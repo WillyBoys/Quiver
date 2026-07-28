@@ -1,7 +1,9 @@
+import glob
+import os
 import re
 import uuid
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import Response
+from fastapi.responses import FileResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.db.database import get_db
@@ -31,6 +33,7 @@ class SessionCreate(BaseModel):
     engagement_type: str = "external"  # external / internal / web
     notes: Optional[str] = ""
     targets: Optional[list] = None  # [{id, value}]; initialized from target if omitted
+    initial_context: Optional[dict] = None  # {domain, dc_ip, credentials:[{user,secret,type}], notes}
 
 
 class SessionUpdate(SessionCreate):
@@ -38,6 +41,7 @@ class SessionUpdate(SessionCreate):
     findings: Optional[list[Finding]] = None
     targets: Optional[list] = None
     campaign_id: Optional[str] = None
+    initial_context: Optional[dict] = None
 
 
 class NotesUpdate(BaseModel):
@@ -60,6 +64,12 @@ class ReportRenameRequest(BaseModel):
 
 class TargetsUpdate(BaseModel):
     targets: list
+
+
+class ArtifactsUpdate(BaseModel):
+    type: str              # user / hash / cred / host / spn / note
+    value: str
+    user: Optional[str] = None
 
 
 @router.get("/")
@@ -87,6 +97,7 @@ async def create_session(body: SessionCreate, db: AsyncSession = Depends(get_db)
         engagement_type=body.engagement_type,
         notes=body.notes,
         targets=targets,
+        initial_context=body.initial_context or {},
     )
     db.add(session)
     await db.commit()
@@ -109,6 +120,8 @@ async def update_session(session_id: str, body: SessionUpdate, db: AsyncSession 
         session.findings = [f.model_dump() for f in body.findings]
     if body.targets is not None:
         session.targets = body.targets
+    if body.initial_context is not None:
+        session.initial_context = body.initial_context
     await db.commit()
     return _session_dict(session)
 
@@ -135,6 +148,16 @@ async def update_checklist(session_id: str, body: ChecklistUpdate, db: AsyncSess
     session.checklist_state = {"phase_checks": body.phase_checks, "custom_items": body.custom_items}
     await db.commit()
     return {"checklist_state": session.checklist_state}
+
+
+@router.patch("/{session_id}/artifacts")
+async def patch_artifacts(session_id: str, body: ArtifactsUpdate, db: AsyncSession = Depends(get_db)):
+    from sqlalchemy.orm.attributes import flag_modified
+    session = await _get_or_404(session_id, db)
+    session.artifacts = _merge_artifact(dict(session.artifacts or {}), body.model_dump())
+    flag_modified(session, "artifacts")
+    await db.commit()
+    return {"artifacts": session.artifacts}
 
 
 @router.delete("/{session_id}", status_code=204)
@@ -281,6 +304,56 @@ def _build_ai_report_prompt(session, runs) -> str:
         sev_counts[s] = sev_counts.get(s, 0) + 1
     count_str = ", ".join(f"{sev_counts[s]} {s}" for s in _SEVERITY_ORDER if s in sev_counts) or "0 findings"
 
+    is_internal = session.engagement_type == "internal"
+    attack_surface_label = "Discovered Infrastructure" if is_internal else "Attack Surface"
+    attack_surface_hint = (
+        "[Bullet list of what was discovered: domain controllers, subnets, live hosts with open ports, "
+        "AD services (LDAP, SMB, Kerberos, WinRM). Include IP addresses, hostnames, and OS where known.]"
+        if is_internal else
+        "[Bullet list of what was discovered: open ports, exposed services, interesting endpoints. "
+        "Pull from tool outputs. Be specific — include port numbers, versions, URLs.]"
+    )
+
+    # Build artifact summary for all engagement types
+    raw_artifacts = session.artifacts or {}
+    artifact_lines = []
+    if raw_artifacts.get("hosts"):
+        artifact_lines.append(f"- Hosts: {', '.join(raw_artifacts['hosts'])}")
+    if raw_artifacts.get("users"):
+        artifact_lines.append(f"- Users discovered: {', '.join(raw_artifacts['users'])}")
+    if raw_artifacts.get("spns"):
+        artifact_lines.append(f"- SPNs: {', '.join(raw_artifacts['spns'])}")
+    for user, h in (raw_artifacts.get("hashes") or {}).items():
+        artifact_lines.append(f"- Hash ({user}): {h}")
+    for user, pw in (raw_artifacts.get("creds") or {}).items():
+        artifact_lines.append(f"- Credential ({user}): {pw}")
+    for note in (raw_artifacts.get("notes") or []):
+        artifact_lines.append(f"- Note: {note}")
+    artifacts_section = (
+        f"\nDISCOVERED ARTIFACTS (credentials, hashes, and hosts captured during the engagement):\n"
+        + ("\n".join(artifact_lines) if artifact_lines else "- (none captured)")
+        + "\n"
+    ) if artifact_lines else ""
+
+    attack_chain_hint = (
+        "[Describe the credential chain and lateral movement path. E.g. 'AS-REP roasting yielded hash for jsmith "
+        "→ cracked to Summer2024! → evil-winrm onto FILESERVER01 → secretsdump revealed administrator hash "
+        "→ pass-the-hash onto DC01 achieving domain compromise.' If no chain: write No credential chain established.]"
+        if is_internal else
+        "[If any findings chain together, describe the kill chain in 2-3 sentences per chain. "
+        "E.g. SQLi yielded admin JWT → used to access /api/Users → mass assignment escalated to admin role. "
+        "If no chains: write No multi-step chains identified.]"
+    )
+
+    coverage_hint = (
+        "[Bullet list of: hashes that were not cracked, attack paths not pursued (e.g. Responder/NTLM relay, "
+        "BloodHound paths), subnets not fully enumerated, tools that timed out, anything needing manual follow-up. "
+        "Be specific about what a reviewer should attempt by hand.]"
+        if is_internal else
+        "[Bullet list of: what wasn't tested, what timed out, what was blocked by scope, "
+        "what needs manual follow-up. Be specific about what a reviewer should check by hand.]"
+    )
+
     return f"""You are a senior penetration tester writing an internal technical brief for a colleague who will review these findings and write the final client report.
 
 This is NOT a client deliverable. Write for a technical reviewer, not an executive. Be terse and precise.
@@ -297,7 +370,7 @@ CONFIRMED FINDINGS (sorted critical → info):
 {findings_text}
 COVERAGE SUMMARY:
 {coverage_text}
-
+{artifacts_section}
 Write a technical brief in Markdown using EXACTLY this structure. Do not add sections, do not write for executives, do not include remediation advice (the reviewer will add that):
 
 # Technical Brief — {session.target}
@@ -311,8 +384,8 @@ Write a technical brief in Markdown using EXACTLY this structure. Do not add sec
 - **Finding count:** {count_str}
 - **Overall risk:** [one word: Critical / High / Medium / Low / Informational — based on highest confirmed severity]
 
-## Attack Surface
-[Bullet list of what was discovered: open ports, exposed services, interesting endpoints. Pull from tool outputs. Be specific — include port numbers, versions, URLs.]
+## {attack_surface_label}
+{attack_surface_hint}
 
 ## Findings
 
@@ -322,7 +395,7 @@ Write a technical brief in Markdown using EXACTLY this structure. Do not add sec
 | Field | Value |
 |-------|-------|
 | **Severity** | SEVERITY — CVSS range |
-| **Location** | specific URL, port, or service |
+| **Location** | specific URL, port, service, or host |
 | **Chains from** | prior finding title OR — |
 
 **Reproduction steps:**
@@ -339,11 +412,10 @@ Write a technical brief in Markdown using EXACTLY this structure. Do not add sec
 ---
 
 ## Attack Chains
-[If any findings chain together, describe the kill chain in 2-3 sentences per chain. E.g. "SQLi (Finding 1) yielded admin JWT → used to access /api/Users (Finding 2) → mass assignment on POST /api/Users escalated to admin role (Finding 3)."]
-[If no chains: write "No multi-step chains identified."]
+{attack_chain_hint}
 
 ## Coverage Gaps
-[Bullet list of: what wasn't tested, what timed out, what was blocked by scope, what needs manual follow-up. Be specific about what a reviewer should check by hand.]
+{coverage_hint}
 
 RULES:
 - Write only what the evidence supports. Do not invent findings.
@@ -481,6 +553,98 @@ async def _get_or_404(session_id: str, db: AsyncSession) -> Session:
     return session
 
 
+def _merge_artifact(current: dict, item: dict) -> dict:
+    result = {
+        "users": list(current.get("users") or []),
+        "hashes": dict(current.get("hashes") or {}),
+        "creds":  dict(current.get("creds") or {}),
+        "hosts":  list(current.get("hosts") or []),
+        "spns":   list(current.get("spns") or []),
+        "notes":  list(current.get("notes") or []),
+    }
+    t = item.get("type", "")
+    value = (item.get("value") or "").strip()
+    user  = (item.get("user") or "").strip()
+    if not value:
+        return result
+    if   t == "user" and value not in result["users"]:  result["users"].append(value)
+    elif t == "hash" and user:                          result["hashes"][user] = value
+    elif t == "cred" and user:                          result["creds"][user]  = value
+    elif t == "host" and value not in result["hosts"]:  result["hosts"].append(value)
+    elif t == "spn"  and value not in result["spns"]:   result["spns"].append(value)
+    elif t == "note" and value not in result["notes"]:  result["notes"].append(value)
+    return result
+
+
+@router.get("/{session_id}/bloodhound-zip")
+async def download_bloodhound_zip(session_id: str, db: AsyncSession = Depends(get_db)):
+    await _get_or_404(session_id, db)
+    bh_dir = f"/data/bloodhound/{session_id}"
+    zips = sorted(glob.glob(os.path.join(bh_dir, "*.zip")), reverse=True)
+    if not zips:
+        raise HTTPException(status_code=404, detail="No BloodHound data collected yet — run bloodhound-python first")
+    return FileResponse(
+        zips[0],
+        media_type="application/zip",
+        filename=f"bloodhound-{session_id[:8]}.zip",
+    )
+
+
+def _bloodhound_available(session_id: str) -> bool:
+    new_dir = f"/data/{session_id}"
+    old_dir = f"/data/bloodhound/{session_id}"
+    return bool(glob.glob(f"{new_dir}/*.zip")) or bool(glob.glob(f"{old_dir}/*.zip"))
+
+
+def _fmt_size(n: int) -> str:
+    for unit in ("B", "KB", "MB", "GB"):
+        if n < 1024:
+            return f"{n:.0f} {unit}"
+        n /= 1024
+    return f"{n:.1f} GB"
+
+
+@router.get("/{session_id}/files")
+async def list_session_files(session_id: str, db: AsyncSession = Depends(get_db)):
+    import pathlib
+    data_dir = pathlib.Path(f"/data/{session_id}")
+    old_bh_dir = pathlib.Path(f"/data/bloodhound/{session_id}")
+    files = []
+    for base in (data_dir, old_bh_dir):
+        if base.is_dir():
+            for fp in sorted(base.rglob("*")):
+                if fp.is_file():
+                    stat = fp.stat()
+                    rel = str(fp.relative_to(base))
+                    # prefix with subdir name to avoid collisions between old/new paths
+                    name = rel if base == data_dir else f"bloodhound/{rel}"
+                    files.append({
+                        "name": name,
+                        "size_human": _fmt_size(stat.st_size),
+                        "created_at": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+                    })
+    return {"files": files}
+
+
+@router.get("/{session_id}/files/download/{filename:path}")
+async def download_session_file(session_id: str, filename: str):
+    import pathlib
+    # Support both new path and old bloodhound path
+    if filename.startswith("bloodhound/"):
+        base = pathlib.Path(f"/data/bloodhound/{session_id}")
+        rel = filename[len("bloodhound/"):]
+    else:
+        base = pathlib.Path(f"/data/{session_id}")
+        rel = filename
+    file_path = (base / rel).resolve()
+    # Security: must stay within base dir
+    if not str(file_path).startswith(str(base.resolve())):
+        raise HTTPException(status_code=403, detail="Invalid path")
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(str(file_path), filename=file_path.name)
+
+
 def _session_dict(s: Session) -> dict:
     return {
         "id": s.id,
@@ -493,7 +657,10 @@ def _session_dict(s: Session) -> dict:
         "findings": s.findings or [],
         "checklist_state": s.checklist_state or {},
         "targets": s.targets or [],
+        "artifacts": s.artifacts or {},
         "campaign_id": s.campaign_id or None,
+        "bloodhound_available": _bloodhound_available(s.id),
+        "initial_context": s.initial_context or {},
         "created_at": s.created_at.isoformat(),
         "updated_at": s.updated_at.isoformat(),
     }

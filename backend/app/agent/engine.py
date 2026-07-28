@@ -67,6 +67,45 @@ def _build_param_values(tool, target: str, llm_params: dict) -> dict:
     return param_values
 
 
+def _merge_artifact(current: dict, item: dict) -> dict:
+    result = {
+        "users": list(current.get("users") or []),
+        "hashes": dict(current.get("hashes") or {}),
+        "creds":  dict(current.get("creds") or {}),
+        "hosts":  list(current.get("hosts") or []),
+        "spns":   list(current.get("spns") or []),
+        "notes":  list(current.get("notes") or []),
+    }
+    t = item.get("type", "")
+    value = (item.get("value") or "").strip()
+    user  = (item.get("user") or "").strip()
+    if not value:
+        return result
+    if   t == "user" and value not in result["users"]:  result["users"].append(value)
+    elif t == "hash" and user:                          result["hashes"][user] = value
+    elif t == "cred" and user:                          result["creds"][user]  = value
+    elif t == "host" and value not in result["hosts"]:  result["hosts"].append(value)
+    elif t == "spn"  and value not in result["spns"]:   result["spns"].append(value)
+    elif t == "note" and value not in result["notes"]:  result["notes"].append(value)
+    return result
+
+
+async def _save_inline_artifact(session_id: str, artifact: dict) -> None:
+    from app.models.session import Session as EngagementSession
+    from sqlalchemy.orm.attributes import flag_modified
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(EngagementSession).where(EngagementSession.id == session_id)
+        )
+        sess = result.scalar_one_or_none()
+        if not sess:
+            return
+        sess.artifacts = _merge_artifact(dict(sess.artifacts or {}), artifact)
+        flag_modified(sess, "artifacts")
+        await db.commit()
+    logger.info("ARTIFACT | session=%s type=%s value=%.60s", session_id, artifact.get("type"), artifact.get("value", ""))
+
+
 # Tool agent_mode tiers: passive=0, active=1, exploit=2
 # Campaign risk_level controls which tiers auto-run vs. need approval.
 TIER_ORDER = {"passive": 0, "active": 1, "exploit": 2}
@@ -442,7 +481,7 @@ async def run_campaign_agent(campaign_id: str) -> str:
             session = EngagementSession(
                 name=f"[Agent] {campaign.name}",
                 target=", ".join(campaign.target_scope or ["(no scope)"]),
-                engagement_type="external",
+                engagement_type=campaign.engagement_type or "external",
                 scope=f"Automated campaign: {campaign.name}",
                 campaign_id=campaign_id,
             )
@@ -515,6 +554,12 @@ async def run_campaign_agent(campaign_id: str) -> str:
         if inline_finding and isinstance(inline_finding, dict) and campaign.session_id:
             asyncio.create_task(
                 _save_inline_finding(campaign.session_id, inline_finding, reasoning, pregenerated_run_id)
+            )
+
+        inline_artifact = action.get("artifact")
+        if inline_artifact and isinstance(inline_artifact, dict) and campaign.session_id:
+            asyncio.create_task(
+                _save_inline_artifact(campaign.session_id, inline_artifact)
             )
 
         # Look up tool — binary name first (LLM is told to use binary names),

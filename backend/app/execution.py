@@ -199,7 +199,67 @@ async def execute_run_background(
 
     _run_done_events[run_id].set()
 
+    if tool_name == "john" and run_status == "complete" and session_id:
+        asyncio.create_task(_extract_john_creds(session_id, cmd_list))
+
     # Keep buffer alive briefly so a reconnect just after completion can replay
     await asyncio.sleep(60)
     _run_buffers.pop(run_id, None)
     _run_done_events.pop(run_id, None)
+
+
+async def _extract_john_creds(session_id: str, cmd_list: list[str]) -> None:
+    """Run john --show after a completed crack and write confirmed passwords to session artifacts."""
+    from app.db.database import AsyncSessionLocal
+    from app.models.session import Session
+    from sqlalchemy import select
+    from sqlalchemy.orm.attributes import flag_modified
+
+    # Hashfile is the first positional arg (no leading dash, not the binary itself)
+    hashfile = next(
+        (tok for tok in cmd_list if tok != "john" and not tok.startswith("-")),
+        None,
+    )
+    if not hashfile:
+        logger.warning("JOHN POST | session=%s | hashfile not found in cmd", session_id)
+        return
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "john", "--show", hashfile,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=15)
+    except Exception as e:
+        logger.warning("JOHN POST | session=%s | --show failed: %s", session_id, e)
+        return
+
+    cracked = []
+    for line in stdout.decode("utf-8", errors="replace").splitlines():
+        parts = line.split(":")
+        # Skip summary lines ("2 password hashes cracked, ...") and malformed lines
+        if len(parts) < 2 or not parts[0] or not parts[1] or parts[0][0].isdigit():
+            continue
+        cracked.append((parts[0].strip(), parts[1].strip()))
+
+    if not cracked:
+        logger.info("JOHN POST | session=%s | no cracked passwords", session_id)
+        return
+
+    logger.info("JOHN POST | session=%s | %d cracked password(s) found", session_id, len(cracked))
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(Session).where(Session.id == session_id))
+        session = result.scalar_one_or_none()
+        if not session:
+            return
+        current = dict(session.artifacts or {})
+        creds = dict(current.get("creds", {}))
+        for username, password in cracked:
+            creds[username] = password
+        current["creds"] = creds
+        session.artifacts = current
+        flag_modified(session, "artifacts")
+        await db.commit()
+        logger.info("JOHN POST | session=%s | wrote %d cred(s) to artifacts", session_id, len(cracked))

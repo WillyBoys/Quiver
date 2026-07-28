@@ -9,12 +9,24 @@
   background: var(--bg-surface); flex-shrink: 0;
 }
 
-.sessionInfo { flex: 1; }
+.sessionInfo { flex: 1; display: flex; flex-direction: column; gap: 2px; }
 .sessionNameRow { display: flex; align-items: center; gap: 8px; }
 .sessionName { font-size: 15px; font-weight: 600; }
 
 
 .target { font-family: var(--font-mono); font-size: 12px; color: var(--accent); margin-left: 10px; }
+
+.detailsToggle {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--accent);
+  cursor: pointer;
+  user-select: none;
+  transition: opacity 0.15s;
+}
+
+.detailsToggle:hover { opacity: 0.7; }
+.detailsToggleYellow { color: #fbbf24; }
 
 /* AI agent strip — sits between top bar and target bar */
 .agentStrip {
@@ -88,6 +100,152 @@
   cursor: pointer;
 }
 .agentToggleBtn:hover { color: var(--text-primary); border-color: var(--text-muted); }
+
+/* Combined info bar */
+
+.infoBar {
+  display: flex;
+  align-items: center;
+  padding: 5px 20px;
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  gap: 12px;
+  min-height: 32px;
+  transition: border-color 0.2s;
+}
+
+.infoBarAlert { border-bottom-color: rgba(251, 191, 36, 0.45); }
+
+.infoBarScope {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.infoBarScopeLabel {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.infoBarScopeText {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-style: italic;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.infoBarScopeEmpty {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-style: italic;
+  opacity: 0.35;
+}
+
+.infoBarDivider {
+  width: 1px;
+  height: 16px;
+  background: var(--border);
+  flex-shrink: 0;
+}
+
+.infoBarAgent {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.infoBarStatus {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.infoBarStatusAlert {
+  font-size: 12px;
+  color: #fbbf24;
+  font-weight: 600;
+}
+
+.infoBarProvider {
+  font-size: 11px;
+  color: var(--text-muted);
+  opacity: 0.65;
+}
+
+.infoBarToggle {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 10px;
+  padding: 3px 5px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  margin-left: auto;
+  line-height: 1;
+  transition: color 0.15s;
+}
+
+.infoBarToggle:hover { color: var(--text-primary); }
+.infoBarToggleYellow { color: #fbbf24 !important; }
+.infoBarToggleGreen { color: var(--accent) !important; }
+
+/* Scope callout strip */
+
+.scopeCallout {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 5px 20px;
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.scopeCallout:hover { background: color-mix(in srgb, var(--bg-elevated) 80%, var(--accent) 20%); }
+
+.scopeCalloutLabel {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.scopeCalloutText {
+  flex: 1;
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-style: italic;
+}
+
+.scopeCalloutExpanded .scopeCalloutText {
+  white-space: pre-wrap;
+  overflow: visible;
+}
+
+.scopeCalloutChevron {
+  font-size: 9px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
 
 .workspace {
   display: flex; flex: 1; overflow: hidden;
@@ -1580,4 +1738,65 @@
   padding: 2px 8px;
   outline: none;
   width: 100%;
+}
+
+/* ── Artifact Box (shown below AI reasoning when enabled in settings) ────── */
+.artifactBox {
+  flex-shrink: 0;
+  display: flex; flex-direction: column;
+  border-top: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.artifactBoxHeader {
+  padding: 5px 14px;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.07em;
+  text-transform: uppercase; color: var(--text-muted);
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.artifactBoxScroll {
+  flex: 1; overflow-y: auto;
+}
+
+.artifactEmpty {
+  padding: 12px 14px; color: var(--text-muted);
+  font-size: 11px; font-style: italic; text-align: center;
+}
+
+.artifactSection {
+  padding: 8px 14px 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.artifactSectionLabel {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.07em;
+  text-transform: uppercase; color: var(--accent); margin-bottom: 6px;
+}
+
+.artifactItem {
+  font-size: 11px; color: var(--text-primary);
+  padding: 2px 0; word-break: break-all;
+}
+
+.artifactItemKV {
+  display: flex; flex-direction: column; gap: 1px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+  word-break: break-all;
+}
+.artifactItemKV:last-child { border-bottom: none; }
+
+.artifactKey {
+  font-size: 10px; color: var(--text-muted);
+}
+
+.artifactHash {
+  font-size: 10px; color: var(--text-secondary);
+}
+
+.artifactMono {
+  font-size: 10px;
 }

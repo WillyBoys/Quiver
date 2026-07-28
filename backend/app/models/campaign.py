@@ -16,6 +16,7 @@ class Campaign(Base):
     status: Mapped[str] = mapped_column(String, default="paused", index=True)   # active / paused / completed / awaiting_approval
     risk_level: Mapped[str] = mapped_column(String, default="passive")   # approve_all / passive / active / autonomous
     ai_provider: Mapped[str] = mapped_column(String, default="local")   # local / claude
+    engagement_type: Mapped[str] = mapped_column(String, default="external")   # external / internal / web
     session_id: Mapped[str | None] = mapped_column(String, ForeignKey("sessions.id"), nullable=True, index=True)
     last_agent_reasoning: Mapped[str] = mapped_column(Text, default="")  # most recent agent thought
     max_iterations: Mapped[int | None] = mapped_column(nullable=True)   # None = unlimited

@@ -11,14 +11,14 @@
 
 ## Tool Execution
 
-**33 pre-configured tools across:**
-- **Recon:** nmap (quick / full / UDP), whois, dig, dnsrecon, nslookup, BBOT, Subdominator
-- **Web:** feroxbuster, dirb, gobuster (dir / vhost), ffuf, nikto, whatweb, wpscan, sslscan, wafw00f
-- **Enumeration:** enum4linux-ng, smbclient, snmpwalk, netexec (SMB + LDAP), kerbrute, impacket-secretsdump, impacket-GetNPUsers
-- **Vuln scanning:** nuclei, sqlmap
+**65 pre-configured tools across:**
+- **Recon:** nmap (quick / full / UDP / host discovery sweep), whois, dig, dnsrecon, nslookup, BBOT, Subdominator
+- **Web:** feroxbuster, gobuster (dir / vhost), ffuf, nikto, whatweb, wpscan, sslscan, wafw00f, curl (probe / headers / CORS / JSON / redirect), nc-banner
+- **Enumeration:** enum4linux-ng, smbclient, smbmap, snmpwalk, rpcclient, ldapsearch, ldapdomaindump, netexec (SMB / LDAP / WinRM / RDP / MSSQL), kerbrute, evil-winrm, bloodhound-python, certipy, impacket suite (secretsdump, GetNPUsers, GetUserSPNs, psexec, smbexec, wmiexec, lookupsid, findDelegation, getST, addcomputer, Get-GPPPassword, GetLAPSPassword, ntlmrelayx), responder
+- **Vuln scanning:** nuclei, nuclei-network, sqlmap
 - **Cloud:** cloud_enum
 - **Secrets:** trufflehog
-- **Utilities:** hydra, searchsploit, cewl, john, netcat
+- **Utilities:** john, hashcat, hydra, searchsploit, cewl, bash (free-form, approval-gated)
 
 **Running tools:**
 - Live terminal output — real-time streaming with ANSI color rendering, screenshot-ready

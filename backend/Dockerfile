@@ -15,11 +15,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     nmap sslscan \
     # SMB / Active Directory / SNMP
     smbclient samba-common-bin snmp enum4linux-ng \
+    netexec smbmap ldap-utils \
+    # Remote access / exploitation
+    evil-winrm responder \
     # Password attacks
-    hydra john \
+    hydra john hashcat \
     # Recon & exploit research
     dnsrecon exploitdb \
-    # Impacket suite (impacket-secretsdump, impacket-smbexec, etc.)
+    # Impacket (apt subset kept because netexec/smbmap/certipy-ad declare it as a dep)
     python3-impacket \
     && rm -rf /var/lib/apt/lists/*
 
@@ -46,6 +49,16 @@ RUN git clone --depth=1 https://github.com/initstring/cloud_enum /opt/cloud_enum
     printf '#!/bin/sh\nexec python3 /opt/cloud_enum/cloud_enum.py "$@"\n' \
         > /usr/local/bin/cloud_enum && chmod +x /usr/local/bin/cloud_enum
 
+# nxc protocol wrappers — nxc SMB/LDAP/WinRM/MSSQL/RDP each get their own binary
+# so all five variants appear in the agent prompt independently (dedup is by binary name).
+RUN printf '#!/bin/sh\nexec nxc smb "$@"\n'   > /usr/local/bin/nxc-smb   && \
+    printf '#!/bin/sh\nexec nxc ldap "$@"\n'  > /usr/local/bin/nxc-ldap  && \
+    printf '#!/bin/sh\nexec nxc winrm "$@"\n' > /usr/local/bin/nxc-winrm && \
+    printf '#!/bin/sh\nexec nxc mssql "$@"\n' > /usr/local/bin/nxc-mssql && \
+    printf '#!/bin/sh\nexec nxc rdp "$@"\n'   > /usr/local/bin/nxc-rdp   && \
+    chmod +x /usr/local/bin/nxc-smb /usr/local/bin/nxc-ldap \
+             /usr/local/bin/nxc-winrm /usr/local/bin/nxc-mssql /usr/local/bin/nxc-rdp
+
 # Thin wrapper scripts — each gives the agent a distinct binary name for a common
 # curl/nc pattern, letting the seed add them as separate auto-approved tools without
 # changing the binary-keyed tool-prompt logic.
@@ -59,6 +72,21 @@ RUN printf '#!/bin/sh\nexec curl -si --max-time 15 "$@"\n'                      
     chmod +x /usr/local/bin/curl-probe /usr/local/bin/curl-headers /usr/local/bin/curl-cors \
              /usr/local/bin/curl-json /usr/local/bin/curl-redirect /usr/local/bin/nc-banner
 
+# nmap-sweep — host discovery (ping sweep) gets its own binary so it doesn't collide
+# with nmap service-scan entries in the agent prompt dedup.
+# nuclei-network — network protocol CVE templates for internal host scanning.
+RUN printf '#!/bin/sh\nexec nmap -sn "$@"\n'                                           > /usr/local/bin/nmap-sweep     && \
+    printf '#!/bin/sh\nexec nuclei -t network/ -severity medium,high,critical "$@"\n' > /usr/local/bin/nuclei-network && \
+    chmod +x /usr/local/bin/nmap-sweep /usr/local/bin/nuclei-network
+
+# ── pipx ──────────────────────────────────────────────────────────────────────
+# pipx installs each Python CLI tool in its own isolated virtualenv and symlinks
+# the binary into PIPX_BIN_DIR. Tools never share Python packages with each other
+# or with apt, so adding a new tool can never break an existing one.
+ENV PIPX_HOME=/opt/pipx
+ENV PIPX_BIN_DIR=/usr/local/bin
+RUN pip install --no-cache-dir --break-system-packages pipx
+
 # User-added apt packages — edit user-tools.txt and run: docker-compose up --build backend
 COPY user-tools.txt /tmp/user-tools.txt
 RUN if grep -qvE '^\s*#|^\s*$' /tmp/user-tools.txt; then \
@@ -67,22 +95,47 @@ RUN if grep -qvE '^\s*#|^\s*$' /tmp/user-tools.txt; then \
       rm -rf /var/lib/apt/lists/*; \
     fi
 
-# User-added pip packages — edit user-pip.txt and run: docker-compose up --build backend
+# User-added Python tools — edit user-pip.txt and run: docker-compose up --build backend
+# Each package is installed via pipx into its own isolated venv. Use pip package names
+# or git+ URLs. No dependency conflicts are possible between tools.
 COPY user-pip.txt /tmp/user-pip.txt
 RUN if grep -qvE '^\s*#|^\s*$' /tmp/user-pip.txt; then \
       grep -vE '^\s*#|^\s*$' /tmp/user-pip.txt | sed 's/\s*#.*//' | \
-      xargs pip install --no-cache-dir --break-system-packages; \
+      while IFS= read -r pkg; do \
+        pipx install "$pkg" || echo "WARNING: pipx install $pkg failed, continuing"; \
+      done; \
     fi
 
-# pip tools not packaged in Kali
-RUN pip install --no-cache-dir --break-system-packages \
-    bbot
+# Built-in Python tools not in Kali apt ──────────────────────────────────────
 
+# bbot — recursive attack surface mapping
+RUN pipx install bbot
+
+# certipy-ad — ADCS enumeration and ESC1-8 exploitation
+RUN pipx install certipy-ad
+
+# ldapdomaindump — structured AD object dump (users, groups, OUs, GPOs, computers)
+RUN pipx install ldapdomaindump
+
+# bloodhound-python — BloodHound AD data collector; dumps attack paths as JSON/ZIP for BloodHound CE
+# PyPI package is "bloodhound"; it installs the bloodhound-python binary.
+RUN pipx install bloodhound
+
+# Full impacket suite (40+ scripts). The apt python3-impacket only ships ~5.
+# impacket's pip package names scripts as GetNPUsers.py etc. rather than the
+# canonical impacket-GetNPUsers form — create symlinks so the agent finds them.
+RUN pipx install impacket && \
+    for f in GetNPUsers GetUserSPNs psexec smbexec wmiexec lookupsid \
+              findDelegation ntlmrelayx secretsdump Get-GPPPassword GetLAPSPassword \
+              getST addcomputer; do \
+      src="${PIPX_HOME}/venvs/impacket/bin/${f}.py"; \
+      [ -f "$src" ] && ln -sf "$src" "${PIPX_BIN_DIR}/impacket-${f}" || true; \
+    done
+
+# ── App venv ──────────────────────────────────────────────────────────────────
+# The FastAPI backend runs in its own venv, fully isolated from all pentest tools.
 WORKDIR /app
 
-# Use a virtualenv at /opt/venv — outside /app so the host volume mount doesn't wipe it.
-# Kali's system Python has pentest tool deps (uvicorn, fastapi, etc.) installed as apt
-# packages; isolating here prevents version conflicts.
 COPY requirements.txt /tmp/requirements.txt
 RUN python3 -m venv /opt/venv && \
     /opt/venv/bin/pip install --no-cache-dir -r /tmp/requirements.txt

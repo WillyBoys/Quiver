@@ -22,6 +22,7 @@ class CampaignCreate(BaseModel):
     schedule: Optional[str] = None
     risk_level: str = "notify"
     ai_provider: str = "local"
+    engagement_type: str = "external"
     session_id: Optional[str] = None
     max_iterations: Optional[int] = None  # None = unlimited
 
@@ -33,6 +34,7 @@ class CampaignUpdate(BaseModel):
     schedule: Optional[str] = None
     risk_level: Optional[str] = None
     ai_provider: Optional[str] = None
+    engagement_type: Optional[str] = None
     status: Optional[str] = None
     max_iterations: Optional[int] = None
 
@@ -58,6 +60,7 @@ async def create_campaign(body: CampaignCreate, db: AsyncSession = Depends(get_d
         status="active",
         risk_level=body.risk_level,
         ai_provider=body.ai_provider,
+        engagement_type=body.engagement_type or "external",
         session_id=body.session_id or None,
         max_iterations=body.max_iterations if body.max_iterations and body.max_iterations > 0 else None,
     )
@@ -87,6 +90,8 @@ async def update_campaign(campaign_id: str, body: CampaignUpdate, db: AsyncSessi
         campaign.risk_level = body.risk_level
     if body.ai_provider is not None:
         campaign.ai_provider = body.ai_provider
+    if body.engagement_type is not None:
+        campaign.engagement_type = body.engagement_type
     if body.status is not None:
         campaign.status = body.status
         if body.status == "paused":
@@ -162,6 +167,7 @@ def _dict(c: Campaign) -> dict:
         "status": c.status,
         "risk_level": c.risk_level,
         "ai_provider": c.ai_provider or "local",
+        "engagement_type": c.engagement_type or "external",
         "session_id": c.session_id,
         "last_agent_reasoning": c.last_agent_reasoning or "",
         "created_at": c.created_at.isoformat(),
