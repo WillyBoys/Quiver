@@ -141,7 +141,9 @@ export default function EngagementTrackPage({ type, label, description, icon: Ic
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
                 autoFocus
               />
-              <label className={styles.fieldLabel}>Targets</label>
+              <div className={styles.targetField}>
+                <label className={styles.fieldLabel}>Targets</label>
+                <p className={styles.fieldHint}>Press Enter or comma after each target to add it</p>
               <div className={styles.targetChipContainer} onClick={() => document.getElementById("targetChipInput").focus()}>
                 {form.targets.map((t) => (
                   <div key={t} className={styles.targetChip}>
@@ -164,6 +166,7 @@ export default function EngagementTrackPage({ type, label, description, icon: Ic
                     }
                   }}
                 />
+              </div>
               </div>
               <label className={styles.fieldLabel}>
                 Additional Context <span className={styles.optional}>(optional)</span>

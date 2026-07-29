@@ -22,14 +22,8 @@ def build_command(tool, param_values: dict, extra_flags: str = "") -> list[str]:
         return ["bash", "-c", extra_flags]
 
     parts = [tool.binary]
-    if tool.default_flags:
-        try:
-            parts.extend(shlex.split(tool.default_flags))
-        except ValueError:
-            parts.append(tool.default_flags)
 
-    # Collect flags already present in extra_flags so we don't emit them twice.
-    # extra_flags represents an explicit override and always wins.
+    # Collect flags already present in extra_flags — extra_flags wins over defaults.
     extra_flag_tokens: set[str] = set()
     if extra_flags:
         try:
@@ -38,6 +32,16 @@ def build_command(tool, param_values: dict, extra_flags: str = "") -> list[str]:
                     extra_flag_tokens.add(tok)
         except ValueError:
             pass
+
+    if tool.default_flags:
+        try:
+            default_tokens = shlex.split(tool.default_flags)
+        except ValueError:
+            default_tokens = [tool.default_flags]
+        for tok in default_tokens:
+            if tok.startswith("-") and tok in extra_flag_tokens:
+                continue  # extra_flags already supplies this flag
+            parts.append(tok)
 
     for param in tool.parameters:
         name = param.get("name")
@@ -96,6 +100,10 @@ async def execute_run_background(
     _run_buffers.setdefault(run_id, [])
     _run_done_events.setdefault(run_id, asyncio.Event())
     buf = _run_buffers[run_id]
+
+    # Ensure the session output directory exists so tools can write files there.
+    if session_id:
+        os.makedirs(f"/data/{session_id}", exist_ok=True)
 
     # Build display/log string from the list; never used for execution.
     command = " ".join(cmd_list)

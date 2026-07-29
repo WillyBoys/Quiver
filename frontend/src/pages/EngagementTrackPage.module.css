@@ -262,6 +262,18 @@
   color: var(--text-muted);
 }
 
+.targetField {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.fieldHint {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin: 0;
+}
+
 .input {
   width: 100%;
   padding: 8px 10px;
