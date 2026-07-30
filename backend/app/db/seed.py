@@ -600,10 +600,10 @@ DEFAULT_TOOLS = [
     },
     {
         "name": "impacket-getST",
-        "description": "Request a Kerberos service ticket via S4U2Self/S4U2Proxy — enables impersonation under constrained delegation and silver ticket attacks. Use after findDelegation identifies a delegation-enabled account.",
+        "description": "Request a Kerberos service ticket via S4U2Self/S4U2Proxy — enables impersonation under constrained delegation and silver ticket attacks. Use after findDelegation identifies a delegation-enabled account. Requires -spn <SPN> in extra_flags (e.g. -spn cifs/TARGET.domain.local) plus optionally -impersonate <user>.",
         "category": "enum",
         "binary": "impacket-getST",
-        "default_flags": "-spn",
+        "default_flags": "",
         "parameters": [
             {"name": "target", "placeholder": "DOMAIN/user:password", "required": True, "description": "Auth string: DOMAIN/user:pass (or -hashes :NTHASH for pass-the-hash)"},
             {"name": "dc", "flag": "-dc-ip", "placeholder": "10.10.10.1", "required": True, "description": "Domain controller IP"},

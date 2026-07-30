@@ -26,6 +26,15 @@ logger = logging.getLogger(__name__)
 
 _finding_locks: dict[str, asyncio.Lock] = {}
 _active_campaign_loops: set[str] = set()  # campaign IDs whose loop task is currently executing
+_bg_tasks: set[asyncio.Task] = set()       # strong refs to fire-and-forget tasks so GC can't collect them
+
+
+def _bg_task(coro) -> asyncio.Task:
+    """Create a tracked background task. Keeps a strong reference until the task completes."""
+    t = asyncio.create_task(coro)
+    _bg_tasks.add(t)
+    t.add_done_callback(_bg_tasks.discard)
+    return t
 
 
 def _normalize_host(target: str) -> str:
@@ -92,7 +101,6 @@ def _merge_artifact(current: dict, item: dict) -> dict:
 
 
 async def _save_inline_artifact(session_id: str, artifact: dict) -> None:
-    from app.models.session import Session as EngagementSession
     from sqlalchemy.orm.attributes import flag_modified
     async with AsyncSessionLocal() as db:
         result = await db.execute(
@@ -276,7 +284,7 @@ async def _save_inline_finding(session_id: str, finding: dict, reasoning: str, r
                         ev = list(f.get("evidence_run_ids") or [])
                         if run_id not in ev:
                             ev.append(run_id)
-                            result = [{**x, "evidence_run_ids": ev} if x.get("id") == f["id"] else x for x in existing]
+                            result = [{**x, "evidence_run_ids": ev} if x.get("id") == f.get("id") else x for x in existing]
                             sess.findings = result
                             await db.commit()
                     logger.info("AGENT | session=%s inline finding merged into existing: %s", session_id, f["title"])
@@ -526,9 +534,7 @@ async def run_campaign_agent(campaign_id: str) -> str:
             campaign.last_run_at = datetime.now(timezone.utc)
             await db.commit()
             if session_id_for_summary:
-                asyncio.create_task(
-                    _generate_and_save_summary(campaign_id, session_id_for_summary, provider)
-                )
+                _bg_task(_generate_and_save_summary(campaign_id, session_id_for_summary, provider))
             return "completed"
 
         tool_name = action.get("tool_name", "").strip()
@@ -553,15 +559,11 @@ async def run_campaign_agent(campaign_id: str) -> str:
             return "scope_violation"
 
         if inline_finding and isinstance(inline_finding, dict) and campaign.session_id:
-            asyncio.create_task(
-                _save_inline_finding(campaign.session_id, inline_finding, reasoning, pregenerated_run_id)
-            )
+            _bg_task(_save_inline_finding(campaign.session_id, inline_finding, reasoning, pregenerated_run_id))
 
         inline_artifact = action.get("artifact")
         if inline_artifact and isinstance(inline_artifact, dict) and campaign.session_id:
-            asyncio.create_task(
-                _save_inline_artifact(campaign.session_id, inline_artifact)
-            )
+            _bg_task(_save_inline_artifact(campaign.session_id, inline_artifact))
 
         # Look up tool — binary name first (LLM is told to use binary names),
         # then fall back to full name match
@@ -865,11 +867,7 @@ async def execute_approval(approval_id: str) -> bool:
         except ValueError:
             approval_cmd_list = approval.command.split()
 
-    asyncio.create_task(
-        execute_run_background(run_id, approval_cmd_list, session_id, approval.tool_name)
-    )
-    asyncio.create_task(
-        _run_approved_then_resume(run_id, approval.command, session_id, approval.tool_name, campaign_id)
-    )
+    _bg_task(execute_run_background(run_id, approval_cmd_list, session_id, approval.tool_name))
+    _bg_task(_run_approved_then_resume(run_id, approval.command, session_id, approval.tool_name, campaign_id))
     logger.info("AGENT | approval %s approved, executing: %s", approval_id, approval.command)
     return True
