@@ -25,6 +25,7 @@ class CampaignCreate(BaseModel):
     engagement_type: str = "external"
     session_id: Optional[str] = None
     max_iterations: Optional[int] = None  # None = unlimited
+    pipeline_mode: str = "single"  # "single" | "pipeline"
 
 
 class CampaignUpdate(BaseModel):
@@ -37,6 +38,7 @@ class CampaignUpdate(BaseModel):
     engagement_type: Optional[str] = None
     status: Optional[str] = None
     max_iterations: Optional[int] = None
+    pipeline_mode: Optional[str] = None
 
 
 @router.get("/")
@@ -63,6 +65,7 @@ async def create_campaign(body: CampaignCreate, db: AsyncSession = Depends(get_d
         engagement_type=body.engagement_type or "external",
         session_id=body.session_id or None,
         max_iterations=body.max_iterations if body.max_iterations and body.max_iterations > 0 else None,
+        pipeline_mode=body.pipeline_mode or "single",
     )
     db.add(campaign)
     await db.commit()
@@ -100,6 +103,8 @@ async def update_campaign(campaign_id: str, body: CampaignUpdate, db: AsyncSessi
             add_campaign_job(campaign_id, campaign.schedule)
     if body.max_iterations is not None:
         campaign.max_iterations = body.max_iterations if body.max_iterations > 0 else None
+    if body.pipeline_mode is not None:
+        campaign.pipeline_mode = body.pipeline_mode
 
     if campaign.schedule and campaign.schedule != old_schedule:
         add_campaign_job(campaign_id, campaign.schedule)
@@ -174,4 +179,5 @@ def _dict(c: Campaign) -> dict:
         "updated_at": c.updated_at.isoformat(),
         "last_run_at": c.last_run_at.isoformat() if c.last_run_at else None,
         "max_iterations": c.max_iterations,
+        "pipeline_mode": c.pipeline_mode or "single",
     }

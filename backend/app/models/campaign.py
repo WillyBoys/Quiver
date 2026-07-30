@@ -24,6 +24,7 @@ class Campaign(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc),
                                                   onupdate=lambda: datetime.now(timezone.utc))
+    pipeline_mode: Mapped[str] = mapped_column(String, default="single", server_default="single")
     last_run_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 

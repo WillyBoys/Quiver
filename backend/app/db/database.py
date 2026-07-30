@@ -25,7 +25,7 @@ class Base(DeclarativeBase):
 
 
 async def init_db():
-    from app.models import tool, session, run, campaign, report  # noqa: import all models
+    from app.models import tool, session, run, campaign, report, pipeline  # noqa: import all models
     async with engine.begin() as conn:
         # Enable WAL mode so reads never block writes (persists in the DB file)
         await conn.execute(text("PRAGMA journal_mode=WAL"))
@@ -84,6 +84,11 @@ async def init_db():
                 logger.warning("Migration warning: %s", e)
         try:
             await conn.execute(text("ALTER TABLE sessions ADD COLUMN initial_context JSON DEFAULT '{}'"))
+        except OperationalError as e:
+            if "duplicate column" not in str(e).lower() and "already exists" not in str(e).lower():
+                logger.warning("Migration warning: %s", e)
+        try:
+            await conn.execute(text("ALTER TABLE campaigns ADD COLUMN pipeline_mode TEXT DEFAULT 'single'"))
         except OperationalError as e:
             if "duplicate column" not in str(e).lower() and "already exists" not in str(e).lower():
                 logger.warning("Migration warning: %s", e)

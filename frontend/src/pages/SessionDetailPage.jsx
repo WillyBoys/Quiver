@@ -58,7 +58,7 @@ export default function SessionDetailPage() {
   const [artifactBoxHeight, setArtifactBoxHeight] = useState(150);
   const dragRef = useRef({ active: false, handle: null, startX: 0, startY: 0, startLeft: 0, startRight: 0, startHeight: 0, startNotesHeight: 0, startArtifactHeight: 0 });
   const [showAgentSetup, setShowAgentSetup] = useState(false);
-  const [agentForm, setAgentForm] = useState({ ai_provider: "claude", risk_level: "passive", max_iterations: "50", unlimited: false });
+  const [agentForm, setAgentForm] = useState({ ai_provider: "claude", risk_level: "passive", max_iterations: "50", unlimited: false, pipeline_mode: "single" });
   const [scheduleMode, setScheduleMode] = useState("now"); // "now" | "later"
   const [scheduledAt, setScheduledAt] = useState(""); // datetime-local value
   const [agentSubmitting, setAgentSubmitting] = useState(false);
@@ -725,6 +725,7 @@ export default function SessionDetailPage() {
         schedule:        scheduleIso,
         session_id:      sessionId,
         max_iterations:  agentForm.unlimited ? null : (parseInt(agentForm.max_iterations) || 50),
+        pipeline_mode:   agentForm.pipeline_mode || "single",
       });
       // Link back to session so the session knows its campaign
       await api.sessions.update(sessionId, { ...session, campaign_id: newCampaign.id });
@@ -846,6 +847,25 @@ export default function SessionDetailPage() {
                   <option value="local">Local AI (Ollama)</option>
                 </select>
               </label>
+              <div className={styles.label}>Agent Mode
+                <div className={styles.scheduleToggle}>
+                  <button type="button"
+                    className={`${styles.scheduleBtn} ${agentForm.pipeline_mode === "single" ? styles.scheduleBtnActive : ""}`}
+                    onClick={() => setAgentForm({ ...agentForm, pipeline_mode: "single" })}>
+                    Single Agent
+                  </button>
+                  <button type="button"
+                    className={`${styles.scheduleBtn} ${agentForm.pipeline_mode === "pipeline" ? styles.scheduleBtnActive : ""}`}
+                    onClick={() => setAgentForm({ ...agentForm, pipeline_mode: "pipeline" })}>
+                    Pipeline (Beta)
+                  </button>
+                </div>
+                <span className={styles.iterationHint}>
+                  {agentForm.pipeline_mode === "pipeline"
+                    ? "Parallel specialist agents run each phase — faster on large scopes. Full reasoning view coming soon."
+                    : "One agent reasons through the full engagement — maximum creativity and adaptability."}
+                </span>
+              </div>
               <label className={styles.label}>Approval Mode
                 <select className="input" value={agentForm.risk_level}
                   onChange={(e) => setAgentForm({ ...agentForm, risk_level: e.target.value })}>
@@ -1078,8 +1098,18 @@ export default function SessionDetailPage() {
               onClick={() => session.campaign_id ? setAgentSidebarView("checklist") : setSidebarView("checklist")}>Checklist</button>
           </div>
 
+          {/* Pipeline mode placeholder */}
+          {session.campaign_id && agentSidebarView === "reasoning" && campaign?.pipeline_mode === "pipeline" && (
+            <div className={styles.reasoningFeed}>
+              <div className={styles.reasoningThinking}>
+                <span className={styles.reasoningThinkingLabel}>pipeline</span>
+                <p>Multi-agent pipeline mode is active. Specialist agents and full phase view are coming in a future update. The agent is running in the background — tool runs will appear in the Runs panel below.</p>
+              </div>
+            </div>
+          )}
+
           {/* Agent reasoning view */}
-          {session.campaign_id && agentSidebarView === "reasoning" && (
+          {session.campaign_id && agentSidebarView === "reasoning" && campaign?.pipeline_mode !== "pipeline" && (
             <div className={styles.reasoningFeed}>
               {campaign?.last_agent_reasoning && (campaign.status === "active" || campaign.status === "awaiting_approval") && (
                 <div className={styles.reasoningThinking}>
