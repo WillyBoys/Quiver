@@ -129,13 +129,17 @@ async def run_specialist(
         from app.agent.engine import run_campaign_loop
         await run_campaign_loop(specialist_campaign_id)
     finally:
-        _specialist_role_prompts.pop(specialist_campaign_id, None)
         async with AsyncSessionLocal() as db:
             result = await db.execute(select(Campaign).where(Campaign.id == specialist_campaign_id))
             camp = result.scalar_one_or_none()
             if camp and camp.status == "active":
                 camp.status = "completed"
                 await db.commit()
+        # Only clean up the role prompt if the specialist is fully done.
+        # If it is awaiting approval, _run_approved_then_resume will restart the loop
+        # and still needs the role prompt; the entry is inert once the campaign is done.
+        if not camp or camp.status != "awaiting_approval":
+            _specialist_role_prompts.pop(specialist_campaign_id, None)
     logger.info("PIPELINE | specialist %s (%s) finished", specialist_campaign_id, spec.role)
 
 
@@ -235,9 +239,9 @@ async def run_synthesis(
     ]
     findings_str = "\n".join(findings_lines) or "(none yet)"
 
-    MAX_OUTPUT = 400
+    MAX_OUTPUT = 300
     phase_lines = []
-    for run in phase_runs[:20]:
+    for run in phase_runs[:60]:
         out = (run.output or "")[:MAX_OUTPUT]
         if len(run.output or "") > MAX_OUTPUT:
             out += "..."
