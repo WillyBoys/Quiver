@@ -48,6 +48,10 @@ async def check_gate(phase: PhaseConfig, session_id: str) -> bool:
         artifacts = dict(sess.artifacts or {})
         if phase.gate_type == "has_hosts":
             return bool(artifacts.get("hosts"))
+        if phase.gate_type == "has_users":
+            return bool(artifacts.get("users"))
+        if phase.gate_type == "has_creds":
+            return bool(artifacts.get("creds") or artifacts.get("hashes"))
         if phase.gate_type == "has_findings_or_creds":
             has_creds = bool(artifacts.get("creds") or artifacts.get("hashes"))
             has_findings = bool(sess.findings)
