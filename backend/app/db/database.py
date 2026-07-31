@@ -30,6 +30,16 @@ async def init_db():
         # Enable WAL mode so reads never block writes (persists in the DB file)
         await conn.execute(text("PRAGMA journal_mode=WAL"))
         await conn.execute(text("PRAGMA busy_timeout=5000"))
+        # Drop pipeline_runs if it has the old schema (had a 'phase' NOT NULL column;
+        # current model uses 'current_phase'). create_all() recreates it correctly.
+        try:
+            result = await conn.execute(text("PRAGMA table_info(pipeline_runs)"))
+            columns = [row[1] for row in result.fetchall()]
+            if columns and "phase" in columns:
+                await conn.execute(text("DROP TABLE pipeline_runs"))
+                logger.info("Dropped old pipeline_runs table (schema migration: phase → current_phase)")
+        except Exception as e:
+            logger.warning("pipeline_runs schema check failed: %s", e)
         await conn.run_sync(Base.metadata.create_all)
         # Migrate: add checklist_state to existing sessions tables that pre-date this column
         try:
@@ -109,6 +119,11 @@ async def init_db():
             except OperationalError as e:
                 if "duplicate column" not in str(e).lower() and "already exists" not in str(e).lower():
                     logger.warning("Migration warning: %s", e)
+        try:
+            await conn.execute(text("ALTER TABLE runs ADD COLUMN campaign_id TEXT DEFAULT NULL"))
+        except OperationalError as e:
+            if "duplicate column" not in str(e).lower() and "already exists" not in str(e).lower():
+                logger.warning("Migration warning: %s", e)
         # Ensure indexes exist on pre-index DBs
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_runs_session_id ON runs (session_id)"

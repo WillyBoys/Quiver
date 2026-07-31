@@ -264,7 +264,10 @@ async def build_agent_prompt(campaign: Campaign, db: AsyncSession) -> str:
             f"  Status: {run.status}\n"
             f"  Output: {out or '(no output)'}\n"
         )
-        if run.command:
+        # Dedup list is campaign-scoped: parallel pipeline specialists each track their
+        # own history so they don't block each other. Old runs (campaign_id=None) are
+        # included for backward compatibility with pre-campaign_id data.
+        if run.command and (run.campaign_id is None or run.campaign_id == campaign.id):
             already_run_commands.append(f"  - {run.command}")
 
     actions_str = "\n".join(action_lines) or "  (none yet)"

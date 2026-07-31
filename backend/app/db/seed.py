@@ -795,8 +795,8 @@ DEFAULT_TOOLS = [
         "name": "trufflehog",
         "description": "Scan git repos for leaked secrets and credentials, with live API validation",
         "category": "secrets",
-        "binary": "trufflehog",
-        "default_flags": "git --only-verified",
+        "binary": "trufflehog-git",
+        "default_flags": "--only-verified",
         "parameters": [
             {"name": "repo", "placeholder": "https://github.com/org/repo", "required": True, "description": "Git repository URL"},
         ],

@@ -46,6 +46,8 @@ async def get_pipeline_phases(run_id: str, db: AsyncSession = Depends(get_db)):
             "role": _extract_role(camp.name),
             "campaign_id": camp.id,
             "campaign_status": camp.status,
+            "last_agent_reasoning": camp.last_agent_reasoning or "",
+            "iteration_count": camp.iteration_count or 0,
         })
 
     skipped_nums = {s["phase"] for s in (rec.skipped_phases or [])}

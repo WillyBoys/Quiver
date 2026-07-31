@@ -90,6 +90,22 @@ async def _reset_stale_campaigns():
             logger.warning("Startup: reset %d interrupted campaign(s) to paused", len(stale))
 
 
+async def _reset_stale_pipeline_runs():
+    """On startup, reset any PipelineRun still in 'running' status to 'paused'.
+    These were interrupted when the process died and are resumable."""
+    from app.models.pipeline import PipelineRun
+    from app.db.database import AsyncSessionLocal
+    from sqlalchemy import select
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(PipelineRun).where(PipelineRun.status == "running"))
+        stale = result.scalars().all()
+        for r in stale:
+            r.status = "paused"
+        if stale:
+            await db.commit()
+            logger.warning("Startup: reset %d interrupted pipeline run(s) to paused", len(stale))
+
+
 async def _reset_stale_runs():
     """On startup, mark any run still in 'running' status as 'error'.
     These are runs whose subprocess died when the backend process did."""
@@ -113,6 +129,7 @@ async def _reset_stale_runs():
 async def lifespan(app: FastAPI):
     logger.info("Quiver API starting up")
     await init_db()
+    await _reset_stale_pipeline_runs()
     await _reset_stale_runs()
     await _reset_stale_campaigns()
     await seed_default_tools()

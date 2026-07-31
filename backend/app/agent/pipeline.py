@@ -168,10 +168,14 @@ async def run_phase(
         specialist_pairs.append((camp, spec))
         logger.info("PIPELINE | created specialist campaign=%s role=%s", camp.id, spec.role)
 
-    await asyncio.gather(*[
+    results = await asyncio.gather(*[
         run_specialist(camp.id, spec, synthesis_directives)
         for camp, spec in specialist_pairs
-    ])
+    ], return_exceptions=True)
+
+    for r in results:
+        if isinstance(r, Exception):
+            logger.error("PIPELINE | specialist raised unhandled exception: %s", r)
 
     logger.info("PIPELINE | campaign=%s phase %d complete: %s",
                 parent.id, phase.phase_num, phase.name)
@@ -319,6 +323,11 @@ async def run_pipeline(campaign_id: str) -> None:
     """Top-level pipeline orchestrator — phases run sequentially, specialists in parallel."""
     logger.info("PIPELINE | campaign=%s starting pipeline", campaign_id)
 
+    resume_from_phase = 1
+    pipeline_record_id: str = ""
+    synthesis_directives: list[dict] = []
+    skipped: list[dict] = []
+
     async with AsyncSessionLocal() as db:
         parent = (await db.execute(
             select(Campaign).where(Campaign.id == campaign_id)
@@ -333,28 +342,55 @@ async def run_pipeline(campaign_id: str) -> None:
         engagement_type = parent.engagement_type or "external"
         provider = parent.ai_provider or "local"
         phases = PIPELINE_CONFIGS.get(engagement_type, PIPELINE_CONFIGS["external"])
-
-        pipeline_record = PipelineRun(
-            campaign_id=campaign_id,
-            session_id=parent.session_id,
-            engagement_type=engagement_type,
-            status="running",
-            current_phase=1,
-            phase_count=len(phases),
-            started_at=datetime.now(timezone.utc),
-        )
-        db.add(pipeline_record)
-        await db.commit()
-        await db.refresh(pipeline_record)
-        pipeline_record_id = pipeline_record.id
         parent_id = parent.id
         parent_session_id = parent.session_id
 
-    skipped: list[dict] = []
-    synthesis_directives: list[dict] = []
+        # Check for an existing incomplete run to resume rather than restarting from phase 1.
+        # "running" status after a fresh start means the previous process was killed mid-flight
+        # (Docker restart, crash, rebuild) — those are resumable too.
+        existing_run = (await db.execute(
+            select(PipelineRun)
+            .where(PipelineRun.campaign_id == campaign_id)
+            .where(PipelineRun.status.in_(["paused", "running", "error"]))
+            .order_by(PipelineRun.started_at.desc())
+        )).scalars().first()
+
+        if existing_run:
+            pipeline_record_id = existing_run.id
+            resume_from_phase = existing_run.current_phase
+            skipped = list(existing_run.skipped_phases or [])
+            # Restore synthesis directives from the last synthesis that ran before this phase
+            outputs = list(existing_run.synthesis_outputs or [])
+            if outputs:
+                last_output = outputs[-1]
+                if last_output.get("phase") == resume_from_phase - 1:
+                    synthesis_directives = last_output.get("directives", [])
+            existing_run.status = "running"
+            await db.commit()
+            logger.info("PIPELINE | campaign=%s resuming from phase %d (run=%s)",
+                        campaign_id, resume_from_phase, pipeline_record_id)
+        else:
+            pipeline_record = PipelineRun(
+                campaign_id=campaign_id,
+                session_id=parent.session_id,
+                engagement_type=engagement_type,
+                status="running",
+                current_phase=1,
+                phase_count=len(phases),
+                started_at=datetime.now(timezone.utc),
+            )
+            db.add(pipeline_record)
+            await db.commit()
+            await db.refresh(pipeline_record)
+            pipeline_record_id = pipeline_record.id
+            logger.info("PIPELINE | campaign=%s fresh run (run=%s)", campaign_id, pipeline_record_id)
 
     try:
         for phase_idx, phase in enumerate(phases):
+            # Skip phases already completed when resuming a paused run
+            if phase.phase_num < resume_from_phase:
+                continue
+
             # Check if the orchestrating campaign has been paused or stopped
             async with AsyncSessionLocal() as db:
                 current_parent = (await db.execute(

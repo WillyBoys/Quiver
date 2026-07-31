@@ -5,7 +5,7 @@ import uuid as _uuid_mod
 import asyncio
 import logging
 from datetime import datetime, timezone
-from sqlalchemy import select, func
+from sqlalchemy import select, func, or_
 from app.db.database import AsyncSessionLocal
 from app.models.campaign import Campaign, ApprovalRequest
 from app.models.run import Run
@@ -352,6 +352,7 @@ async def _generate_and_save_summary(campaign_id: str, session_id: str, provider
             # Always create a summary run so it appears in the session terminal.
             summary_run = Run(
                 session_id=session_id,
+                campaign_id=campaign_id,
                 tool_id="agent",
                 tool_name="_summary",
                 command="",
@@ -433,6 +434,7 @@ async def _attempt_fix(campaign: Campaign, failed_run: Run, tool, provider: str)
 
         run = Run(
             session_id=campaign.session_id,
+            campaign_id=campaign.id,
             tool_id=retry_tool.id if retry_tool else "agent",
             tool_name=tool_name,
             command=command,
@@ -602,14 +604,17 @@ async def run_campaign_agent(campaign_id: str) -> str:
             cmd_list = cmd_parts
             command = " ".join(cmd_list)
 
-        # Hard duplicate guard: block re-running a command that already completed successfully.
-        # Failed/errored runs are allowed to be retried.
+        # Hard duplicate guard: block re-running a command that already completed successfully
+        # by THIS campaign. Parallel pipeline specialists each get their own dedup scope so
+        # they don't block each other. Runs with no campaign_id (old data) are treated as
+        # belonging to any campaign for backward compatibility.
         if campaign.session_id:
             dup = (await db.execute(
                 select(Run)
                 .where(Run.session_id == campaign.session_id)
                 .where(Run.command == command)
                 .where(Run.status == "complete")
+                .where(or_(Run.campaign_id == None, Run.campaign_id == campaign_id))
             )).scalars().first()
             if dup:
                 logger.warning("AGENT | campaign=%s duplicate blocked (already succeeded): %s",
@@ -648,6 +653,7 @@ async def run_campaign_agent(campaign_id: str) -> str:
         run = Run(
             id=pregenerated_run_id,
             session_id=campaign.session_id,
+            campaign_id=campaign_id,
             tool_id=tool.id if tool else "agent",
             tool_name=tool_name,
             command=command,
@@ -705,7 +711,6 @@ async def run_campaign_loop(campaign_id: str) -> None:
       - safety cap of 30 iterations is reached
     """
     DEFAULT_MAX_ITERATIONS = 50
-    MAX_CONSECUTIVE_DUPES = 5
     STOP_STATUSES = {"completed", "not_found", "pending_approval", "waiting_approval", "auth_error"}
 
     if campaign_id in _active_campaign_loops:
@@ -723,7 +728,9 @@ async def run_campaign_loop(campaign_id: str) -> None:
                 from app.agent.pipeline import run_pipeline
                 await run_pipeline(campaign_id)
                 return
-            elif _c.max_iterations is None or _c.max_iterations <= 0:
+            is_pipeline_specialist = (getattr(_c, "description", "") or "").startswith("pipeline_run:")
+            MAX_CONSECUTIVE_DUPES = 15 if is_pipeline_specialist else 5
+            if _c.max_iterations is None or _c.max_iterations <= 0:
                 MAX_ITERATIONS = 500  # None/0 = unlimited sentinel
             else:
                 MAX_ITERATIONS = _c.max_iterations
@@ -843,6 +850,7 @@ async def execute_approval(approval_id: str) -> bool:
 
         run = Run(
             session_id=campaign.session_id,
+            campaign_id=campaign.id,
             tool_id="agent",
             tool_name=approval.tool_name,
             command=approval.command,

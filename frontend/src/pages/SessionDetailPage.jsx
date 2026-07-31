@@ -1152,13 +1152,23 @@ export default function SessionDetailPage() {
 
                   {phase.specialists.map((spec) => (
                     <div key={spec.role} className={styles.pipelineSpecialist}>
-                      <span className={styles.pipelineSpecRole}>{spec.role}</span>
-                      <span className={`${styles.pipelineSpecStatus} ${styles[`specStatus_${spec.campaign_status}`]}`}>
-                        {spec.campaign_status === "active"             && "● running"}
-                        {spec.campaign_status === "awaiting_approval"  && "⚠ approval"}
-                        {spec.campaign_status === "completed"          && "✓ done"}
-                        {spec.campaign_status === "paused"             && "‖ paused"}
-                      </span>
+                      <div className={styles.pipelineSpecHeader}>
+                        <span className={styles.pipelineSpecRole}>{spec.role}</span>
+                        <div className={styles.pipelineSpecMeta}>
+                          {spec.iteration_count > 0 && (
+                            <span className={styles.pipelineSpecIter}>{spec.iteration_count} iter</span>
+                          )}
+                          <span className={`${styles.pipelineSpecStatus} ${styles[`specStatus_${spec.campaign_status}`]}`}>
+                            {spec.campaign_status === "active"             && "● running"}
+                            {spec.campaign_status === "awaiting_approval"  && "⚠ approval"}
+                            {spec.campaign_status === "completed"          && "✓ done"}
+                            {spec.campaign_status === "paused"             && "‖ paused"}
+                          </span>
+                        </div>
+                      </div>
+                      {spec.campaign_status === "active" && spec.last_agent_reasoning && (
+                        <p className={styles.pipelineSpecReasoning}>{spec.last_agent_reasoning}</p>
+                      )}
                     </div>
                   ))}
 
