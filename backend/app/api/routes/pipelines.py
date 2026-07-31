@@ -86,6 +86,7 @@ async def get_pipeline_phases(run_id: str, db: AsyncSession = Depends(get_db)):
             "status": phase_status,
             "specialists": specialists,
             "synthesis_directives": synth["directives"] if synth else None,
+            "synthesis_reasoning": synth.get("reasoning", "") if synth else "",
             "skip_reason": skipped_reasons.get(pn, ""),
         })
 

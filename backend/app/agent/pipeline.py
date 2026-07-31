@@ -284,6 +284,7 @@ If there is nothing specific worth prioritizing beyond the standard phase plan, 
 
     # ── LLM call ──────────────────────────────────────────────────────────────
     directives: list[dict] = []
+    raw: str = ""
     try:
         raw, _ = await generate_summary(prompt, provider=provider)
         logger.info("PIPELINE SYNTHESIS | campaign=%s phase=%d raw: %.400s",
@@ -307,6 +308,7 @@ If there is nothing specific worth prioritizing beyond the standard phase plan, 
                 "phase": phase.phase_num,
                 "phase_name": phase.name,
                 "directives": directives,
+                "reasoning": raw,
             })
             rec.synthesis_outputs = current_outputs
             flag_modified(rec, "synthesis_outputs")
