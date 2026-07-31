@@ -452,5 +452,9 @@ async def run_pipeline(campaign_id: str) -> None:
             camp.status = "completed"
             await db.commit()
 
+    # Generate a consolidated summary across the full pipeline engagement
+    from app.agent.engine import _generate_and_save_summary, _bg_task
+    _bg_task(_generate_and_save_summary(parent_id, parent_session_id, provider))
+
     logger.info("PIPELINE | campaign=%s pipeline complete. skipped=%d phase(s)",
                 parent_id, len(skipped))

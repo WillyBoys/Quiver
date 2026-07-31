@@ -530,10 +530,11 @@ async def run_campaign_agent(campaign_id: str) -> str:
         if action.get("done"):
             logger.info("AGENT | campaign=%s complete: %s", campaign_id, action.get("reasoning", ""))
             session_id_for_summary = campaign.session_id
+            is_pipeline_specialist = (campaign.description or "").startswith("pipeline_run:")
             campaign.status = "completed"
             campaign.last_run_at = datetime.now(timezone.utc)
             await db.commit()
-            if session_id_for_summary:
+            if session_id_for_summary and not is_pipeline_specialist:
                 _bg_task(_generate_and_save_summary(campaign_id, session_id_for_summary, provider))
             return "completed"
 
