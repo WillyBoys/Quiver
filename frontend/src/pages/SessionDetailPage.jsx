@@ -51,8 +51,11 @@ export default function SessionDetailPage() {
   const [pipelineRun, setPipelineRun] = useState(null);
   const [pipelinePhases, setPipelinePhases] = useState([]);
   const [agentSidebarView, setAgentSidebarView] = useState("reasoning"); // "reasoning" | "tools" | "checklist"
+  const [selectedRunId, setSelectedRunId] = useState(null);
+  const [expandedArtifacts, setExpandedArtifacts] = useState(new Set());
   const connectedRunIds = useRef(new Set());
   const openSocketsRef = useRef([]);
+  const drawerScrollRef = useRef(null);
   const [leftWidth, setLeftWidth] = useState(260);
   const [rightWidth, setRightWidth] = useState(240);
   const [notesSectionHeight, setNotesSectionHeight] = useState(130);
@@ -805,6 +808,38 @@ export default function SessionDetailPage() {
   }
 
   const runsById = useMemo(() => Object.fromEntries(runs.map((r) => [r.id, r])), [runs]);
+
+  useEffect(() => {
+    if (!selectedRunId || !drawerScrollRef.current) return;
+    drawerScrollRef.current.scrollTop = drawerScrollRef.current.scrollHeight;
+  }, [selectedRunId, liveOutput]);
+
+  const toggleArtifact = (key) => setExpandedArtifacts(prev => {
+    const next = new Set(prev);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    return next;
+  });
+
+  const artifactCount = (key) => {
+    const v = artifacts[key];
+    if (!v) return 0;
+    return Array.isArray(v) ? v.length : Object.keys(v).length;
+  };
+
+  const renderArtifactValues = (key) => {
+    const v = artifacts[key];
+    if (!v) return null;
+    if (Array.isArray(v)) return v.map((item, i) => (
+      <div key={i} className={styles.artExpandRow}>{item}</div>
+    ));
+    return Object.entries(v).map(([k, val]) => (
+      <div key={k} className={styles.artExpandRow}>
+        <span className={styles.artExpandKey}>{k}</span>
+        {val && <span className={styles.artExpandVal}>{val}</span>}
+      </div>
+    ));
+  };
+
   const runningToolIds = useMemo(
     () => new Set(runs.filter((r) => streaming[r.id]).map((r) => r.tool_id)),
     [runs, streaming]
@@ -838,6 +873,9 @@ export default function SessionDetailPage() {
   }
 
   if (!session) return <div className={styles.loading}>Loading session...</div>;
+
+  const isAiSession = Boolean(session.campaign_id && campaign);
+  const isPipelineMode = campaign?.pipeline_mode === "pipeline";
 
   return (
     <div className={styles.page}>
@@ -882,7 +920,7 @@ export default function SessionDetailPage() {
                 </div>
                 <span className={styles.iterationHint}>
                   {agentForm.pipeline_mode === "pipeline"
-                    ? "Parallel specialist agents run each phase — faster on large scopes. Full reasoning view coming soon."
+                    ? "Parallel specialist agents run each phase — faster on large scopes."
                     : "One agent reasons through the full engagement — maximum creativity and adaptability."}
                 </span>
               </div>
@@ -1040,6 +1078,11 @@ export default function SessionDetailPage() {
                   })()}
                 </span>
                 <span className={styles.infoBarProvider}>{campaign.ai_provider === "claude" ? "Claude" : "Local AI"}</span>
+                {campaign.status === "awaiting_approval" && (
+                  <button className={styles.approvalBadge} onClick={() => navigate("/approvals")}>
+                    ⚠ Approvals
+                  </button>
+                )}
                 {campaign.status !== "completed" && (
                   <button className={styles.agentToggleBtn} onClick={handleAgentToggle}>
                     {campaign.status === "active"
@@ -1101,6 +1144,307 @@ export default function SessionDetailPage() {
       </div>
 
       <div className={styles.workspace}>
+
+        {/* ── Single-agent AI session — Narrative + Intel rail ── */}
+        {isAiSession && !isPipelineMode && (
+          <div className={styles.aiWorkspace}>
+            <div className={styles.narrativeFeed}>
+              <div className={styles.narrativeScroll}>
+                {runs.filter(r => r.reasoning).length === 0 && !campaign.last_agent_reasoning && (
+                  <p className={styles.narrativeEmpty}>Waiting for agent to start…</p>
+                )}
+                {[...runs].reverse().filter(r => r.reasoning).map((run) => {
+                  if (run.tool_name === "_summary") {
+                    const sf = run.param_values?._findings || [];
+                    return (
+                      <div key={run.id} className={styles.feedSummaryCard}>
+                        <div className={`${styles.feedIcon} ${styles.feedIconDone}`}>✓</div>
+                        <div className={styles.feedBody}>
+                          <div className={styles.feedMeta}>
+                            <span className={styles.feedWho}>Agent Summary</span>
+                          </div>
+                          {run.reasoning && <p className={styles.feedThought}>{run.reasoning}</p>}
+                          {sf.length > 0 && (
+                            <div className={styles.feedSummaryFindings}>
+                              {sf.map((f, fi) => (
+                                <div key={fi} className={styles.feedSummaryFinding}>
+                                  <span className={`badge badge-${f.severity}`}>{f.severity}</span>
+                                  <span className={styles.feedSummaryFindingTitle}>{f.title}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  }
+                  return (
+                    <div key={run.id} className={styles.feedEntry}>
+                      <div className={styles.feedIcon}>⬡</div>
+                      <div className={styles.feedBody}>
+                        <div className={styles.feedMeta}>
+                          <span className={styles.feedWho}>Agent</span>
+                          <span className={styles.feedWhen}>{fmtRunTime(run.created_at)}</span>
+                        </div>
+                        <p className={styles.feedThought}>{run.reasoning}</p>
+                        <div
+                          className={`${styles.feedRunRow} ${selectedRunId === run.id ? styles.feedRunRowActive : ""}`}
+                          onClick={() => setSelectedRunId(run.id)}
+                        >
+                          <span className={styles.feedRunTool}>{run.tool_name}</span>
+                          <span className={styles.feedRunCmd}>{run.command}</span>
+                          <span className={run.status === "complete" ? styles.feedRunOk : styles.feedRunErr}>
+                            {run.status === "complete" ? "✓" : "✗"}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+                {campaign.last_agent_reasoning && (campaign.status === "active" || campaign.status === "awaiting_approval") && (
+                  <div className={`${styles.feedEntry} ${styles.feedEntryLive}`}>
+                    <div className={`${styles.feedIcon} ${styles.feedIconLive}`}>⬡</div>
+                    <div className={styles.feedBody}>
+                      <div className={styles.feedMeta}>
+                        <span className={styles.feedWho}>Agent</span>
+                        {campaign.iteration_count > 0 && <span className={styles.feedWhen}>iter {campaign.iteration_count}</span>}
+                        {campaign.status === "active" && (
+                          <span className={styles.feedLiveBadge}><span className={styles.feedPulse} />thinking</span>
+                        )}
+                        {campaign.status === "awaiting_approval" && (
+                          <span className={styles.feedApprovalBadge}>awaiting approval</span>
+                        )}
+                      </div>
+                      <p className={styles.feedThought}>{campaign.last_agent_reasoning}</p>
+                      {runs.find(r => streaming[r.id]) && (() => {
+                        const lr = runs.find(r => streaming[r.id]);
+                        return (
+                          <div
+                            className={`${styles.feedRunRow} ${selectedRunId === lr.id ? styles.feedRunRowActive : ""}`}
+                            onClick={() => setSelectedRunId(lr.id)}
+                          >
+                            <span className={styles.feedRunTool}>{lr.tool_name}</span>
+                            <span className={styles.feedRunCmd}>{lr.command}</span>
+                            <span className={styles.feedPulse} />
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className={styles.intelRail}>
+              <div className={styles.railSectionTitle}>
+                Findings <span className={styles.railCount}>{(session.findings||[]).length}</span>
+              </div>
+              {!(session.findings||[]).length && <p className={styles.railEmpty}>No findings yet.</p>}
+              {(session.findings||[]).map((f) => (
+                <div key={f.id} className={styles.railFinding}>
+                  <div className={styles.railFindingTop}>
+                    <span className={`badge badge-${f.severity}`}>{f.severity}</span>
+                    <div className={styles.railFindingTitle}>{f.title}</div>
+                  </div>
+                  {(f.evidence_run_ids||[]).map(rid => {
+                    const er = runsById[rid];
+                    if (!er) return null;
+                    return (
+                      <div key={rid} className={`${styles.feedRunRow} ${selectedRunId === rid ? styles.feedRunRowActive : ""}`} onClick={() => setSelectedRunId(rid)}>
+                        <span className={styles.feedRunTool}>{er.tool_name}</span>
+                        <span className={styles.feedRunCmd}>{er.command}</span>
+                        <span className={er.status === "complete" ? styles.feedRunOk : styles.feedRunErr}>
+                          {er.status === "complete" ? "✓" : "✗"}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
+              <div className={styles.railSectionTitle} style={{ marginTop: 8 }}>Artifacts</div>
+              <div className={styles.artList}>
+                {["hosts","users","creds","hashes"].map(key => {
+                  const count = artifactCount(key);
+                  const expanded = expandedArtifacts.has(key);
+                  return (
+                    <div key={key}>
+                      <div className={`${styles.artRow} ${count ? styles.artRowClickable : ""}`} onClick={() => count && toggleArtifact(key)}>
+                        <span className={styles.artKey}>{key}</span>
+                        <span className={styles.artVal}>{count || "—"}</span>
+                        {count > 0 && <span className={styles.artChevron}>{expanded ? "▴" : "▾"}</span>}
+                      </div>
+                      {expanded && <div className={styles.artExpand}>{renderArtifactValues(key)}</div>}
+                    </div>
+                  );
+                })}
+              </div>
+              <div className={styles.railSectionTitle} style={{ marginTop: 8 }}>Progress</div>
+              <div className={styles.railProgress}>
+                <div className={styles.railProgressRow}>
+                  <span className={styles.railProgressLabel}>Iteration</span>
+                  <span className={styles.railProgressVal}>
+                    {campaign.iteration_count || 0}{campaign.max_iterations ? ` / ${campaign.max_iterations}` : ""}
+                  </span>
+                </div>
+                {campaign.max_iterations && (
+                  <div className={styles.railBar}>
+                    <div className={styles.railBarFill}
+                      style={{ width: `${Math.min(100, ((campaign.iteration_count||0)/campaign.max_iterations)*100)}%` }} />
+                  </div>
+                )}
+                <div className={styles.railProgressRow}>
+                  <span className={styles.railProgressLabel}>Findings</span>
+                  <span className={`${styles.railProgressVal} ${(session.findings||[]).length ? styles.railCountHigh : ""}`}>
+                    {(session.findings||[]).length}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Pipeline AI session — Mission Control ── */}
+        {isAiSession && isPipelineMode && (
+          <div className={styles.mcWorkspace}>
+            <div className={styles.mcLanes}
+              style={{ gridTemplateColumns: `repeat(${Math.max(pipelinePhases.length, 1)}, 1fr)` }}>
+              {pipelinePhases.length === 0 && (
+                <div className={styles.mcLane}><p className={styles.mcLaneEmpty}>Pipeline starting…</p></div>
+              )}
+              {pipelinePhases.map((phase) => (
+                <div key={phase.phase_num} className={`${styles.mcLane} ${styles[`mcLane_${phase.status}`]}`}>
+                  <div className={styles.mcLaneHdr}>
+                    <span className={styles.mcLaneName}>Phase {phase.phase_num} · {phase.name}</span>
+                    <span className={`${styles.mcBadge} ${styles[`badge_${phase.status}`]}`}>
+                      {phase.status === "running"  && "●"}
+                      {phase.status === "complete" && "✓"}
+                      {phase.status === "waiting"  && "—"}
+                      {phase.status === "skipped"  && "skip"}
+                      {phase.status === "error"    && "✗"}
+                    </span>
+                  </div>
+                  {phase.specialists.map((spec) => (
+                    <div key={spec.role} className={`${styles.mcSpecRow} ${spec.campaign_status === "active" ? styles.mcSpecRowActive : ""}`}>
+                      <span className={styles.mcSpecName}>{spec.role}</span>
+                      <span className={`${styles.mcSpecIterBadge} ${spec.campaign_status === "active" ? styles.mcSpecIterLive : ""}`}>
+                        {spec.iteration_count > 0 ? `${spec.iteration_count}` : ""}
+                      </span>
+                    </div>
+                  ))}
+                  {phase.status === "waiting" && phase.gate_description && (
+                    <p className={styles.mcGate}>gate: {phase.gate_description}</p>
+                  )}
+                  {phase.status === "skipped" && (
+                    <p className={styles.mcGate}>{phase.skip_reason || "gate not met"}</p>
+                  )}
+                  {phase.synthesis_directives?.length > 0 && (
+                    <div className={styles.mcSynthLine}>
+                      ⚡ {phase.synthesis_directives.length} chain{phase.synthesis_directives.length !== 1 ? "s" : ""}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+            <div className={styles.mcBottom}>
+              <div className={styles.mcReasonPanel}>
+                <div className={styles.mcPanelHdr}>Reasoning</div>
+                <div className={styles.mcReasonScroll}>
+                  {pipelinePhases.filter(p => p.synthesis_reasoning).map((phase) => (
+                    <div key={`synth-${phase.phase_num}`} className={styles.mcSynthBlock}>
+                      <div className={styles.mcSynthWho}>⚡ Synthesis · After Phase {phase.phase_num}</div>
+                      <p className={styles.mcSynthText}>{phase.synthesis_reasoning}</p>
+                      {phase.synthesis_directives?.length > 0 && (
+                        <div className={styles.mcSynthPill}>
+                          ⚡ {phase.synthesis_directives.length} chain{phase.synthesis_directives.length !== 1 ? "s" : ""} → Phase {phase.phase_num + 1}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  {pipelinePhases.flatMap(p => p.specialists).filter(s => s.last_agent_reasoning).map((spec) => {
+                    const specRuns = runs.filter(r => r.campaign_id === spec.campaign_id).slice(0, 10);
+                    return (
+                      <div key={spec.campaign_id} className={styles.mcSpecBlock}>
+                        <div className={`${styles.mcSpecWho} ${spec.campaign_status === "active" ? styles.mcSpecWhoLive : styles.mcSpecWhoDone}`}>
+                          {spec.campaign_status === "active" && <span className={styles.feedPulse} />}
+                          {spec.role}
+                          {spec.iteration_count > 0 && <span className={styles.mcSpecIterLabel}> · {spec.iteration_count} iter</span>}
+                        </div>
+                        <p className={styles.mcSpecThought}>{spec.last_agent_reasoning}</p>
+                        {specRuns.length > 0 && (
+                          <div className={styles.mcSpecRuns}>
+                            {specRuns.map(r => (
+                              <div
+                                key={r.id}
+                                className={`${styles.feedRunRow} ${selectedRunId === r.id ? styles.feedRunRowActive : ""}`}
+                                onClick={() => setSelectedRunId(r.id)}
+                              >
+                                <span className={styles.feedRunTool}>{r.tool_name}</span>
+                                <span className={styles.feedRunCmd}>{r.command}</span>
+                                <span className={r.status === "complete" ? styles.feedRunOk : r.status === "running" ? styles.feedPulse : styles.feedRunErr}>
+                                  {r.status === "complete" ? "✓" : r.status === "running" ? "" : "✗"}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {pipelinePhases.length === 0 && (
+                    <p className={styles.mcReasonEmpty}>Pipeline hasn't started yet.</p>
+                  )}
+                </div>
+              </div>
+              <div className={styles.mcRightPanel}>
+                <div className={styles.mcPanelHdr}>
+                  Findings <span className={styles.railCount}>{(session.findings||[]).length}</span>
+                </div>
+                {(session.findings||[]).map((f) => (
+                  <div key={f.id} className={styles.railFinding}>
+                    <div className={styles.railFindingTop}>
+                      <span className={`badge badge-${f.severity}`}>{f.severity}</span>
+                      <div className={styles.railFindingTitle}>{f.title}</div>
+                    </div>
+                    {(f.evidence_run_ids||[]).map(rid => {
+                      const er = runsById[rid];
+                      if (!er) return null;
+                      return (
+                        <div key={rid} className={`${styles.feedRunRow} ${selectedRunId === rid ? styles.feedRunRowActive : ""}`} onClick={() => setSelectedRunId(rid)}>
+                          <span className={styles.feedRunTool}>{er.tool_name}</span>
+                          <span className={styles.feedRunCmd}>{er.command}</span>
+                          <span className={er.status === "complete" ? styles.feedRunOk : styles.feedRunErr}>
+                            {er.status === "complete" ? "✓" : "✗"}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))}
+                {!(session.findings||[]).length && <p className={styles.railEmpty}>No findings yet.</p>}
+                <div className={styles.mcPanelHdr} style={{ marginTop: 12 }}>Artifacts</div>
+                <div className={styles.artList}>
+                  {["hosts","users","creds","hashes"].map(key => {
+                    const count = artifactCount(key);
+                    const expanded = expandedArtifacts.has(key);
+                    return (
+                      <div key={key}>
+                        <div className={`${styles.artRow} ${count ? styles.artRowClickable : ""}`} onClick={() => count && toggleArtifact(key)}>
+                          <span className={styles.artKey}>{key}</span>
+                          {count > 0 && <span className={styles.artChevron}>{expanded ? "▴" : "▾"}</span>}
+                          <span className={styles.artVal}>{count || "—"}</span>
+                        </div>
+                        {expanded && <div className={styles.artExpand}>{renderArtifactValues(key)}</div>}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Manual / non-AI session — existing 3-column layout ── */}
+        {!isAiSession && (
+          <>
         {/* Left: reasoning terminal (agent sessions) or tool picker / checklist (manual) */}
         <aside className={styles.toolPicker} style={{ width: leftWidth, minWidth: leftWidth }}>
           {/* Unified toggle — Reasoning tab only appears when agent is active */}
@@ -1749,6 +2093,8 @@ export default function SessionDetailPage() {
             )}
           </div>
         </aside>
+          </>
+        )}
       </div>
 
       {/* Wordlist picker modal */}
@@ -2282,6 +2628,40 @@ export default function SessionDetailPage() {
           </div>
         </div>
       )}
+
+      {/* ── Tool output drawer ─────────────────────────────────────────── */}
+      {selectedRunId && (() => {
+        const dr = (runsById || {})[selectedRunId];
+        if (!dr) return null;
+        const drOutput = liveOutput[selectedRunId] || dr.output || "";
+        const drIsLive = Boolean(streaming[selectedRunId]);
+        return (
+          <>
+            <div className={styles.drawerBackdrop} onClick={() => setSelectedRunId(null)} />
+            <div className={styles.outputDrawer}>
+              <div className={styles.drawerHeader}>
+                <div className={styles.drawerHeaderMeta}>
+                  <span className={styles.drawerTool}>{dr.tool_name}</span>
+                  {drIsLive && <span className={styles.drawerLivePill}>● live</span>}
+                  {dr.status === "complete" && <span className={styles.drawerOkPill}>✓ done</span>}
+                  {dr.status === "error" && <span className={styles.drawerErrPill}>✗ error</span>}
+                </div>
+                <button className={styles.drawerClose} onClick={() => setSelectedRunId(null)}>✕</button>
+              </div>
+              {dr.command && (
+                <div className={styles.drawerCmd}>{dr.command}</div>
+              )}
+              <div className={styles.drawerBody} ref={drawerScrollRef}>
+                {drOutput ? (
+                  <pre className={styles.drawerOutput}>{drOutput}</pre>
+                ) : (
+                  <p className={styles.drawerEmpty}>No output captured yet.</p>
+                )}
+              </div>
+            </div>
+          </>
+        );
+      })()}
     </div>
   );
 }

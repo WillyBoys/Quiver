@@ -139,6 +139,19 @@ DEFAULT_TOOLS = [
         "is_builtin": True,
     },
     {
+        "name": "subfinder",
+        "description": "Fast passive subdomain enumeration using 40+ OSINT sources — lightweight first pass before active DNS brute-forcing",
+        "category": "recon",
+        "binary": "subfinder",
+        "default_flags": "-silent",
+        "parameters": [
+            {"name": "domain", "flag": "-d", "placeholder": "target.com", "required": True, "description": "Target domain"},
+        ],
+        "agent_mode": "passive",
+        "workflow_tags": ["external", "web"],
+        "is_builtin": True,
+    },
+    {
         "name": "Subdominator",
         "description": "Passive subdomain enumeration using 73+ OSINT sources (requires Python 3.13+; add to user-pip.txt to install)",
         "category": "recon",

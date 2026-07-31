@@ -269,6 +269,7 @@ def _run_dict(r: Run) -> dict:
     return {
         "id": r.id,
         "session_id": r.session_id,
+        "campaign_id": r.campaign_id,
         "tool_id": r.tool_id,
         "tool_name": r.tool_name,
         "command": r.command,

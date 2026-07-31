@@ -32,6 +32,16 @@ RUN curl -fL --retry 3 --retry-delay 2 \
     -o /usr/local/bin/kerbrute && chmod +x /usr/local/bin/kerbrute \
     || echo "WARNING: kerbrute download failed — binary will not be available"
 
+# subfinder — not in Kali apt; download pre-built binary from ProjectDiscovery releases
+RUN VER=$(curl -fsSL "https://api.github.com/repos/projectdiscovery/subfinder/releases/latest" \
+          | grep '"tag_name"' | cut -d'"' -f4 | tr -d 'v') && \
+    curl -fsSL "https://github.com/projectdiscovery/subfinder/releases/download/v${VER}/subfinder_${VER}_linux_amd64.zip" \
+         -o /tmp/subfinder.zip && \
+    unzip -q /tmp/subfinder.zip subfinder -d /usr/local/bin && \
+    chmod +x /usr/local/bin/subfinder && \
+    rm -f /tmp/subfinder.zip \
+    || echo "WARNING: subfinder download failed — binary will not be available"
+
 # SpiSuite — not in Kali; build from source
 RUN curl -L https://go.dev/dl/go1.24.5.linux-amd64.tar.gz | tar xz -C /usr/local && \
     git clone --depth=1 https://github.com/waffl3ss/SpiSuite.git /opt/SpiSuite && \
