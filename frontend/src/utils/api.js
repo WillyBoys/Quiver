@@ -123,6 +123,11 @@ export const api = {
     run:     (id)       => req(`/campaigns/${id}/run`, { method: "POST" }),
     session: (id)       => req(`/campaigns/${id}/session`),
   },
+  pipelines: {
+    list:      (campaign_id) => req(`/pipelines/${campaign_id ? `?campaign_id=${campaign_id}` : ""}`),
+    get:       (id)          => req(`/pipelines/${id}`),
+    getPhases: (id)          => req(`/pipelines/${id}/phases`),
+  },
   approvals: {
     list:    (status = "pending") => req(`/approvals/?status=${status}`),
     pending: ()                   => req("/approvals/pending-count"),

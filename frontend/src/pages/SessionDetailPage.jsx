@@ -48,6 +48,8 @@ export default function SessionDetailPage() {
   const [newTargetValue, setNewTargetValue] = useState("");
 
   const [campaign, setCampaign] = useState(null);
+  const [pipelineRun, setPipelineRun] = useState(null);
+  const [pipelinePhases, setPipelinePhases] = useState([]);
   const [agentSidebarView, setAgentSidebarView] = useState("reasoning"); // "reasoning" | "tools" | "checklist"
   const connectedRunIds = useRef(new Set());
   const openSocketsRef = useRef([]);
@@ -204,6 +206,24 @@ export default function SessionDetailPage() {
     };
   }, [session?.campaign_id, sessionId]);
 
+  // Poll pipeline phases when campaign is in pipeline mode
+  useEffect(() => {
+    if (!campaign?.id || campaign.pipeline_mode !== "pipeline") return;
+    async function refreshPipeline() {
+      try {
+        const runs = await api.pipelines.list(campaign.id);
+        if (runs.length > 0) {
+          const latest = runs[0];
+          setPipelineRun(latest);
+          const phases = await api.pipelines.getPhases(latest.id);
+          setPipelinePhases(phases);
+        }
+      } catch {}
+    }
+    refreshPipeline();
+    const iv = setInterval(refreshPipeline, 4000);
+    return () => clearInterval(iv);
+  }, [campaign?.id, campaign?.pipeline_mode]);
 
   const enabledTools = useMemo(() => tools.filter((t) => t.enabled), [tools]);
   const filteredTools = useMemo(() => {
@@ -1098,13 +1118,62 @@ export default function SessionDetailPage() {
               onClick={() => session.campaign_id ? setAgentSidebarView("checklist") : setSidebarView("checklist")}>Checklist</button>
           </div>
 
-          {/* Pipeline mode placeholder */}
+          {/* Pipeline panel */}
           {session.campaign_id && agentSidebarView === "reasoning" && campaign?.pipeline_mode === "pipeline" && (
-            <div className={styles.reasoningFeed}>
-              <div className={styles.reasoningThinking}>
-                <span className={styles.reasoningThinkingLabel}>pipeline</span>
-                <p>Multi-agent pipeline mode is active. Specialist agents and full phase view are coming in a future update. The agent is running in the background — tool runs will appear in the Runs panel below.</p>
-              </div>
+            <div className={styles.pipelinePanel}>
+              {pipelinePhases.length === 0 && (
+                <p className={styles.pipelineEmpty}>
+                  {pipelineRun ? "Loading phases…" : "Pipeline hasn't started yet."}
+                </p>
+              )}
+              {pipelinePhases.map((phase) => (
+                <div key={phase.phase_num} className={styles.pipelinePhaseBlock}>
+                  <div className={styles.pipelinePhaseHeader}>
+                    <span className={styles.pipelinePhaseName}>
+                      Phase {phase.phase_num} — {phase.name}
+                    </span>
+                    <span className={`${styles.pipelineBadge} ${styles[`badge_${phase.status}`]}`}>
+                      {phase.status === "running"  && "● running"}
+                      {phase.status === "complete" && "✓ complete"}
+                      {phase.status === "waiting"  && "waiting"}
+                      {phase.status === "skipped"  && "– skipped"}
+                      {phase.status === "error"    && "✗ error"}
+                    </span>
+                  </div>
+
+                  {phase.status === "waiting" && phase.gate_description && (
+                    <p className={styles.pipelineGate}>gate: {phase.gate_description}</p>
+                  )}
+                  {phase.status === "skipped" && (
+                    <p className={styles.pipelineGate}>
+                      {phase.skip_reason || phase.gate_description || "gate not met"}
+                    </p>
+                  )}
+
+                  {phase.specialists.map((spec) => (
+                    <div key={spec.role} className={styles.pipelineSpecialist}>
+                      <span className={styles.pipelineSpecRole}>{spec.role}</span>
+                      <span className={`${styles.pipelineSpecStatus} ${styles[`specStatus_${spec.campaign_status}`]}`}>
+                        {spec.campaign_status === "active"             && "● running"}
+                        {spec.campaign_status === "awaiting_approval"  && "⚠ approval"}
+                        {spec.campaign_status === "completed"          && "✓ done"}
+                        {spec.campaign_status === "paused"             && "‖ paused"}
+                      </span>
+                    </div>
+                  ))}
+
+                  {phase.synthesis_directives && phase.synthesis_directives.length > 0 && (
+                    <div className={styles.pipelineSynthesis}>
+                      <span className={styles.pipelineSynthesisLabel}>synthesis</span>
+                      {phase.synthesis_directives.map((d, di) => (
+                        <p key={di} className={`${styles.pipelineDirective} ${styles[`priority_${d.priority}`]}`}>
+                          {d.directive}
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
             </div>
           )}
 

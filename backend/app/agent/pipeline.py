@@ -79,12 +79,13 @@ async def _create_specialist_campaign(
     parent: Campaign,
     spec: SpecialistConfig,
     pipeline_run_id: str,
+    phase_num: int,
 ) -> Campaign:
     """Create a child Campaign record for a specialist agent."""
     async with AsyncSessionLocal() as db:
         specialist = Campaign(
             name=f"[Pipeline:{pipeline_run_id[:8]}] {spec.role}",
-            description=f"pipeline_run:{pipeline_run_id}",
+            description=f"pipeline_run:{pipeline_run_id}:phase:{phase_num}",
             target_scope=list(parent.target_scope or []),
             risk_level=parent.risk_level,
             ai_provider=parent.ai_provider,
@@ -155,7 +156,7 @@ async def run_phase(
 
     specialist_pairs: list[tuple[Campaign, SpecialistConfig]] = []
     for spec in phase.specialists:
-        camp = await _create_specialist_campaign(parent, spec, pipeline_run_id)
+        camp = await _create_specialist_campaign(parent, spec, pipeline_run_id, phase.phase_num)
         specialist_pairs.append((camp, spec))
         logger.info("PIPELINE | created specialist campaign=%s role=%s", camp.id, spec.role)
 
