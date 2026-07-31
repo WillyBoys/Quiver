@@ -8,6 +8,7 @@ from app.models.tool import Tool
 from app.models.campaign import Campaign
 from app.models.session import Session as EngagementSession
 from app.constants import TARGET_PARAM_NAMES
+from app.agent.roles import _specialist_role_prompts
 
 logger = logging.getLogger(__name__)
 
@@ -352,7 +353,10 @@ async def build_agent_prompt(campaign: Campaign, db: AsyncSession) -> str:
         if initial_context_str else ""
     )
 
-    return f"""You are a penetration tester AI. Choose the single best NEXT action against the target scope.
+    role_prefix = _specialist_role_prompts.get(campaign.id, "")
+    intro_line = role_prefix if role_prefix else "You are a penetration tester AI. Choose the single best NEXT action against the target scope."
+
+    return f"""{intro_line}
 
 SCOPE (test all entries — work through each systematically):
 {scope_str}

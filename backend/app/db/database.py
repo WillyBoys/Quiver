@@ -92,6 +92,23 @@ async def init_db():
         except OperationalError as e:
             if "duplicate column" not in str(e).lower() and "already exists" not in str(e).lower():
                 logger.warning("Migration warning: %s", e)
+        # pipeline_runs columns — table may have been created by P1 with fewer columns
+        for col_sql in [
+            "ALTER TABLE pipeline_runs ADD COLUMN session_id TEXT DEFAULT NULL",
+            "ALTER TABLE pipeline_runs ADD COLUMN engagement_type TEXT DEFAULT 'external'",
+            "ALTER TABLE pipeline_runs ADD COLUMN current_phase INTEGER DEFAULT 1",
+            "ALTER TABLE pipeline_runs ADD COLUMN phase_count INTEGER DEFAULT 0",
+            "ALTER TABLE pipeline_runs ADD COLUMN specialist_results JSON DEFAULT '{}'",
+            "ALTER TABLE pipeline_runs ADD COLUMN synthesis_outputs JSON DEFAULT '[]'",
+            "ALTER TABLE pipeline_runs ADD COLUMN skipped_phases JSON DEFAULT '[]'",
+            "ALTER TABLE pipeline_runs ADD COLUMN started_at DATETIME DEFAULT NULL",
+            "ALTER TABLE pipeline_runs ADD COLUMN completed_at DATETIME DEFAULT NULL",
+        ]:
+            try:
+                await conn.execute(text(col_sql))
+            except OperationalError as e:
+                if "duplicate column" not in str(e).lower() and "already exists" not in str(e).lower():
+                    logger.warning("Migration warning: %s", e)
         # Ensure indexes exist on pre-index DBs
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_runs_session_id ON runs (session_id)"

@@ -717,6 +717,11 @@ async def run_campaign_loop(campaign_id: str) -> None:
             _c = (await db.execute(select(Campaign).where(Campaign.id == campaign_id))).scalar_one_or_none()
             if _c is None:
                 MAX_ITERATIONS = DEFAULT_MAX_ITERATIONS
+            elif getattr(_c, "pipeline_mode", "single") == "pipeline":
+                # Dispatch to the pipeline orchestrator instead of the single-agent loop
+                from app.agent.pipeline import run_pipeline
+                await run_pipeline(campaign_id)
+                return
             elif _c.max_iterations is None or _c.max_iterations <= 0:
                 MAX_ITERATIONS = 500  # None/0 = unlimited sentinel
             else:
