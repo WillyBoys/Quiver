@@ -2313,6 +2313,20 @@
   flex-shrink: 0;
 }
 
+.drawerReasoning {
+  padding: 10px 16px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elevated);
+  flex-shrink: 0;
+}
+.drawerReasoningLabel {
+  font-size: 9px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--text-muted); margin-bottom: 5px;
+}
+.drawerReasoningText {
+  font-size: 12px; color: var(--text-secondary); line-height: 1.65; margin: 0;
+}
+
 .drawerBody {
   flex: 1; overflow-y: auto; overflow-x: auto;
   padding: 12px 16px;

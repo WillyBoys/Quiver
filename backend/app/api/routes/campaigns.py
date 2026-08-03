@@ -99,6 +99,16 @@ async def update_campaign(campaign_id: str, body: CampaignUpdate, db: AsyncSessi
         campaign.status = body.status
         if body.status == "paused":
             remove_campaign_job(campaign_id)
+            # Cascade pause to any active specialist campaigns spawned by this pipeline
+            if campaign.pipeline_mode == "pipeline":
+                spec_result = await db.execute(
+                    select(Campaign)
+                    .where(Campaign.session_id == campaign.session_id)
+                    .where(Campaign.description.like("pipeline_run:%"))
+                    .where(Campaign.status == "active")
+                )
+                for spec in spec_result.scalars().all():
+                    spec.status = "paused"
         elif body.status == "active" and campaign.schedule:
             add_campaign_job(campaign_id, campaign.schedule)
     if body.max_iterations is not None:

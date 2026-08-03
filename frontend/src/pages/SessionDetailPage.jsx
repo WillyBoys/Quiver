@@ -811,8 +811,11 @@ export default function SessionDetailPage() {
 
   useEffect(() => {
     if (!selectedRunId || !drawerScrollRef.current) return;
-    drawerScrollRef.current.scrollTop = drawerScrollRef.current.scrollHeight;
-  }, [selectedRunId, liveOutput]);
+    if (!streaming[selectedRunId]) return; // only auto-scroll live runs
+    const el = drawerScrollRef.current;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    if (nearBottom) el.scrollTop = el.scrollHeight;
+  }, [selectedRunId, liveOutput[selectedRunId]]);
 
   const toggleArtifact = (key) => setExpandedArtifacts(prev => {
     const next = new Set(prev);
@@ -1322,14 +1325,17 @@ export default function SessionDetailPage() {
                       {phase.status === "error"    && "✗"}
                     </span>
                   </div>
-                  {phase.specialists.map((spec) => (
-                    <div key={spec.role} className={`${styles.mcSpecRow} ${spec.campaign_status === "active" ? styles.mcSpecRowActive : ""}`}>
-                      <span className={styles.mcSpecName}>{spec.role}</span>
-                      <span className={`${styles.mcSpecIterBadge} ${spec.campaign_status === "active" ? styles.mcSpecIterLive : ""}`}>
-                        {spec.iteration_count > 0 ? `${spec.iteration_count}` : ""}
-                      </span>
-                    </div>
-                  ))}
+                  {phase.specialists.map((spec) => {
+                    const specRunCount = runs.filter(r => r.campaign_id === spec.campaign_id).length;
+                    return (
+                      <div key={spec.role} className={`${styles.mcSpecRow} ${spec.campaign_status === "active" ? styles.mcSpecRowActive : ""}`}>
+                        <span className={styles.mcSpecName}>{spec.role}</span>
+                        <span className={`${styles.mcSpecIterBadge} ${spec.campaign_status === "active" ? styles.mcSpecIterLive : ""}`}>
+                          {specRunCount > 0 ? specRunCount : ""}
+                        </span>
+                      </div>
+                    );
+                  })}
                   {phase.status === "waiting" && phase.gate_description && (
                     <p className={styles.mcGate}>gate: {phase.gate_description}</p>
                   )}
@@ -1361,12 +1367,13 @@ export default function SessionDetailPage() {
                   ))}
                   {pipelinePhases.flatMap(p => p.specialists).filter(s => s.last_agent_reasoning).map((spec) => {
                     const specRuns = runs.filter(r => r.campaign_id === spec.campaign_id).slice(0, 10);
+                    const specRunCount = runs.filter(r => r.campaign_id === spec.campaign_id).length;
                     return (
                       <div key={spec.campaign_id} className={styles.mcSpecBlock}>
                         <div className={`${styles.mcSpecWho} ${spec.campaign_status === "active" ? styles.mcSpecWhoLive : styles.mcSpecWhoDone}`}>
                           {spec.campaign_status === "active" && <span className={styles.feedPulse} />}
                           {spec.role}
-                          {spec.iteration_count > 0 && <span className={styles.mcSpecIterLabel}> · {spec.iteration_count} iter</span>}
+                          {specRunCount > 0 && <span className={styles.mcSpecIterLabel}> · {specRunCount} runs</span>}
                         </div>
                         <p className={styles.mcSpecThought}>{spec.last_agent_reasoning}</p>
                         {specRuns.length > 0 && (
@@ -2650,6 +2657,12 @@ export default function SessionDetailPage() {
               </div>
               {dr.command && (
                 <div className={styles.drawerCmd}>{dr.command}</div>
+              )}
+              {dr.reasoning && (
+                <div className={styles.drawerReasoning}>
+                  <div className={styles.drawerReasoningLabel}>reasoning</div>
+                  <p className={styles.drawerReasoningText}>{dr.reasoning}</p>
+                </div>
               )}
               <div className={styles.drawerBody} ref={drawerScrollRef}>
                 {drOutput ? (

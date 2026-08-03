@@ -3,6 +3,11 @@ import json
 import logging
 import re
 from datetime import datetime, timezone
+
+
+def _extract_role(name: str) -> str:
+    m = re.search(r"\]\s+(.+)$", name or "")
+    return m.group(1).strip() if m else name
 from sqlalchemy import select
 from sqlalchemy.orm.attributes import flag_modified
 from app.db.database import AsyncSessionLocal
@@ -162,11 +167,37 @@ async def run_phase(
             rec.current_phase = phase.phase_num
             await db.commit()
 
+    # Reuse existing specialist campaigns for this phase if we're resuming after a pause.
+    # Matching is by description tag; only campaigns that aren't already completed are reused.
     specialist_pairs: list[tuple[Campaign, SpecialistConfig]] = []
+    spec_by_role = {spec.role: spec for spec in phase.specialists}
+
+    async with AsyncSessionLocal() as db:
+        existing_result = await db.execute(
+            select(Campaign).where(
+                Campaign.description == f"pipeline_run:{pipeline_run_id}:phase:{phase.phase_num}"
+            )
+        )
+        existing_camps = existing_result.scalars().all()
+        reused_roles: set[str] = set()
+        for camp in existing_camps:
+            role = _extract_role(camp.name)
+            spec_cfg = spec_by_role.get(role)
+            if spec_cfg and camp.status != "completed":
+                if camp.status == "paused":
+                    camp.status = "active"
+                specialist_pairs.append((camp, spec_cfg))
+                reused_roles.add(role)
+                logger.info("PIPELINE | reusing specialist campaign=%s role=%s status=%s",
+                            camp.id, role, camp.status)
+        await db.commit()
+
+    # Create new campaigns only for roles that had no reusable campaign
     for spec in phase.specialists:
-        camp = await _create_specialist_campaign(parent, spec, pipeline_run_id, phase.phase_num)
-        specialist_pairs.append((camp, spec))
-        logger.info("PIPELINE | created specialist campaign=%s role=%s", camp.id, spec.role)
+        if spec.role not in reused_roles:
+            camp = await _create_specialist_campaign(parent, spec, pipeline_run_id, phase.phase_num)
+            specialist_pairs.append((camp, spec))
+            logger.info("PIPELINE | created specialist campaign=%s role=%s", camp.id, spec.role)
 
     results = await asyncio.gather(*[
         run_specialist(camp.id, spec, synthesis_directives)
