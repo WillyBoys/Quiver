@@ -53,6 +53,7 @@ export default function SessionDetailPage() {
   const [agentSidebarView, setAgentSidebarView] = useState("reasoning"); // "reasoning" | "tools" | "checklist"
   const [selectedRunId, setSelectedRunId] = useState(null);
   const [expandedArtifacts, setExpandedArtifacts] = useState(new Set());
+  const [expandedSynthPhases, setExpandedSynthPhases] = useState(new Set());
   const connectedRunIds = useRef(new Set());
   const openSocketsRef = useRef([]);
   const drawerScrollRef = useRef(null);
@@ -817,6 +818,16 @@ export default function SessionDetailPage() {
     if (nearBottom) el.scrollTop = el.scrollHeight;
   }, [selectedRunId, liveOutput[selectedRunId]]);
 
+  const specRoleForRun = (runId) => {
+    const r = runsById[runId];
+    if (!r) return null;
+    for (const phase of pipelinePhases) {
+      const spec = phase.specialists.find(s => s.campaign_id === r.campaign_id);
+      if (spec) return spec.role;
+    }
+    return null;
+  };
+
   const toggleArtifact = (key) => setExpandedArtifacts(prev => {
     const next = new Set(prev);
     if (next.has(key)) next.delete(key); else next.add(key);
@@ -838,7 +849,11 @@ export default function SessionDetailPage() {
     return Object.entries(v).map(([k, val]) => (
       <div key={k} className={styles.artExpandRow}>
         <span className={styles.artExpandKey}>{k}</span>
-        {val && <span className={styles.artExpandVal}>{val}</span>}
+        {val != null && (
+          <span className={styles.artExpandVal}>
+            {Array.isArray(val) ? val.join(", ") : val}
+          </span>
+        )}
       </div>
     ));
   };
@@ -855,6 +870,14 @@ export default function SessionDetailPage() {
   const activeRun = runsById[activeRunId] || null;
   const activeOutput = liveOutput[activeRunId] || activeRun?.output || "";
   const isActiveStreaming = streaming[activeRunId] || false;
+
+  function fmtElapsed(isoStart) {
+    if (!isoStart) return "";
+    const secs = Math.floor((Date.now() - new Date(isoStart).getTime()) / 1000);
+    if (secs < 60) return `${secs}s`;
+    if (secs < 3600) return `${Math.floor(secs/60)}m ${secs%60}s`;
+    return `${Math.floor(secs/3600)}h ${Math.floor((secs%3600)/60)}m`;
+  }
 
   function fmtRunTime(isoStr) {
     if (!isoStr) return "";
@@ -1308,6 +1331,19 @@ export default function SessionDetailPage() {
         {/* ── Pipeline AI session — Mission Control ── */}
         {isAiSession && isPipelineMode && (
           <div className={styles.mcWorkspace}>
+            {pipelineRun && (
+              <div className={styles.mcProgressHdr}>
+                <span className={styles.mcProgressLabel}>
+                  {pipelineRun.status === "running" ? "Running" : pipelineRun.status === "completed" ? "Complete" : pipelineRun.status}
+                </span>
+                <span className={styles.mcProgressElapsed}>
+                  {fmtElapsed(pipelineRun.started_at || pipelineRun.created_at)}
+                </span>
+                <span className={styles.mcProgressPhase}>
+                  Phase {pipelineRun.current_phase || 1} of {pipelinePhases.length || "?"}
+                </span>
+              </div>
+            )}
             <div className={styles.mcLanes}
               style={{ gridTemplateColumns: `repeat(${Math.max(pipelinePhases.length, 1)}, 1fr)` }}>
               {pipelinePhases.length === 0 && (
@@ -1327,10 +1363,12 @@ export default function SessionDetailPage() {
                   </div>
                   {phase.specialists.map((spec) => {
                     const specRunCount = runs.filter(r => r.campaign_id === spec.campaign_id).length;
+                    const st = spec.campaign_status;
                     return (
-                      <div key={spec.role} className={`${styles.mcSpecRow} ${spec.campaign_status === "active" ? styles.mcSpecRowActive : ""}`}>
+                      <div key={spec.role} className={`${styles.mcSpecRow} ${st === "active" ? styles.mcSpecRowActive : st === "paused" ? styles.mcSpecRowPaused : st === "completed" ? styles.mcSpecRowDone : ""}`}>
+                        <span className={styles.mcSpecStatusDot} data-status={st} />
                         <span className={styles.mcSpecName}>{spec.role}</span>
-                        <span className={`${styles.mcSpecIterBadge} ${spec.campaign_status === "active" ? styles.mcSpecIterLive : ""}`}>
+                        <span className={`${styles.mcSpecIterBadge} ${st === "active" ? styles.mcSpecIterLive : ""}`}>
                           {specRunCount > 0 ? specRunCount : ""}
                         </span>
                       </div>
@@ -1343,8 +1381,23 @@ export default function SessionDetailPage() {
                     <p className={styles.mcGate}>{phase.skip_reason || "gate not met"}</p>
                   )}
                   {phase.synthesis_directives?.length > 0 && (
-                    <div className={styles.mcSynthLine}>
-                      ⚡ {phase.synthesis_directives.length} chain{phase.synthesis_directives.length !== 1 ? "s" : ""}
+                    <div
+                      className={`${styles.mcSynthLine} ${expandedSynthPhases.has(phase.phase_num) ? styles.mcSynthLineOpen : ""}`}
+                      onClick={() => setExpandedSynthPhases(prev => {
+                        const next = new Set(prev);
+                        if (next.has(phase.phase_num)) next.delete(phase.phase_num); else next.add(phase.phase_num);
+                        return next;
+                      })}
+                    >
+                      <span>⚡ {phase.synthesis_directives.length} chain{phase.synthesis_directives.length !== 1 ? "s" : ""}</span>
+                      <span className={styles.mcSynthChevron}>{expandedSynthPhases.has(phase.phase_num) ? "▴" : "▾"}</span>
+                      {expandedSynthPhases.has(phase.phase_num) && (
+                        <div className={styles.mcSynthDirectives}>
+                          {phase.synthesis_directives.map((d, i) => (
+                            <div key={i} className={styles.mcSynthDirective}>{d}</div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1405,12 +1458,16 @@ export default function SessionDetailPage() {
                 <div className={styles.mcPanelHdr}>
                   Findings <span className={styles.railCount}>{(session.findings||[]).length}</span>
                 </div>
-                {(session.findings||[]).map((f) => (
+                {(session.findings||[]).map((f) => {
+                  const firstRunId = (f.evidence_run_ids||[])[0];
+                  const specRole = firstRunId ? specRoleForRun(firstRunId) : null;
+                  return (
                   <div key={f.id} className={styles.railFinding}>
                     <div className={styles.railFindingTop}>
                       <span className={`badge badge-${f.severity}`}>{f.severity}</span>
                       <div className={styles.railFindingTitle}>{f.title}</div>
                     </div>
+                    {specRole && <div className={styles.railFindingSpec}>{specRole}</div>}
                     {(f.evidence_run_ids||[]).map(rid => {
                       const er = runsById[rid];
                       if (!er) return null;
@@ -1425,11 +1482,12 @@ export default function SessionDetailPage() {
                       );
                     })}
                   </div>
-                ))}
+                  );
+                })}
                 {!(session.findings||[]).length && <p className={styles.railEmpty}>No findings yet.</p>}
                 <div className={styles.mcPanelHdr} style={{ marginTop: 12 }}>Artifacts</div>
                 <div className={styles.artList}>
-                  {["hosts","users","creds","hashes"].map(key => {
+                  {["hosts","users","creds","hashes","spns","notes","services","tech"].map(key => {
                     const count = artifactCount(key);
                     const expanded = expandedArtifacts.has(key);
                     return (

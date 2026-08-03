@@ -2062,6 +2062,11 @@
 }
 .railFindingTop { display: flex; align-items: flex-start; gap: 7px; }
 .railFindingTitle { font-size: 11px; color: var(--text-primary); line-height: 1.4; }
+.railFindingSpec {
+  font-family: var(--font-mono); font-size: 9px; font-weight: 600;
+  letter-spacing: .04em; text-transform: uppercase;
+  color: var(--accent); opacity: 0.8; padding-left: 1px;
+}
 
 .railArtGrid {
   display: grid; grid-template-columns: 1fr 1fr; gap: 5px; padding: 8px 14px;
@@ -2154,6 +2159,61 @@
 .mcSynthLine {
   margin-top: auto; padding-top: 4px;
   font-size: 9px; color: #d97706; font-weight: 600; letter-spacing: .04em;
+  cursor: pointer; display: flex; align-items: baseline; gap: 4px; flex-wrap: wrap;
+  position: relative;
+}
+.mcSynthChevron { font-size: 8px; opacity: 0.7; }
+.mcSynthDirectives {
+  width: 100%; margin-top: 4px;
+  display: flex; flex-direction: column; gap: 3px;
+}
+.mcSynthDirective {
+  font-size: 9px; color: #92400e; background: rgba(217,119,6,0.08);
+  border-left: 2px solid rgba(217,119,6,0.4);
+  padding: 3px 6px; border-radius: 0 2px 2px 0;
+  line-height: 1.5; white-space: pre-wrap; word-break: break-word;
+}
+
+/* Pipeline progress header above lanes */
+.mcProgressHdr {
+  display: flex; align-items: center; gap: 12px;
+  padding: 5px 14px 4px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.mcProgressLabel {
+  font-size: 10px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--accent);
+}
+.mcProgressElapsed {
+  font-family: var(--font-mono); font-size: 10px; color: var(--text-muted);
+}
+.mcProgressPhase {
+  font-size: 10px; color: var(--text-muted); margin-left: auto;
+}
+
+/* Specialist status dot */
+.mcSpecStatusDot {
+  width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; margin-right: 4px;
+  background: var(--text-muted); opacity: 0.35;
+}
+.mcSpecStatusDot[data-status="active"]           { background: var(--accent); opacity: 1; animation: specDotPulse 1.6s ease-in-out infinite; }
+.mcSpecStatusDot[data-status="awaiting_approval"]{ background: #d97706; opacity: 1; }
+.mcSpecStatusDot[data-status="paused"]           { background: #d97706; opacity: 0.8; }
+.mcSpecStatusDot[data-status="completed"]        { background: #10b981; opacity: 0.7; }
+.mcSpecStatusDot[data-status="error"]            { background: var(--critical); opacity: 1; }
+@keyframes specDotPulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.5; }
+}
+
+/* Specialist row status variants */
+.mcSpecRowPaused {
+  border-color: rgba(217,119,6,0.3);
+  background: rgba(217,119,6,0.05);
+}
+.mcSpecRowDone {
+  opacity: 0.55;
 }
 
 /* Bottom half */

@@ -1,6 +1,7 @@
 import ipaddress
 import logging
 import re
+import shlex
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.models.run import Run
@@ -236,17 +237,25 @@ async def build_agent_prompt(campaign: Campaign, db: AsyncSession) -> str:
     tool_lines = []
     for binary in ordered_binaries:
         t = tool_map[binary]
-        target_param = next(
-            (p for p in (t.parameters or []) if p.get("name") in TARGET_PARAM_NAMES),
-            None,
-        )
         extra_required = [
             p for p in (t.parameters or [])
             if p.get("name") not in TARGET_PARAM_NAMES and p.get("required")
         ]
+        # Build an example command using each parameter's placeholder so the LLM
+        # can see exactly what default_flags and parameters are already handled.
+        # This prevents the LLM from re-adding flags the tool definition already provides.
+        example_params: dict = {}
+        for p in (t.parameters or []):
+            ph = p.get("placeholder", "")
+            if ph:
+                example_params[p["name"]] = ph
+        try:
+            from app.execution import build_command as _bc
+            example_cmd = " ".join(_bc(t, example_params, extra_flags=""))
+        except Exception:
+            example_cmd = binary
         parts = [f"  - {binary}: {t.description or t.name}"]
-        if target_param:
-            parts.append(f"target={target_param.get('placeholder', primary)!r}")
+        parts.append(f"example: {example_cmd}")
         for p in extra_required:
             parts.append(f"{p['name']}={p.get('placeholder', '...')!r}")
         tool_lines.append(" | ".join(parts))
@@ -301,6 +310,10 @@ async def build_agent_prompt(campaign: Campaign, db: AsyncSession) -> str:
         artifacts_lines.append("  Users: " + ", ".join(raw_artifacts["users"]))
     if raw_artifacts.get("spns"):
         artifacts_lines.append("  SPNs: " + ", ".join(raw_artifacts["spns"]))
+    for host, svcs in (raw_artifacts.get("services") or {}).items():
+        artifacts_lines.append(f"  Services  {host}: {', '.join(svcs)}")
+    for host, techs in (raw_artifacts.get("tech") or {}).items():
+        artifacts_lines.append(f"  Tech  {host}: {', '.join(techs)}")
     for user, h in (raw_artifacts.get("hashes") or {}).items():
         artifacts_lines.append(f"  Hash  {user}: {h}")
     for user, pw in (raw_artifacts.get("creds") or {}).items():
@@ -405,11 +418,11 @@ RULES (follow all):
 - tool_name MUST be one of the binaries listed in TOOLS AVAILABLE above
 - target must be one of the SCOPE entries above, or a specific discovered host/IP/endpoint found during enumeration
 - DO NOT use any command listed in COMMANDS ALREADY RUN
-- extra_flags: optional string of additional CLI flags to append; leave empty string if not needed
+- extra_flags: ADDITIONAL flags only — the example command shown for each tool is already built from its defaults and parameters. Do NOT re-add flags or positional arguments already present in the example. Leave empty string if not needed.
 - bash special rule: when tool_name is "bash", put the COMPLETE shell command in extra_flags. The bash tool requires human approval and is your escape hatch for custom probes, chained commands, or anything no other tool covers.
 - finding: ONLY include when the CURRENT step's output confirms a real vulnerability. Prefer updating an existing finding (with its id) over creating a near-duplicate.
 - chains_from: optional — only set when the current finding directly depended on a prior finding to be exploitable.
-- artifact: ONLY include when the current step's output reveals something worth storing for later (credentials, hashes, usernames, hosts, SPNs). Types: "user" (value=username), "hash" (user=username, value=full-hash-string), "cred" (user=username, value=plaintext-password), "host" (value="IP description"), "spn" (value=full-SPN-string), "note" (value=domain-level-info). For hash and cred, include a "user" key. Omit artifact if nothing new was found.
+- artifact: ONLY include when the current step's output reveals something worth storing for later. Types: "user" (value=username), "hash" (user=username, value=full-hash-string), "cred" (user=username, value=plaintext-password), "host" (value="IP or hostname description"), "spn" (value=full-SPN-string), "note" (value=domain-level-info), "service" (host="IP or hostname", value="port/proto version — e.g. 22/ssh OpenSSH 8.9"), "tech" (host="IP or hostname or domain", value="framework/version — e.g. Apache 2.4.49"). For hash/cred use a "user" key; for service/tech use a "host" key. Omit artifact if nothing new was found.
 - Reply with exactly one line of JSON, no line breaks inside"""
 
 
@@ -427,6 +440,8 @@ ERROR OUTPUT:
 {error_output[:600]}
 
 TARGET: {primary}
+
+IMPORTANT: extra_flags must contain ONLY additional flags not already in the failed command above. Do NOT repeat flags already present in the failed command — the system will append extra_flags to the reconstructed base command.
 
 If the error reveals a simple fixable mistake (wrong flag, wrong path, missing argument, typo), return:
 {{"retry":true,"thought":"what went wrong and exactly how to fix it","tool_name":"binary","target":"<scope_entry>","parameters":{{}},"extra_flags":"","reasoning":"one sentence"}}

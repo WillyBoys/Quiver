@@ -79,16 +79,19 @@ def _build_param_values(tool, target: str, llm_params: dict) -> dict:
 
 def _merge_artifact(current: dict, item: dict) -> dict:
     result = {
-        "users": list(current.get("users") or []),
-        "hashes": dict(current.get("hashes") or {}),
-        "creds":  dict(current.get("creds") or {}),
-        "hosts":  list(current.get("hosts") or []),
-        "spns":   list(current.get("spns") or []),
-        "notes":  list(current.get("notes") or []),
+        "users":    list(current.get("users") or []),
+        "hashes":   dict(current.get("hashes") or {}),
+        "creds":    dict(current.get("creds") or {}),
+        "hosts":    list(current.get("hosts") or []),
+        "spns":     list(current.get("spns") or []),
+        "notes":    list(current.get("notes") or []),
+        "services": {k: list(v) for k, v in (current.get("services") or {}).items()},
+        "tech":     {k: list(v) for k, v in (current.get("tech") or {}).items()},
     }
-    t = item.get("type", "")
+    t     = item.get("type", "")
     value = (item.get("value") or "").strip()
     user  = (item.get("user") or "").strip()
+    host  = (item.get("host") or user).strip()  # "host" field preferred; fall back to "user"
     if not value:
         return result
     if   t == "user" and value not in result["users"]:  result["users"].append(value)
@@ -97,6 +100,14 @@ def _merge_artifact(current: dict, item: dict) -> dict:
     elif t == "host" and value not in result["hosts"]:  result["hosts"].append(value)
     elif t == "spn"  and value not in result["spns"]:   result["spns"].append(value)
     elif t == "note" and value not in result["notes"]:  result["notes"].append(value)
+    elif t == "service" and host:
+        bucket = result["services"].setdefault(host, [])
+        if value not in bucket:
+            bucket.append(value)
+    elif t == "tech" and host:
+        bucket = result["tech"].setdefault(host, [])
+        if value not in bucket:
+            bucket.append(value)
     return result
 
 
