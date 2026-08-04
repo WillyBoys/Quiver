@@ -404,7 +404,7 @@ async def build_agent_prompt(campaign: Campaign, db: AsyncSession) -> str:
             f"\nENGAGEMENT METHODOLOGY ({eng_label} — follow phases in order):\n{methodology_str}\n"
         )
 
-    role_prefix = _specialist_role_prompts.get(campaign.id, "")
+    role_prefix = _specialist_role_prompts.get(campaign.id, "") or (campaign.role_prompt or "")
     intro_line = role_prefix if role_prefix else "You are a penetration tester AI. Choose the single best NEXT action against the target scope."
 
     return f"""{intro_line}

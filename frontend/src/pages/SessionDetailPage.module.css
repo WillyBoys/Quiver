@@ -2242,6 +2242,30 @@
   opacity: 0.55;
 }
 
+/* Specialist elapsed time */
+.mcSpecElapsed {
+  font-family: var(--font-mono); font-size: 9px; color: var(--text-muted);
+  margin-left: 2px; flex-shrink: 0;
+}
+
+/* Retry button on paused specialists */
+.mcSpecRetryBtn {
+  all: unset; cursor: pointer; font-size: 11px; line-height: 1;
+  color: #d97706; padding: 1px 4px; border-radius: 3px;
+  border: 1px solid rgba(217,119,6,0.35); flex-shrink: 0;
+  transition: background 0.15s;
+}
+.mcSpecRetryBtn:hover { background: rgba(217,119,6,0.12); }
+
+/* Show-all toggle in mcSpecBlock run list */
+.mcSpecShowAll {
+  all: unset; cursor: pointer; font-size: 9px;
+  color: var(--accent); padding: 3px 6px;
+  display: block; text-align: center; width: 100%;
+  border-top: 1px solid var(--border); margin-top: 2px;
+}
+.mcSpecShowAll:hover { text-decoration: underline; }
+
 /* Bottom half */
 .mcBottom {
   flex: 1; display: grid; grid-template-columns: 1fr 230px; overflow: hidden;

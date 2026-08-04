@@ -56,6 +56,7 @@ export default function SessionDetailPage() {
   const [selectedRunId, setSelectedRunId] = useState(null);
   const [expandedArtifacts, setExpandedArtifacts] = useState(new Set());
   const [expandedSynthPhases, setExpandedSynthPhases] = useState(new Set());
+  const [expandedSpecIds, setExpandedSpecIds] = useState(new Set());
   const connectedRunIds = useRef(new Set());
   const openSocketsRef = useRef([]);
   const drawerScrollRef = useRef(null);
@@ -1371,6 +1372,16 @@ export default function SessionDetailPage() {
                   {phase.specialists.map((spec) => {
                     const specRunCount = runs.filter(r => r.campaign_id === spec.campaign_id).length;
                     const st = spec.campaign_status;
+                    const elapsed = st === "active"
+                      ? fmtElapsed(spec.started_at)
+                      : st === "completed" && spec.started_at && spec.updated_at
+                        ? (() => {
+                            const secs = Math.floor((new Date(spec.updated_at) - new Date(spec.started_at)) / 1000);
+                            if (secs < 60) return `${secs}s`;
+                            if (secs < 3600) return `${Math.floor(secs/60)}m`;
+                            return `${Math.floor(secs/3600)}h ${Math.floor((secs%3600)/60)}m`;
+                          })()
+                        : null;
                     return (
                       <div key={spec.role} className={`${styles.mcSpecRow} ${st === "active" ? styles.mcSpecRowActive : st === "paused" ? styles.mcSpecRowPaused : st === "completed" ? styles.mcSpecRowDone : ""}`}>
                         <span className={styles.mcSpecStatusDot} data-status={st} />
@@ -1378,6 +1389,17 @@ export default function SessionDetailPage() {
                         <span className={`${styles.mcSpecIterBadge} ${st === "active" ? styles.mcSpecIterLive : ""}`}>
                           {specRunCount > 0 ? specRunCount : ""}
                         </span>
+                        {elapsed && <span className={styles.mcSpecElapsed}>{elapsed}</span>}
+                        {st === "paused" && (
+                          <button
+                            className={styles.mcSpecRetryBtn}
+                            title="Retry this specialist"
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              try { await api.campaigns.run(spec.campaign_id); } catch {}
+                            }}
+                          >↺</button>
+                        )}
                       </div>
                     );
                   })}
@@ -1440,8 +1462,10 @@ export default function SessionDetailPage() {
                           </div>
                         )}
                         {activeSpecs.map(spec => {
-                          const specRuns = runs.filter(r => r.campaign_id === spec.campaign_id).slice(0, 10);
-                          const specRunCount = runs.filter(r => r.campaign_id === spec.campaign_id).length;
+                          const allSpecRuns = runs.filter(r => r.campaign_id === spec.campaign_id);
+                          const specRunCount = allSpecRuns.length;
+                          const isExpanded = expandedSpecIds.has(spec.campaign_id);
+                          const specRuns = isExpanded ? allSpecRuns : allSpecRuns.slice(0, 10);
                           return (
                             <div key={spec.campaign_id} className={styles.mcSpecBlock}>
                               <div className={`${styles.mcSpecWho} ${spec.campaign_status === "active" ? styles.mcSpecWhoLive : styles.mcSpecWhoDone}`}>
@@ -1465,6 +1489,18 @@ export default function SessionDetailPage() {
                                       </span>
                                     </div>
                                   ))}
+                                  {specRunCount > 10 && (
+                                    <button
+                                      className={styles.mcSpecShowAll}
+                                      onClick={() => setExpandedSpecIds(prev => {
+                                        const next = new Set(prev);
+                                        if (next.has(spec.campaign_id)) next.delete(spec.campaign_id); else next.add(spec.campaign_id);
+                                        return next;
+                                      })}
+                                    >
+                                      {isExpanded ? "Show less" : `Show all ${specRunCount} runs`}
+                                    </button>
+                                  )}
                                 </div>
                               )}
                             </div>

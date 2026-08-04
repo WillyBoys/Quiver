@@ -102,6 +102,11 @@ async def init_db():
         except OperationalError as e:
             if "duplicate column" not in str(e).lower() and "already exists" not in str(e).lower():
                 logger.warning("Migration warning: %s", e)
+        try:
+            await conn.execute(text("ALTER TABLE campaigns ADD COLUMN role_prompt TEXT DEFAULT ''"))
+        except OperationalError as e:
+            if "duplicate column" not in str(e).lower() and "already exists" not in str(e).lower():
+                logger.warning("Migration warning: %s", e)
         # pipeline_runs columns — table may have been created by P1 with fewer columns
         for col_sql in [
             "ALTER TABLE pipeline_runs ADD COLUMN session_id TEXT DEFAULT NULL",

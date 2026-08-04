@@ -130,6 +130,12 @@ async def run_specialist(
                 + chains_block
             )
     _specialist_role_prompts[specialist_campaign_id] = role_prompt
+    # Persist to DB so the role prompt survives a backend restart mid-pipeline.
+    async with AsyncSessionLocal() as db:
+        c = (await db.execute(select(Campaign).where(Campaign.id == specialist_campaign_id))).scalar_one_or_none()
+        if c:
+            c.role_prompt = role_prompt
+            await db.commit()
     try:
         from app.agent.engine import run_campaign_loop
         await run_campaign_loop(specialist_campaign_id)
@@ -553,6 +559,7 @@ async def run_pipeline(campaign_id: str) -> None:
             )).scalar_one_or_none()
             if camp and camp.status == "active":
                 camp.status = "paused"
+                camp.last_agent_reasoning = "Pipeline stopped due to an unexpected error — check backend logs for details."
                 await db.commit()
         return
 
