@@ -134,6 +134,7 @@ async def run_specialist(
         from app.agent.engine import run_campaign_loop
         await run_campaign_loop(specialist_campaign_id)
     finally:
+        camp = None  # ensure bound even if the DB call below raises (BUG-10)
         async with AsyncSessionLocal() as db:
             result = await db.execute(select(Campaign).where(Campaign.id == specialist_campaign_id))
             camp = result.scalar_one_or_none()
@@ -204,9 +205,43 @@ async def run_phase(
         for camp, spec in specialist_pairs
     ], return_exceptions=True)
 
-    for r in results:
+    # BUG-9: mark campaigns whose coroutine crashed as paused so they show up
+    # as errored in the UI rather than silently appearing as "complete".
+    for (camp, spec), r in zip(specialist_pairs, results):
         if isinstance(r, Exception):
-            logger.error("PIPELINE | specialist raised unhandled exception: %s", r)
+            logger.error("PIPELINE | specialist %s (%s) raised: %s", camp.id, spec.role, r, exc_info=r)
+            async with AsyncSessionLocal() as db:
+                c = (await db.execute(
+                    select(Campaign).where(Campaign.id == camp.id)
+                )).scalar_one_or_none()
+                if c and c.status not in ("completed", "paused"):
+                    c.status = "paused"
+                    await db.commit()
+
+    # BUG-3: some specialists may have exited run_campaign_loop early because they hit
+    # awaiting_approval. Poll until every specialist reaches a terminal state so synthesis
+    # and the next phase run with the full picture, not a partial one.
+    APPROVAL_POLL_INTERVAL = 15  # seconds between DB checks
+    APPROVAL_MAX_WAIT = 3600     # 1 hour safety ceiling
+    approval_wait_start = asyncio.get_event_loop().time()
+    while True:
+        still_running = []
+        async with AsyncSessionLocal() as db:
+            for camp, _ in specialist_pairs:
+                c = (await db.execute(
+                    select(Campaign).where(Campaign.id == camp.id)
+                )).scalar_one_or_none()
+                if c and c.status in ("awaiting_approval", "active"):
+                    still_running.append(camp.id)
+        if not still_running:
+            break
+        if asyncio.get_event_loop().time() - approval_wait_start > APPROVAL_MAX_WAIT:
+            logger.warning("PIPELINE | phase %d: approval wait exceeded 1h, proceeding with %d specialist(s) incomplete",
+                           phase.phase_num, len(still_running))
+            break
+        logger.info("PIPELINE | phase %d: waiting for %d specialist(s): %s",
+                    phase.phase_num, len(still_running), still_running)
+        await asyncio.sleep(APPROVAL_POLL_INTERVAL)
 
     logger.info("PIPELINE | campaign=%s phase %d complete: %s",
                 parent.id, phase.phase_num, phase.name)
@@ -252,7 +287,12 @@ async def run_synthesis(
         )
         phase_runs = list(phase_runs_result.scalars().all())
         artifacts = dict(sess.artifacts or {})
-        findings = list(sess.findings or [])
+        all_findings = list(sess.findings or [])
+
+    # Filter findings to those created during this phase — synthesis should reason
+    # about what THIS phase found, not all-time findings (DESIGN-1).
+    phase_start_iso = phase_start_at.isoformat()
+    phase_findings = [f for f in all_findings if (f.get("created_at") or "") >= phase_start_iso]
 
     # ── Build prompt sections ──────────────────────────────────────────────────
     artifacts_lines = []
@@ -270,7 +310,7 @@ async def run_synthesis(
 
     findings_lines = [
         f"[{f.get('severity', 'info')}] {f.get('title', '')}"
-        for f in findings[:20]
+        for f in phase_findings[:20]
     ]
     findings_str = "\n".join(findings_lines) or "(none yet)"
 
@@ -294,7 +334,7 @@ actionable attack chains and priority targets for the next phase.
 ARTIFACTS (current engagement state):
 {artifacts_str}
 
-FINDINGS LOGGED ({len(findings)} total):
+FINDINGS THIS PHASE ({len(phase_findings)} new):
 {findings_str}
 
 PHASE {phase.phase_num} OUTPUT SUMMARY ({len(phase_runs)} runs):
@@ -369,7 +409,10 @@ async def run_pipeline(campaign_id: str) -> None:
             logger.error("PIPELINE | campaign %s not found", campaign_id)
             return
         if not parent.session_id:
-            logger.error("PIPELINE | campaign %s has no session_id", campaign_id)
+            logger.error("PIPELINE | campaign %s has no session_id — cannot start", campaign_id)
+            parent.status = "paused"
+            parent.last_agent_reasoning = "Pipeline could not start: campaign has no attached session"
+            await db.commit()
             return
 
         engagement_type = parent.engagement_type or "external"
@@ -395,9 +438,12 @@ async def run_pipeline(campaign_id: str) -> None:
             # Restore synthesis directives from the last synthesis that ran before this phase
             outputs = list(existing_run.synthesis_outputs or [])
             if outputs:
-                last_output = outputs[-1]
-                if last_output.get("phase") == resume_from_phase - 1:
-                    synthesis_directives = last_output.get("directives", [])
+                # Find the most recent synthesis for any phase before our resume point.
+                # A simple phase == resume-1 check fails when one or more phases were skipped.
+                eligible = [o for o in outputs if o.get("phase", 0) < resume_from_phase]
+                if eligible:
+                    last_eligible = max(eligible, key=lambda o: o.get("phase", 0))
+                    synthesis_directives = last_eligible.get("directives", [])
             existing_run.status = "running"
             await db.commit()
             logger.info("PIPELINE | campaign=%s resuming from phase %d (run=%s)",

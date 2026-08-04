@@ -20,11 +20,14 @@ from app.execution import (
     build_command,
     _run_buffers,
     _run_done_events,
+    _artifact_locks,
 )
 
 logger = logging.getLogger(__name__)
 
 _finding_locks: dict[str, asyncio.Lock] = {}
+# _artifact_locks is defined in execution.py and imported above so both
+# _save_inline_artifact (here) and _extract_john_creds (execution.py) share the same lock dict.
 _active_campaign_loops: set[str] = set()  # campaign IDs whose loop task is currently executing
 _bg_tasks: set[asyncio.Task] = set()       # strong refs to fire-and-forget tasks so GC can't collect them
 
@@ -113,16 +116,19 @@ def _merge_artifact(current: dict, item: dict) -> dict:
 
 async def _save_inline_artifact(session_id: str, artifact: dict) -> None:
     from sqlalchemy.orm.attributes import flag_modified
-    async with AsyncSessionLocal() as db:
-        result = await db.execute(
-            select(EngagementSession).where(EngagementSession.id == session_id)
-        )
-        sess = result.scalar_one_or_none()
-        if not sess:
-            return
-        sess.artifacts = _merge_artifact(dict(sess.artifacts or {}), artifact)
-        flag_modified(sess, "artifacts")
-        await db.commit()
+    if session_id not in _artifact_locks:
+        _artifact_locks[session_id] = asyncio.Lock()
+    async with _artifact_locks[session_id]:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(
+                select(EngagementSession).where(EngagementSession.id == session_id)
+            )
+            sess = result.scalar_one_or_none()
+            if not sess:
+                return
+            sess.artifacts = _merge_artifact(dict(sess.artifacts or {}), artifact)
+            flag_modified(sess, "artifacts")
+            await db.commit()
     logger.info("ARTIFACT | session=%s type=%s value=%.60s", session_id, artifact.get("type"), artifact.get("value", ""))
 
 
@@ -729,22 +735,30 @@ async def run_campaign_loop(campaign_id: str) -> None:
         return
     _active_campaign_loops.add(campaign_id)
     try:
-        # Resolve per-campaign cap; None in DB means unlimited (use a safe ceiling of 500)
+        # Resolve per-campaign config in a short-lived DB session so the connection
+        # is not held open for the full pipeline lifetime (which can run for hours).
         async with AsyncSessionLocal() as db:
             _c = (await db.execute(select(Campaign).where(Campaign.id == campaign_id))).scalar_one_or_none()
             if _c is None:
                 MAX_ITERATIONS = DEFAULT_MAX_ITERATIONS
-            elif getattr(_c, "pipeline_mode", "single") == "pipeline":
-                # Dispatch to the pipeline orchestrator instead of the single-agent loop
-                from app.agent.pipeline import run_pipeline
-                await run_pipeline(campaign_id)
-                return
-            is_pipeline_specialist = (getattr(_c, "description", "") or "").startswith("pipeline_run:")
-            MAX_CONSECUTIVE_DUPES = 15 if is_pipeline_specialist else 5
-            if _c.max_iterations is None or _c.max_iterations <= 0:
-                MAX_ITERATIONS = 500  # None/0 = unlimited sentinel
+                is_pipeline_mode = False
+                is_pipeline_specialist = False
+                MAX_CONSECUTIVE_DUPES = 5
             else:
-                MAX_ITERATIONS = _c.max_iterations
+                is_pipeline_mode = getattr(_c, "pipeline_mode", "single") == "pipeline"
+                is_pipeline_specialist = (getattr(_c, "description", "") or "").startswith("pipeline_run:")
+                MAX_CONSECUTIVE_DUPES = 15 if is_pipeline_specialist else 5
+                if _c.max_iterations is None or _c.max_iterations <= 0:
+                    MAX_ITERATIONS = 500  # None/0 = unlimited sentinel
+                else:
+                    MAX_ITERATIONS = _c.max_iterations
+
+        # Dispatch pipeline AFTER the DB context closes — run_pipeline can run for hours
+        # and must not hold a connection-pool slot for that entire duration.
+        if is_pipeline_mode:
+            from app.agent.pipeline import run_pipeline
+            await run_pipeline(campaign_id)
+            return
 
         consecutive_dupes = 0
 

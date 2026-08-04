@@ -29,6 +29,8 @@ export default function SessionDetailPage() {
   const [newFinding, setNewFinding] = useState({ title: "", severity: "high", notes: "", evidence_run_ids: [] });
   const [editingFinding, setEditingFinding] = useState(null);
   const [linkingFindingId, setLinkingFindingId] = useState(null);
+  const [showApprovalModal, setShowApprovalModal] = useState(false);
+  const [pendingApprovals, setPendingApprovals] = useState([]);
 
   // Notes editor state
   const [notesValue, setNotesValue] = useState("");
@@ -203,13 +205,18 @@ export default function SessionDetailPage() {
       api.sessions.get(sessionId).then((fresh) => {
         setSession((prev) => prev ? { ...prev, findings: fresh.findings, checklist_state: fresh.checklist_state } : prev);
         setArtifacts(fresh.artifacts || {});
+        // Keep the open finding detail modal in sync with the latest server state
+        setSelectedFinding((prev) => {
+          if (!prev) return prev;
+          const updated = (fresh.findings || []).find(f => f.id === prev.id);
+          return updated || prev;
+        });
       });
     }, 4000);
-    return () => {
-      clearInterval(interval);
-      openSocketsRef.current.forEach(ws => { try { ws.close(); } catch {} });
-      openSocketsRef.current = [];
-    };
+    // Only clear the interval here — socket cleanup lives in the sessionId effect
+    // so that launching a new agent (which changes campaign_id) doesn't kill
+    // sockets that are still streaming live tool output.
+    return () => { clearInterval(interval); };
   }, [session?.campaign_id, sessionId]);
 
   // Poll pipeline phases when campaign is in pipeline mode
@@ -635,7 +642,7 @@ export default function SessionDetailPage() {
         scope: settingsForm.scope,
         engagement_type: settingsForm.engagement_type,
         initial_context: ic,
-        notes: session.notes,
+        notes: notesValue,
         status: session.status,
         findings: session.findings,
         targets: session.targets,
@@ -651,7 +658,11 @@ export default function SessionDetailPage() {
 
   function downloadAiReport(report) {
     const target = report || selectedReport;
-    if (!target?.content) return;
+    if (!target?.content) {
+      // Content not yet loaded — open the report so it loads, then the user can download
+      setSelectedReport(target);
+      return;
+    }
     const slug = (target.name || session.name || "report").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
     const blob = new Blob([target.content], { type: "text/markdown" });
     const url = URL.createObjectURL(blob);
@@ -1109,7 +1120,11 @@ export default function SessionDetailPage() {
                 </span>
                 <span className={styles.infoBarProvider}>{campaign.ai_provider === "claude" ? "Claude" : "Local AI"}</span>
                 {campaign.status === "awaiting_approval" && (
-                  <button className={styles.approvalBadge} onClick={() => navigate("/approvals")}>
+                  <button className={styles.approvalBadge} onClick={async () => {
+                    const all = await api.approvals.list("pending");
+                    setPendingApprovals(all.filter(a => a.campaign_id === campaign.id));
+                    setShowApprovalModal(true);
+                  }}>
                     ⚠ Approvals
                   </button>
                 )}
@@ -2153,7 +2168,7 @@ export default function SessionDetailPage() {
                 )}
               </div>
             ) : (
-              <AttackChainView findings={session.findings || []} onNodeClick={(f) => setFindingsView("list")} />
+              <AttackChainView findings={session.findings || []} onNodeClick={(f) => { setSelectedFinding(f); }} />
             )}
           </div>
         </aside>
@@ -2213,8 +2228,8 @@ export default function SessionDetailPage() {
         const activeFinding = session.findings?.find((f) => f.id === linkingFindingId);
         const selectedIds = activeFinding ? getEvidenceIds(activeFinding) : [];
         return (
-          <div className={styles.modal}>
-            <div className={styles.modalBox}>
+          <div className={styles.modal} onClick={() => setLinkingFindingId(null)}>
+            <div className={styles.modalBox} onClick={e => e.stopPropagation()}>
               <h2 className={styles.modalTitle}>Link Evidence Runs</h2>
               <div className={styles.form}>
                 {completedRuns.length === 0 ? (
@@ -2252,8 +2267,8 @@ export default function SessionDetailPage() {
 
       {/* Finding modal */}
       {showFinding && (
-        <div className={styles.modal}>
-          <div className={styles.modalBox}>
+        <div className={styles.modal} onClick={() => setShowFinding(false)}>
+          <div className={styles.modalBox} onClick={e => e.stopPropagation()}>
             <h2 className={styles.modalTitle}>Log Finding</h2>
             <div className={styles.form}>
               <label className={styles.label}>Title
@@ -2694,6 +2709,47 @@ export default function SessionDetailPage() {
       )}
 
       {/* ── Finding detail modal ───────────────────────────────────────── */}
+      {/* ── Inline approval modal ──────────────────────────────────────── */}
+      {showApprovalModal && (
+        <div className={styles.modalOverlay} onClick={() => setShowApprovalModal(false)}>
+          <div className={styles.findingModal} style={{ maxWidth: 620 }} onClick={e => e.stopPropagation()}>
+            <div className={styles.findingModalHdr}>
+              <div className={styles.findingModalTitle}>⚠ Pending Approvals</div>
+              <button className={styles.drawerClose} onClick={() => setShowApprovalModal(false)}><X size={14} /></button>
+            </div>
+            {pendingApprovals.length === 0 ? (
+              <div className={styles.findingModalSection} style={{ color: "var(--text-muted)", fontSize: 12 }}>
+                No pending approvals found.
+              </div>
+            ) : pendingApprovals.map(appr => (
+              <div key={appr.id} className={styles.findingModalSection}>
+                <div className={styles.findingModalSectionLabel}>{appr.tool_name}</div>
+                <code style={{ display: "block", fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--text-primary)", background: "var(--bg-card)", padding: "6px 8px", borderRadius: 4, wordBreak: "break-all", marginBottom: 6 }}>
+                  {appr.command}
+                </code>
+                {appr.reasoning && (
+                  <p style={{ fontSize: 11, color: "var(--text-muted)", margin: "0 0 8px" }}>{appr.reasoning}</p>
+                )}
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button className="btn btn-primary" style={{ fontSize: 11, padding: "4px 12px" }} onClick={async () => {
+                    await api.approvals.approve(appr.id);
+                    setPendingApprovals(prev => prev.filter(a => a.id !== appr.id));
+                    api.campaigns.get(campaign.id).then(setCampaign);
+                    if (pendingApprovals.length <= 1) setShowApprovalModal(false);
+                  }}>Approve</button>
+                  <button className="btn btn-ghost" style={{ fontSize: 11, padding: "4px 12px" }} onClick={async () => {
+                    await api.approvals.reject(appr.id);
+                    setPendingApprovals(prev => prev.filter(a => a.id !== appr.id));
+                    api.campaigns.get(campaign.id).then(setCampaign);
+                    if (pendingApprovals.length <= 1) setShowApprovalModal(false);
+                  }}>Reject</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* ── Attack chain modal ─────────────────────────────────────────── */}
       {showChainModal && (
         <div className={styles.modalOverlay} onClick={() => setShowChainModal(false)}>
@@ -2892,7 +2948,7 @@ function ReportRenderer({ markdown }) {
         i++;
       }
       elements.push(
-        <pre key={i} style={{ background: "#0d1117", border: "1px solid var(--border)", borderRadius: 6, padding: "10px 14px", margin: "8px 0", overflowX: "auto", fontFamily: "var(--font-mono)", fontSize: 11, lineHeight: 1.6, color: "#e2e8f0" }}>
+        <pre key={elements.length} style={{ background: "#0d1117", border: "1px solid var(--border)", borderRadius: 6, padding: "10px 14px", margin: "8px 0", overflowX: "auto", fontFamily: "var(--font-mono)", fontSize: 11, lineHeight: 1.6, color: "#e2e8f0" }}>
           {codeLines.join("\n")}
         </pre>
       );
@@ -2903,7 +2959,7 @@ function ReportRenderer({ markdown }) {
     // H1
     if (line.startsWith("# ")) {
       elements.push(
-        <h1 key={i} style={{ fontSize: 18, fontWeight: 700, color: "var(--accent)", borderBottom: "2px solid var(--accent)", paddingBottom: 8, marginBottom: 4 }}>
+        <h1 key={elements.length} style={{ fontSize: 18, fontWeight: 700, color: "var(--accent)", borderBottom: "2px solid var(--accent)", paddingBottom: 8, marginBottom: 4 }}>
           {line.slice(2)}
         </h1>
       );
@@ -2913,7 +2969,7 @@ function ReportRenderer({ markdown }) {
     // Blockquote (reviewer line)
     if (line.startsWith("> ")) {
       elements.push(
-        <div key={i} style={{ borderLeft: "3px solid var(--border)", paddingLeft: 12, margin: "4px 0 16px", color: "var(--text-muted)", fontSize: 12 }}>
+        <div key={elements.length} style={{ borderLeft: "3px solid var(--border)", paddingLeft: 12, margin: "4px 0 16px", color: "var(--text-muted)", fontSize: 12 }}>
           {inlineStyle(line.slice(2))}
         </div>
       );
@@ -2925,7 +2981,7 @@ function ReportRenderer({ markdown }) {
       const title = line.slice(3);
       const color = Object.entries(SECTION_COLORS).find(([k]) => title.includes(k))?.[1] || "var(--text-secondary)";
       elements.push(
-        <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, margin: "24px 0 10px", borderBottom: `1px solid ${color}40` }}>
+        <div key={elements.length} style={{ display: "flex", alignItems: "center", gap: 8, margin: "24px 0 10px", borderBottom: `1px solid ${color}40` }}>
           <span style={{ width: 4, height: 18, borderRadius: 2, background: color, flexShrink: 0 }} />
           <h2 style={{ fontSize: 14, fontWeight: 700, color, margin: 0, letterSpacing: "0.04em", textTransform: "uppercase" }}>{title}</h2>
         </div>
@@ -2936,8 +2992,9 @@ function ReportRenderer({ markdown }) {
     // H3 with severity badge detection
     if (line.startsWith("### ")) {
       const badge = colorSeverityBadge(line);
-      elements.push(badge || (
-        <h3 key={i} style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)", margin: "16px 0 4px" }}>
+      const k = elements.length;
+      elements.push(badge ? React.cloneElement(badge, { key: k }) : (
+        <h3 key={k} style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)", margin: "16px 0 4px" }}>
           {line.slice(4)}
         </h3>
       ));
@@ -2946,7 +3003,7 @@ function ReportRenderer({ markdown }) {
 
     // HR
     if (/^---+$/.test(line.trim())) {
-      elements.push(<hr key={i} style={{ border: "none", borderTop: "1px solid var(--border)", margin: "16px 0" }} />);
+      elements.push(<hr key={elements.length} style={{ border: "none", borderTop: "1px solid var(--border)", margin: "16px 0" }} />);
       i++; continue;
     }
 
@@ -2959,7 +3016,7 @@ function ReportRenderer({ markdown }) {
       }
       const rows = tableLines.filter(l => !/^\|[-| :]+\|$/.test(l.trim()));
       elements.push(
-        <table key={i} style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, margin: "8px 0" }}>
+        <table key={elements.length} style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, margin: "8px 0" }}>
           <tbody>
             {rows.map((r, ri) => {
               const cells = r.split("|").filter((_, ci) => ci > 0 && ci < r.split("|").length - 1);
@@ -2987,7 +3044,7 @@ function ReportRenderer({ markdown }) {
         i++;
       }
       elements.push(
-        <ol key={i} style={{ paddingLeft: 20, margin: "4px 0 8px", fontSize: 12, lineHeight: 1.7 }}>
+        <ol key={elements.length} style={{ paddingLeft: 20, margin: "4px 0 8px", fontSize: 12, lineHeight: 1.7 }}>
           {listLines.map((l, li) => <li key={li} style={{ color: "var(--text-primary)" }}>{inlineStyle(l)}</li>)}
         </ol>
       );
@@ -3002,7 +3059,7 @@ function ReportRenderer({ markdown }) {
         i++;
       }
       elements.push(
-        <ul key={i} style={{ paddingLeft: 18, margin: "4px 0 8px", fontSize: 12, lineHeight: 1.7 }}>
+        <ul key={elements.length} style={{ paddingLeft: 18, margin: "4px 0 8px", fontSize: 12, lineHeight: 1.7 }}>
           {listLines.map((l, li) => <li key={li} style={{ color: "var(--text-primary)" }}>{inlineStyle(l)}</li>)}
         </ul>
       );
@@ -3011,13 +3068,13 @@ function ReportRenderer({ markdown }) {
 
     // Empty line
     if (!line.trim()) {
-      elements.push(<div key={i} style={{ height: 6 }} />);
+      elements.push(<div key={elements.length} style={{ height: 6 }} />);
       i++; continue;
     }
 
     // Normal paragraph
     elements.push(
-      <p key={i} style={{ fontSize: 12, lineHeight: 1.7, margin: "2px 0", color: "var(--text-primary)" }}>
+      <p key={elements.length} style={{ fontSize: 12, lineHeight: 1.7, margin: "2px 0", color: "var(--text-primary)" }}>
         {inlineStyle(line)}
       </p>
     );
@@ -3048,10 +3105,27 @@ function AttackChainView({ findings, onNodeClick }) {
 
   // Build tree: depth-first layout
   const byId = Object.fromEntries(findings.map(f => [f.id, f]));
+
+  // Detect cycles via DFS — any node that is part of a cycle becomes a root
+  // so the SVG never gets NaN/Infinity dimensions.
+  const cycleNodes = new Set();
+  function hasCycle(id, visited, stack) {
+    visited.add(id); stack.add(id);
+    const parent = byId[id]?.chains_from_id;
+    if (parent && byId[parent]) {
+      if (stack.has(parent)) { cycleNodes.add(id); cycleNodes.add(parent); return true; }
+      if (!visited.has(parent) && hasCycle(parent, visited, stack)) return true;
+    }
+    stack.delete(id);
+    return false;
+  }
+  const _v = new Set(), _s = new Set();
+  for (const f of findings) if (!_v.has(f.id)) hasCycle(f.id, _v, _s);
+
   const childrenOf = {};
   const roots = [];
   for (const f of findings) {
-    if (f.chains_from_id && byId[f.chains_from_id]) {
+    if (!cycleNodes.has(f.id) && f.chains_from_id && byId[f.chains_from_id] && !cycleNodes.has(f.chains_from_id)) {
       (childrenOf[f.chains_from_id] = childrenOf[f.chains_from_id] || []).push(f.id);
     } else {
       roots.push(f.id);

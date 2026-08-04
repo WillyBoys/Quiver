@@ -753,6 +753,7 @@
 .status_complete { color: var(--status-done); }
 .status_error { color: var(--status-error); }
 .status_pending { color: var(--status-pending); }
+.status_timeout { color: var(--status-pending); }
 
 .delBtn {
   background: transparent; border: none; color: var(--text-muted);
@@ -1860,12 +1861,37 @@
 
 .pipelineSpecialist {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 3px 8px;
+  flex-direction: column;
+  padding: 4px 8px;
   margin: 2px 0;
   border-radius: 4px;
   background: var(--bg-elevated);
+}
+
+/* Header row: role name + status/iter on the same line */
+.pipelineSpecHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+}
+
+/* Reasoning text shown under the header when specialist is active */
+.pipelineSpecReasoning {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-style: italic;
+  margin: 3px 0 1px;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.pipelineSpecMeta {
+  display: flex; align-items: center; gap: 6px;
+}
+
+.pipelineSpecIter {
+  font-size: 9px; color: var(--text-muted); font-family: var(--font-mono);
 }
 
 .pipelineSpecRole {

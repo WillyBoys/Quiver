@@ -3,7 +3,7 @@ import logging
 import re
 import shlex
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, or_
 from app.models.run import Run
 from app.models.tool import Tool
 from app.models.campaign import Campaign
@@ -179,15 +179,36 @@ def _primary_target(scope: list[str], kind: str) -> str:
 
 
 async def build_agent_prompt(campaign: Campaign, db: AsyncSession) -> str:
+    # Pipeline specialists share a session with sibling campaigns — scope their
+    # history strictly to their own campaign so they don't reason over each other's runs.
+    # Single-agent campaigns include NULL campaign_id runs for backward compatibility.
+    is_pipeline_specialist = bool(
+        campaign.session_id and (campaign.description or "").startswith("pipeline_run:")
+    )
+    max_runs = 20 if is_pipeline_specialist else MAX_RUNS
+    max_output = 1000 if is_pipeline_specialist else MAX_OUTPUT_PER_RUN
+
     runs = []
     if campaign.session_id:
-        result = await db.execute(
-            select(Run)
-            .where(Run.session_id == campaign.session_id)
-            .where(Run.status.in_(["complete", "error"]))
-            .order_by(Run.created_at.desc())
-            .limit(MAX_RUNS)
-        )
+        if is_pipeline_specialist:
+            history_q = (
+                select(Run)
+                .where(Run.session_id == campaign.session_id)
+                .where(Run.campaign_id == campaign.id)
+                .where(Run.status.in_(["complete", "error"]))
+                .order_by(Run.created_at.desc())
+                .limit(max_runs)
+            )
+        else:
+            history_q = (
+                select(Run)
+                .where(Run.session_id == campaign.session_id)
+                .where(or_(Run.campaign_id == None, Run.campaign_id == campaign.id))
+                .where(Run.status.in_(["complete", "error"]))
+                .order_by(Run.created_at.desc())
+                .limit(max_runs)
+            )
+        result = await db.execute(history_q)
         runs = list(reversed(result.scalars().all()))
 
     # Resolve engagement type from the linked session
@@ -270,8 +291,8 @@ async def build_agent_prompt(campaign: Campaign, db: AsyncSession) -> str:
     action_lines = []
     already_run_commands: list[str] = []
     for run in runs:
-        out = (run.output or "")[:MAX_OUTPUT_PER_RUN]
-        if len(run.output or "") > MAX_OUTPUT_PER_RUN:
+        out = (run.output or "")[:max_output]
+        if len(run.output or "") > max_output:
             out += "..."
         action_lines.append(
             f"  [{run.tool_name}] {run.command}\n"
@@ -374,6 +395,15 @@ async def build_agent_prompt(campaign: Campaign, db: AsyncSession) -> str:
         if initial_context_str else ""
     )
 
+    # Pipeline specialists have a precise role_prompt that already defines their lane.
+    # Injecting the full multi-phase methodology creates conflicting instructions.
+    if is_pipeline_specialist:
+        methodology_block = ""
+    else:
+        methodology_block = (
+            f"\nENGAGEMENT METHODOLOGY ({eng_label} — follow phases in order):\n{methodology_str}\n"
+        )
+
     role_prefix = _specialist_role_prompts.get(campaign.id, "")
     intro_line = role_prefix if role_prefix else "You are a penetration tester AI. Choose the single best NEXT action against the target scope."
 
@@ -382,10 +412,7 @@ async def build_agent_prompt(campaign: Campaign, db: AsyncSession) -> str:
 SCOPE (test all entries — work through each systematically):
 {scope_str}
 SESSION OUTPUT DIR (write all tool output files here — use this path for -outputfile flags and any file redirects): {data_dir}/
-{context_section}
-ENGAGEMENT METHODOLOGY ({eng_label} — follow phases in order):
-{methodology_str}
-
+{context_section}{methodology_block}
 TOOLS AVAILABLE (use binary name as tool_name):
 {tools_str}
 
