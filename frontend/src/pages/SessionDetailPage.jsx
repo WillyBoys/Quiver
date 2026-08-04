@@ -866,7 +866,10 @@ export default function SessionDetailPage() {
 
   function fmtElapsed(isoStart) {
     if (!isoStart) return "";
-    const secs = Math.floor((Date.now() - new Date(isoStart).getTime()) / 1000);
+    // Append Z if the string has no timezone info — SQLite strips the UTC offset on round-trip
+    const ts = /[Z+]/.test(isoStart) ? isoStart : isoStart + "Z";
+    const secs = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
+    if (secs <= 0) return "0s";
     if (secs < 60) return `${secs}s`;
     if (secs < 3600) return `${Math.floor(secs/60)}m ${secs%60}s`;
     return `${Math.floor(secs/3600)}h ${Math.floor((secs%3600)/60)}m`;

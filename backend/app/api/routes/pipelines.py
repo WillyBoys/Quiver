@@ -48,8 +48,8 @@ async def get_pipeline_phases(run_id: str, db: AsyncSession = Depends(get_db)):
             "campaign_status": camp.status,
             "last_agent_reasoning": camp.last_agent_reasoning or "",
             "iteration_count": camp.iteration_count or 0,
-            "started_at": camp.created_at.isoformat() if camp.created_at else None,
-            "updated_at": camp.updated_at.isoformat() if camp.updated_at else None,
+            "started_at": _utc_iso(camp.created_at),
+            "updated_at": _utc_iso(camp.updated_at),
             "exit_report": getattr(camp, "exit_report", "") or "",
         })
 
@@ -101,6 +101,17 @@ async def get_pipeline_run(run_id: str, db: AsyncSession = Depends(get_db)):
     return _dict(await _get_or_404(run_id, db))
 
 
+def _utc_iso(dt) -> str | None:
+    """Return ISO-8601 string with explicit UTC offset so JS Date() parses correctly."""
+    if dt is None:
+        return None
+    iso = dt.isoformat()
+    # SQLite strips timezone on round-trip; all datetimes in this app are UTC
+    if not (iso.endswith("Z") or "+" in iso[10:]):
+        iso += "+00:00"
+    return iso
+
+
 def _extract_phase_num(description: str) -> int:
     m = re.search(r":phase:(\d+)", description or "")
     return int(m.group(1)) if m else 0
@@ -132,8 +143,8 @@ def _dict(r: PipelineRun) -> dict:
         "synthesis_outputs": r.synthesis_outputs or [],
         "skipped_phases": r.skipped_phases or [],
         "error": r.error or "",
-        "started_at": r.started_at.isoformat() if r.started_at else None,
-        "completed_at": r.completed_at.isoformat() if r.completed_at else None,
-        "created_at": r.created_at.isoformat(),
-        "updated_at": r.updated_at.isoformat(),
+        "started_at": _utc_iso(r.started_at),
+        "completed_at": _utc_iso(r.completed_at),
+        "created_at": _utc_iso(r.created_at),
+        "updated_at": _utc_iso(r.updated_at),
     }
