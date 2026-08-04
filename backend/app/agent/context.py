@@ -20,10 +20,12 @@ METHODOLOGY = {
     "external": """\
 Follow these phases IN ORDER. Use HISTORY and ARTIFACTS to determine your current phase.
 ALWAYS save discovered hosts, subdomains, credentials, and technology notes to ARTIFACTS — they persist across iterations and are your memory for chaining attacks.
+Select tools from TOOLS AVAILABLE that match each task — the list reflects what is actually installed.
 
 Phase 1 — Passive Recon & OSINT
-  Enumerate subdomains (bbot, dnsrecon), DNS records, and certificate transparency logs.
+  Enumerate subdomains, DNS records, and certificate transparency logs without touching the target directly.
   Identify ASN/CIDR ranges, technologies, and any exposed credentials or sensitive info.
+  Check for exposed secrets in public cloud storage and code repositories.
   Save every confirmed live subdomain and IP as a host artifact.
   Save domain, technology stack, and ASN context as note artifacts.
   Save any leaked credentials or API keys to ARTIFACTS immediately — credential chaining starts here.
@@ -35,16 +37,16 @@ Phase 2 — Active Service Discovery
   Save notable service versions and technology stack identifiers as note artifacts — they drive Phase 4 vuln selection.
 
 Phase 3 — Web Application Discovery (requires at least one host in ARTIFACTS)
-  Enumerate vhosts, directories (gobuster/ffuf/feroxbuster), detect web tech stack (whatweb/wafw00f).
+  Enumerate virtual hosts, directories, and files. Fingerprint the web technology stack and frameworks.
   Find login panels, admin interfaces, API endpoints, and exposed files (robots.txt, .env, .git, backup files).
   Save any newly discovered hosts or subdomains found during web enumeration to ARTIFACTS.
   Save credentials, API keys, or secrets found in exposed files to ARTIFACTS immediately.
 
 Phase 4 — Vulnerability Identification (requires hosts in ARTIFACTS)
-  Run nuclei templates against all hosts in ARTIFACTS.
-  Cross-reference service versions from ARTIFACTS notes against known CVEs (sslscan, exploitdb).
+  Run template-based vulnerability scans against all hosts in ARTIFACTS — prefer version-specific templates when service versions are known.
+  Cross-reference service versions from ARTIFACTS against known CVEs and exploit databases.
   Test default credentials on all identified services — save any successful login to ARTIFACTS as a cred artifact.
-  Check for secrets in source repositories and cloud storage (trufflehog, cloud_enum).
+  Check TLS configuration on HTTPS hosts for weak ciphers, outdated protocols, and certificate issues.
 
 Phase 5 — Exploitation & Validation (requires findings logged or credentials in ARTIFACTS)
   Exploit confirmed vulnerabilities with minimal-impact PoC (do not cause outages or data loss).
@@ -61,6 +63,7 @@ Phase 6 — Post-Exploitation (requires credentials or foothold in ARTIFACTS)
     "internal": """\
 Follow these phases IN ORDER. Use HISTORY and ARTIFACTS to determine your current phase.
 ALWAYS save discovered usernames, hashes, creds, hosts, and SPNs to ARTIFACTS — they persist across iterations and are your memory for chaining attacks.
+Select tools from TOOLS AVAILABLE that match each task — the list reflects what is actually installed.
 
 Phase 1 — Network Discovery
   Sweep all subnets in SCOPE to identify live hosts. Full TCP port scan of discovered hosts.
@@ -72,17 +75,18 @@ Phase 2 — AD & Service Enumeration
   Start with null/anonymous sessions — many environments leak user lists, password policy, and share listings without credentials.
   Hunt SMB shares on every live host — scripts, configs, and Group Policy Preferences (GPP) files in SYSVOL frequently contain plaintext credentials.
   Enumerate domain users via Kerberos (no lockout risk) or SID brute-force if no wordlist is available.
+  Collect AD graph data to map attack paths and object control relationships.
   With valid credentials: dump LDAP objects, check LAPS passwords, retrieve SYSVOL contents.
   Save every discovered username and SPN to ARTIFACTS — they unlock Phase 3.
 
 Phase 3 — Credential Access (requires at least one user in ARTIFACTS)
   AS-REP roasting: request hashes for accounts with pre-authentication disabled — no credentials needed.
   Kerberoasting: request TGS tickets for SPN accounts — needs any valid domain credential.
-  Write hash output files to SESSION OUTPUT DIR so john can crack them; save cracked credentials to ARTIFACTS.
+  Write hash output files to SESSION OUTPUT DIR and crack them offline; save cracked credentials to ARTIFACTS.
   Secretsdump: if any credentials exist in ARTIFACTS, this is often the highest-yield move — dumps SAM, LSA secrets, and with the right rights: all NTDS hashes via DCSync.
   GPP/SYSVOL: check NETLOGON and SYSVOL shares for XML, batch, and ini files containing embedded credentials.
   Password spraying: last resort — check lockout policy from ARTIFACTS first and stay well under the threshold.
-  SMB signing: if signing is disabled across hosts, flag for NTLM relay. Responder and ntlmrelayx require manual execution from a host on the target subnet.
+  SMB signing: if signing is disabled across hosts, flag for NTLM relay.
 
 Phase 4 — Lateral Movement (requires credentials or hashes in ARTIFACTS)
   Validate credentials across all discovered hosts before attempting access.
@@ -91,21 +95,22 @@ Phase 4 — Lateral Movement (requires credentials or hashes in ARTIFACTS)
   Save any newly discovered credentials, hashes, or privileged access to ARTIFACTS.
 
 Phase 5 — Privilege Escalation
-  BloodHound maps the full AD attack graph — look for paths to Domain Admin via ACL abuse, group membership, or object control (WriteDACL, GenericAll, GenericWrite).
-  ADCS: enumerate certificate templates for misconfigurations (ESC1-8) — a vulnerable template can yield Domain Admin equivalent without touching credentials.
-  Delegation: unconstrained delegation on any host is a significant escalation path; constrained delegation may allow impersonation to specific services.
+  Review AD graph attack paths for routes to Domain Admin via ACL abuse, group membership, or object control (WriteDACL, GenericAll, GenericWrite).
+  Enumerate certificate templates for misconfigurations (ESC1-8) — a vulnerable template can yield Domain Admin equivalent.
+  Unconstrained delegation on any host is a significant escalation path; constrained delegation may allow impersonation to specific services.
   If any account has DS-Replication rights, DCSync to dump all domain hashes directly.
 
 Phase 6 — Domain Dominance
-  Achieve Domain Admin. Dump NTDS.dit via DCSync to capture all domain hashes.
+  Achieve Domain Admin. Dump all domain hashes via DCSync or NTDS.dit extraction.
   Document the full attack chain: initial access → enumeration → credential → lateral → DA.
   Save DA credentials to ARTIFACTS.""",
 
     "web": """\
 Follow OWASP Top 10 phases IN ORDER. Use HISTORY to determine current phase, then act accordingly.
+Select tools from TOOLS AVAILABLE that match each task — the list reflects what is actually installed.
 
 Phase 1 — Recon & Discovery (OWASP A05)
-  Directory/endpoint brute-force (gobuster/ffuf). Fingerprint tech stack and frameworks.
+  Enumerate directories, endpoints, and files via fuzzing. Fingerprint the tech stack and frameworks.
   Check robots.txt, sitemap, .git, .env, backup files. Find admin panels and API docs.
 
 Phase 2 — Authentication Testing (OWASP A07)
@@ -113,7 +118,7 @@ Phase 2 — Authentication Testing (OWASP A07)
   Password reset flaws, username enumeration via timing/response. MFA bypass techniques.
 
 Phase 3 — Injection & Input Validation (OWASP A03)
-  SQL injection in all inputs, headers, cookies — manual probes then sqlmap.
+  SQL injection in all inputs, headers, cookies — manual probes then automated confirmation.
   Command injection, SSTI (Jinja2/Twig), XPath, LDAP injection.
   Path traversal (../), file inclusion (LFI/RFI), XXE in XML endpoints.
 
@@ -137,7 +142,7 @@ Phase 7 — API Testing (OWASP A09)
 
 Phase 8 — Misconfigurations & Outdated Components (OWASP A05, A06)
   Security headers: CSP, HSTS, X-Frame-Options, Referrer-Policy. CORS wildcard origins.
-  TLS: SSLv3/TLS 1.0/weak ciphers. Outdated component CVEs (nuclei templates).
+  TLS: outdated protocols and weak ciphers. Outdated component CVEs.
   Exposed error messages, stack traces, debug endpoints, server version headers.""",
 }
 

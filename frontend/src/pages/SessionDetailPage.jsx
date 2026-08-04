@@ -94,6 +94,8 @@ export default function SessionDetailPage() {
   const [confirmDialog, setConfirmDialog] = useState(null); // { message, onConfirm }
   const [aiAnalysis, setAiAnalysis] = useState({});        // runId -> { status, text, model, error }
   const [findingsView, setFindingsView] = useState("list"); // "list" | "chain"
+  const [selectedFinding, setSelectedFinding] = useState(null); // finding detail modal
+  const [showChainModal, setShowChainModal] = useState(false);  // attack chain modal
 
   useEffect(() => {
     api.sessions.get(sessionId).then(async (s) => {
@@ -818,6 +820,8 @@ export default function SessionDetailPage() {
     if (nearBottom) el.scrollTop = el.scrollHeight;
   }, [selectedRunId, liveOutput[selectedRunId]]);
 
+  const openFinding = (f) => setSelectedFinding(f);
+
   const specRoleForRun = (runId) => {
     const r = runsById[runId];
     if (!r) return null;
@@ -1266,24 +1270,12 @@ export default function SessionDetailPage() {
               </div>
               {!(session.findings||[]).length && <p className={styles.railEmpty}>No findings yet.</p>}
               {(session.findings||[]).map((f) => (
-                <div key={f.id} className={styles.railFinding}>
+                <div key={f.id} className={styles.railFinding} onClick={() => openFinding(f)} style={{ cursor: "pointer" }}>
                   <div className={styles.railFindingTop}>
                     <span className={`badge badge-${f.severity}`}>{f.severity}</span>
                     <div className={styles.railFindingTitle}>{f.title}</div>
                   </div>
-                  {(f.evidence_run_ids||[]).map(rid => {
-                    const er = runsById[rid];
-                    if (!er) return null;
-                    return (
-                      <div key={rid} className={`${styles.feedRunRow} ${selectedRunId === rid ? styles.feedRunRowActive : ""}`} onClick={() => setSelectedRunId(rid)}>
-                        <span className={styles.feedRunTool}>{er.tool_name}</span>
-                        <span className={styles.feedRunCmd}>{er.command}</span>
-                        <span className={er.status === "complete" ? styles.feedRunOk : styles.feedRunErr}>
-                          {er.status === "complete" ? "✓" : "✗"}
-                        </span>
-                      </div>
-                    );
-                  })}
+                  {f.notes && <div className={styles.railFindingNotes}>{f.notes}</div>}
                 </div>
               ))}
               <div className={styles.railSectionTitle} style={{ marginTop: 8 }}>Artifacts</div>
@@ -1407,80 +1399,87 @@ export default function SessionDetailPage() {
               <div className={styles.mcReasonPanel}>
                 <div className={styles.mcPanelHdr}>Reasoning</div>
                 <div className={styles.mcReasonScroll}>
-                  {pipelinePhases.filter(p => p.synthesis_reasoning).map((phase) => (
-                    <div key={`synth-${phase.phase_num}`} className={styles.mcSynthBlock}>
-                      <div className={styles.mcSynthWho}>⚡ Synthesis · After Phase {phase.phase_num}</div>
-                      <p className={styles.mcSynthText}>{phase.synthesis_reasoning}</p>
-                      {phase.synthesis_directives?.length > 0 && (
-                        <div className={styles.mcSynthPill}>
-                          ⚡ {phase.synthesis_directives.length} chain{phase.synthesis_directives.length !== 1 ? "s" : ""} → Phase {phase.phase_num + 1}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                  {pipelinePhases.flatMap(p => p.specialists).filter(s => s.last_agent_reasoning).map((spec) => {
-                    const specRuns = runs.filter(r => r.campaign_id === spec.campaign_id).slice(0, 10);
-                    const specRunCount = runs.filter(r => r.campaign_id === spec.campaign_id).length;
-                    return (
-                      <div key={spec.campaign_id} className={styles.mcSpecBlock}>
-                        <div className={`${styles.mcSpecWho} ${spec.campaign_status === "active" ? styles.mcSpecWhoLive : styles.mcSpecWhoDone}`}>
-                          {spec.campaign_status === "active" && <span className={styles.feedPulse} />}
-                          {spec.role}
-                          {specRunCount > 0 && <span className={styles.mcSpecIterLabel}> · {specRunCount} runs</span>}
-                        </div>
-                        <p className={styles.mcSpecThought}>{spec.last_agent_reasoning}</p>
-                        {specRuns.length > 0 && (
-                          <div className={styles.mcSpecRuns}>
-                            {specRuns.map(r => (
-                              <div
-                                key={r.id}
-                                className={`${styles.feedRunRow} ${selectedRunId === r.id ? styles.feedRunRowActive : ""}`}
-                                onClick={() => setSelectedRunId(r.id)}
-                              >
-                                <span className={styles.feedRunTool}>{r.tool_name}</span>
-                                <span className={styles.feedRunCmd}>{r.command}</span>
-                                <span className={r.status === "complete" ? styles.feedRunOk : r.status === "running" ? styles.feedPulse : styles.feedRunErr}>
-                                  {r.status === "complete" ? "✓" : r.status === "running" ? "" : "✗"}
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
                   {pipelinePhases.length === 0 && (
                     <p className={styles.mcReasonEmpty}>Pipeline hasn't started yet.</p>
                   )}
+                  {[...pipelinePhases].reverse().map((phase, phaseIdx) => {
+                    const activeSpecs = phase.specialists.filter(s => s.last_agent_reasoning);
+                    const hasSynth = Boolean(phase.synthesis_reasoning);
+                    if (!activeSpecs.length && !hasSynth) return null;
+                    return (
+                      <div key={phase.phase_num}>
+                        {phaseIdx > 0 && <div className={styles.phaseDivider} />}
+                        <div className={styles.phaseDividerLabel}>
+                          <span>Phase {phase.phase_num}</span>
+                          <span className={styles.phaseDividerName}>{phase.name}</span>
+                        </div>
+                        {hasSynth && (
+                          <div className={styles.mcSynthBlock}>
+                            <div className={styles.mcSynthWho}>⚡ Synthesis</div>
+                            <p className={styles.mcSynthText}>{phase.synthesis_reasoning}</p>
+                            {phase.synthesis_directives?.length > 0 && (
+                              <div className={styles.mcSynthPill}>
+                                ⚡ {phase.synthesis_directives.length} chain{phase.synthesis_directives.length !== 1 ? "s" : ""} → Phase {phase.phase_num + 1}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        {activeSpecs.map(spec => {
+                          const specRuns = runs.filter(r => r.campaign_id === spec.campaign_id).slice(0, 10);
+                          const specRunCount = runs.filter(r => r.campaign_id === spec.campaign_id).length;
+                          return (
+                            <div key={spec.campaign_id} className={styles.mcSpecBlock}>
+                              <div className={`${styles.mcSpecWho} ${spec.campaign_status === "active" ? styles.mcSpecWhoLive : styles.mcSpecWhoDone}`}>
+                                {spec.campaign_status === "active" && <span className={styles.feedPulse} />}
+                                {spec.role}
+                                {specRunCount > 0 && <span className={styles.mcSpecIterLabel}> · {specRunCount} runs</span>}
+                              </div>
+                              <p className={styles.mcSpecThought}>{spec.last_agent_reasoning}</p>
+                              {specRuns.length > 0 && (
+                                <div className={styles.mcSpecRuns}>
+                                  {specRuns.map(r => (
+                                    <div
+                                      key={r.id}
+                                      className={`${styles.feedRunRow} ${selectedRunId === r.id ? styles.feedRunRowActive : ""}`}
+                                      onClick={() => setSelectedRunId(r.id)}
+                                    >
+                                      <span className={styles.feedRunTool}>{r.tool_name}</span>
+                                      <span className={styles.feedRunCmd}>{r.command}</span>
+                                      <span className={r.status === "complete" ? styles.feedRunOk : r.status === "running" ? styles.feedPulse : styles.feedRunErr}>
+                                        {r.status === "complete" ? "✓" : r.status === "running" ? "" : "✗"}
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
               <div className={styles.mcRightPanel}>
                 <div className={styles.mcPanelHdr}>
                   Findings <span className={styles.railCount}>{(session.findings||[]).length}</span>
+                  {(session.findings||[]).length > 0 && (
+                    <button className={styles.chainBtn} onClick={() => setShowChainModal(true)} title="Attack chain view">
+                      <GitBranch size={11} />
+                    </button>
+                  )}
                 </div>
                 {(session.findings||[]).map((f) => {
                   const firstRunId = (f.evidence_run_ids||[])[0];
                   const specRole = firstRunId ? specRoleForRun(firstRunId) : null;
                   return (
-                  <div key={f.id} className={styles.railFinding}>
+                  <div key={f.id} className={styles.railFinding} onClick={() => openFinding(f)} style={{ cursor: "pointer" }}>
                     <div className={styles.railFindingTop}>
                       <span className={`badge badge-${f.severity}`}>{f.severity}</span>
                       <div className={styles.railFindingTitle}>{f.title}</div>
                     </div>
                     {specRole && <div className={styles.railFindingSpec}>{specRole}</div>}
-                    {(f.evidence_run_ids||[]).map(rid => {
-                      const er = runsById[rid];
-                      if (!er) return null;
-                      return (
-                        <div key={rid} className={`${styles.feedRunRow} ${selectedRunId === rid ? styles.feedRunRowActive : ""}`} onClick={() => setSelectedRunId(rid)}>
-                          <span className={styles.feedRunTool}>{er.tool_name}</span>
-                          <span className={styles.feedRunCmd}>{er.command}</span>
-                          <span className={er.status === "complete" ? styles.feedRunOk : styles.feedRunErr}>
-                            {er.status === "complete" ? "✓" : "✗"}
-                          </span>
-                        </div>
-                      );
-                    })}
+                    {f.notes && <div className={styles.railFindingNotes}>{f.notes}</div>}
                   </div>
                   );
                 })}
@@ -2693,6 +2692,89 @@ export default function SessionDetailPage() {
           </div>
         </div>
       )}
+
+      {/* ── Finding detail modal ───────────────────────────────────────── */}
+      {/* ── Attack chain modal ─────────────────────────────────────────── */}
+      {showChainModal && (
+        <div className={styles.modalOverlay} onClick={() => setShowChainModal(false)}>
+          <div className={styles.chainModal} onClick={e => e.stopPropagation()}>
+            <div className={styles.chainModalHdr}>
+              <span className={styles.chainModalTitle}>Attack Chain</span>
+              <span className={styles.chainModalSub}>{(session.findings||[]).length} finding{(session.findings||[]).length !== 1 ? "s" : ""}</span>
+              <button className={styles.drawerClose} onClick={() => setShowChainModal(false)}><X size={14} /></button>
+            </div>
+            <div className={styles.chainModalBody}>
+              <AttackChainView
+                findings={session.findings||[]}
+                onNodeClick={(f) => { setSelectedFinding(f); }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Finding detail modal (rendered last so it stacks above chain modal) */}
+      {selectedFinding && (() => {
+        const f = selectedFinding;
+        const parentFinding = f.chains_from_id
+          ? (session.findings||[]).find(p => p.id === f.chains_from_id)
+          : null;
+        const specRole = (f.evidence_run_ids||[])[0] ? specRoleForRun((f.evidence_run_ids||[])[0]) : null;
+        return (
+          <div className={styles.modalOverlayTop} onClick={() => setSelectedFinding(null)}>
+            <div className={styles.findingModal} onClick={e => e.stopPropagation()}>
+              <div className={styles.findingModalHdr}>
+                <div className={styles.findingModalTitle}>
+                  <span className={`badge badge-${f.severity}`}>{f.severity}</span>
+                  <span>{f.title}</span>
+                </div>
+                <button className={styles.drawerClose} onClick={() => setSelectedFinding(null)}><X size={14} /></button>
+              </div>
+              {specRole && (
+                <div className={styles.findingModalMeta}>
+                  <span className={styles.findingModalMetaLabel}>discovered by</span>
+                  <span className={styles.findingModalMetaVal}>{specRole}</span>
+                </div>
+              )}
+              {parentFinding && (
+                <div className={styles.findingModalMeta}>
+                  <span className={styles.findingModalMetaLabel}>chains from</span>
+                  <span className={`${styles.findingModalMetaVal} ${styles.findingModalChain}`}
+                    onClick={() => setSelectedFinding(parentFinding)}>
+                    ↳ {parentFinding.title}
+                  </span>
+                </div>
+              )}
+              {f.notes && (
+                <div className={styles.findingModalSection}>
+                  <div className={styles.findingModalSectionLabel}>Notes</div>
+                  <p className={styles.findingModalNotes}>{f.notes}</p>
+                </div>
+              )}
+              {(f.evidence_run_ids||[]).length > 0 && (
+                <div className={styles.findingModalSection}>
+                  <div className={styles.findingModalSectionLabel}>Evidence</div>
+                  {(f.evidence_run_ids||[]).map(rid => {
+                    const er = runsById[rid];
+                    if (!er) return null;
+                    return (
+                      <div key={rid}
+                        className={`${styles.feedRunRow} ${selectedRunId === rid ? styles.feedRunRowActive : ""}`}
+                        onClick={() => { setSelectedRunId(rid); setSelectedFinding(null); }}>
+                        <span className={styles.feedRunTool}>{er.tool_name}</span>
+                        <span className={styles.feedRunCmd}>{er.command}</span>
+                        <span className={er.status === "complete" ? styles.feedRunOk : styles.feedRunErr}>
+                          {er.status === "complete" ? "✓" : "✗"}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── Tool output drawer ─────────────────────────────────────────── */}
       {selectedRunId && (() => {
