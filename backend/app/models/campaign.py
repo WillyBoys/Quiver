@@ -20,6 +20,7 @@ class Campaign(Base):
     session_id: Mapped[str | None] = mapped_column(String, ForeignKey("sessions.id"), nullable=True, index=True)
     last_agent_reasoning: Mapped[str] = mapped_column(Text, default="")  # most recent agent thought
     role_prompt: Mapped[str] = mapped_column(Text, default="")  # specialist role prompt (persisted for restart durability)
+    exit_report: Mapped[str] = mapped_column(Text, default="")  # post-run specialist exit report for synthesis context
     max_iterations: Mapped[int | None] = mapped_column(nullable=True)   # None = unlimited
     iteration_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))

@@ -152,7 +152,70 @@ async def run_specialist(
         # and still needs the role prompt; the entry is inert once the campaign is done.
         if not camp or camp.status != "awaiting_approval":
             _specialist_role_prompts.pop(specialist_campaign_id, None)
+
+    # Generate exit report for completed specialists — best-effort, never blocks the pipeline.
+    if camp and camp.status == "completed":
+        await _generate_specialist_exit_report(specialist_campaign_id, spec.role, camp)
+
     logger.info("PIPELINE | specialist %s (%s) finished", specialist_campaign_id, spec.role)
+
+
+async def _generate_specialist_exit_report(
+    campaign_id: str,
+    role: str,
+    camp: Campaign,
+) -> None:
+    """Ask the specialist to summarise what it found, what failed, and what to follow up on."""
+    from app.models.run import Run
+    from app.agent.llm import generate_summary, AuthError
+
+    try:
+        async with AsyncSessionLocal() as db:
+            runs_result = await db.execute(
+                select(Run)
+                .where(Run.campaign_id == campaign_id)
+                .where(Run.tool_name != "_summary")
+                .order_by(Run.created_at.desc())
+                .limit(20)
+            )
+            recent_runs = list(runs_result.scalars().all())
+
+        run_lines = "\n".join(
+            f"  [{r.status}] {r.tool_name}: {(r.command or '')[:120]}"
+            for r in reversed(recent_runs)
+        ) or "  (no runs)"
+
+        last_thought = (camp.last_agent_reasoning or "").strip() or "(none)"
+        iter_count = camp.iteration_count or 0
+
+        prompt = f"""You just finished your run as the {role} specialist for a penetration test.
+Iterations completed: {iter_count}
+Your final reasoning: {last_thought[:600]}
+
+Recent tool runs (newest last):
+{run_lines}
+
+Write a brief exit report (3-5 sentences, plain text) covering:
+1. What you confirmed or discovered
+2. What you attempted that was blocked, failed, or timed out
+3. The single highest-value follow-up for the next phase
+
+Be specific — name hosts, ports, services, or CVEs where relevant. No headers, no JSON."""
+
+        provider = camp.ai_provider or "local"
+        raw, _ = await generate_summary(prompt, provider=provider)
+        exit_report = raw.strip()[:1500]
+
+        async with AsyncSessionLocal() as db:
+            c = (await db.execute(select(Campaign).where(Campaign.id == campaign_id))).scalar_one_or_none()
+            if c:
+                c.exit_report = exit_report
+                await db.commit()
+
+        logger.info("PIPELINE | specialist=%s exit report generated (%d chars)", campaign_id, len(exit_report))
+
+    except (AuthError, Exception) as e:
+        logger.warning("PIPELINE | specialist=%s exit report failed: %s", campaign_id, e)
 
 
 async def run_phase(

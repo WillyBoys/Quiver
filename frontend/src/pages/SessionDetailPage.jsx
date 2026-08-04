@@ -5,6 +5,11 @@ import { api, createRunSocket } from "../utils/api.js";
 import TerminalPane from "../components/terminal/TerminalPane.jsx";
 import ChecklistPane from "../components/checklist/ChecklistPane.jsx";
 import styles from "./SessionDetailPage.module.css";
+import useSessionPoller from "../hooks/useSessionPoller.js";
+import SingleAgentView from "../components/session/SingleAgentView.jsx";
+import MissionControlView from "../components/session/MissionControlView.jsx";
+import ReportRenderer from "../components/session/ReportRenderer.jsx";
+import AttackChainView from "../components/session/AttackChainView.jsx";
 
 const SEVERITY_OPTS = ["critical", "high", "medium", "low", "info"];
 const SHELL_TAB = "__shell__";
@@ -55,8 +60,6 @@ export default function SessionDetailPage() {
   const [agentSidebarView, setAgentSidebarView] = useState("reasoning"); // "reasoning" | "tools" | "checklist"
   const [selectedRunId, setSelectedRunId] = useState(null);
   const [expandedArtifacts, setExpandedArtifacts] = useState(new Set());
-  const [expandedSynthPhases, setExpandedSynthPhases] = useState(new Set());
-  const [expandedSpecIds, setExpandedSpecIds] = useState(new Set());
   const connectedRunIds = useRef(new Set());
   const openSocketsRef = useRef([]);
   const drawerScrollRef = useRef(null);
@@ -166,78 +169,52 @@ export default function SessionDetailPage() {
     };
   }, [sessionId]);
 
-  // Poll for new agent-created runs + campaign status; auto-connect streaming for new running runs
-  useEffect(() => {
-    if (!session?.campaign_id) return;
-    const campaignId = session.campaign_id;
-
-    function connectNewRunningRuns(fetchedRuns) {
-      const running = fetchedRuns.filter(
-        (r) => r.status === "running" && !connectedRunIds.current.has(r.id)
-      );
-      for (const run of running) {
-        connectedRunIds.current.add(run.id);
-        setLiveOutput((o) => ({ ...o, [run.id]: o[run.id] || "" }));
-        setStreaming((s) => ({ ...s, [run.id]: true }));
-        setOpenTabs((t) => (t.includes(run.id) ? t : [...t, run.id]));
-        setActiveRunId(run.id);
-        const ws2 = createRunSocket(run.id, {
-          onOutput: (line) => setLiveOutput((o) => ({ ...o, [run.id]: (o[run.id] || "") + line })),
-          onDone: (msg) => {
-            setStreaming((s) => ({ ...s, [run.id]: false }));
-            setRuns((prev) => prev.map((r) => r.id === run.id ? { ...r, status: msg.status } : r));
-          },
-          onError: (err) => {
-            setStreaming((s) => ({ ...s, [run.id]: false }));
-            setLiveOutput((o) => ({ ...o, [run.id]: (o[run.id] || "") + `\n[ERROR] ${err}` }));
-          },
-        });
-        openSocketsRef.current.push(ws2);
-      }
-    }
-
-    api.campaigns.get(campaignId).then(setCampaign);
-    api.runs.listForSession(sessionId).then((r) => { setRuns(r); connectNewRunningRuns(r); });
-
-    const interval = setInterval(() => {
-      api.runs.listForSession(sessionId).then((r) => { setRuns(r); connectNewRunningRuns(r); });
-      api.campaigns.get(campaignId).then(setCampaign);
-      // Merge only findings + checklist + artifacts from the server so in-progress notes edits aren't clobbered
-      api.sessions.get(sessionId).then((fresh) => {
-        setSession((prev) => prev ? { ...prev, findings: fresh.findings, checklist_state: fresh.checklist_state } : prev);
-        setArtifacts(fresh.artifacts || {});
-        // Keep the open finding detail modal in sync with the latest server state
-        setSelectedFinding((prev) => {
-          if (!prev) return prev;
-          const updated = (fresh.findings || []).find(f => f.id === prev.id);
-          return updated || prev;
-        });
+  function connectNewRunningRuns(fetchedRuns) {
+    const running = fetchedRuns.filter(
+      (r) => r.status === "running" && !connectedRunIds.current.has(r.id)
+    );
+    for (const run of running) {
+      connectedRunIds.current.add(run.id);
+      setLiveOutput((o) => ({ ...o, [run.id]: o[run.id] || "" }));
+      setStreaming((s) => ({ ...s, [run.id]: true }));
+      setOpenTabs((t) => (t.includes(run.id) ? t : [...t, run.id]));
+      setActiveRunId(run.id);
+      const ws2 = createRunSocket(run.id, {
+        onOutput: (line) => setLiveOutput((o) => ({ ...o, [run.id]: (o[run.id] || "") + line })),
+        onDone: (msg) => {
+          setStreaming((s) => ({ ...s, [run.id]: false }));
+          setRuns((prev) => prev.map((r) => r.id === run.id ? { ...r, status: msg.status } : r));
+        },
+        onError: (err) => {
+          setStreaming((s) => ({ ...s, [run.id]: false }));
+          setLiveOutput((o) => ({ ...o, [run.id]: (o[run.id] || "") + `\n[ERROR] ${err}` }));
+        },
       });
-    }, 4000);
-    // Only clear the interval here — socket cleanup lives in the sessionId effect
-    // so that launching a new agent (which changes campaign_id) doesn't kill
-    // sockets that are still streaming live tool output.
-    return () => { clearInterval(interval); };
-  }, [session?.campaign_id, sessionId]);
-
-  // Poll pipeline phases when campaign is in pipeline mode
-  useEffect(() => {
-    if (!campaign?.id || campaign.pipeline_mode !== "pipeline") return;
-    async function refreshPipeline() {
-      try {
-        const runs = await api.pipelines.list(campaign.id);
-        if (runs.length > 0) {
-          const latest = runs[0];
-          setPipelineRun(latest);
-          const phases = await api.pipelines.getPhases(latest.id);
-          setPipelinePhases(phases);
-        }
-      } catch {}
+      openSocketsRef.current.push(ws2);
     }
-    refreshPipeline();
-    const iv = setInterval(refreshPipeline, 4000);
-    return () => clearInterval(iv);
-  }, [campaign?.id, campaign?.pipeline_mode]);
+  }
+
+  useSessionPoller({
+    sessionId,
+    campaignId: session?.campaign_id || null,
+    pipelineMode: campaign?.pipeline_mode === "pipeline",
+    onRuns: (fetchedRuns) => {
+      setRuns(fetchedRuns);
+      connectNewRunningRuns(fetchedRuns);
+    },
+    onCampaign: setCampaign,
+    onSession: (fresh) => {
+      setSession((prev) => prev ? { ...prev, findings: fresh.findings, checklist_state: fresh.checklist_state } : prev);
+      setArtifacts(fresh.artifacts || {});
+      setSelectedFinding((prev) => {
+        if (!prev) return prev;
+        const updated = (fresh.findings || []).find(f => f.id === prev.id);
+        return updated || prev;
+      });
+    },
+    onPipeline: setPipelineRun,
+    onPipelinePhases: setPipelinePhases,
+  });
 
   const enabledTools = useMemo(() => tools.filter((t) => t.enabled), [tools]);
   const filteredTools = useMemo(() => {
@@ -1193,368 +1170,42 @@ export default function SessionDetailPage() {
 
         {/* ── Single-agent AI session — Narrative + Intel rail ── */}
         {isAiSession && !isPipelineMode && (
-          <div className={styles.aiWorkspace}>
-            <div className={styles.narrativeFeed}>
-              <div className={styles.narrativeScroll}>
-                {runs.filter(r => r.reasoning).length === 0 && !campaign.last_agent_reasoning && (
-                  <p className={styles.narrativeEmpty}>Waiting for agent to start…</p>
-                )}
-                {[...runs].reverse().filter(r => r.reasoning).map((run) => {
-                  if (run.tool_name === "_summary") {
-                    const sf = run.param_values?._findings || [];
-                    return (
-                      <div key={run.id} className={styles.feedSummaryCard}>
-                        <div className={`${styles.feedIcon} ${styles.feedIconDone}`}>✓</div>
-                        <div className={styles.feedBody}>
-                          <div className={styles.feedMeta}>
-                            <span className={styles.feedWho}>Agent Summary</span>
-                          </div>
-                          {run.reasoning && <p className={styles.feedThought}>{run.reasoning}</p>}
-                          {sf.length > 0 && (
-                            <div className={styles.feedSummaryFindings}>
-                              {sf.map((f, fi) => (
-                                <div key={fi} className={styles.feedSummaryFinding}>
-                                  <span className={`badge badge-${f.severity}`}>{f.severity}</span>
-                                  <span className={styles.feedSummaryFindingTitle}>{f.title}</span>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  }
-                  return (
-                    <div key={run.id} className={styles.feedEntry}>
-                      <div className={styles.feedIcon}>⬡</div>
-                      <div className={styles.feedBody}>
-                        <div className={styles.feedMeta}>
-                          <span className={styles.feedWho}>Agent</span>
-                          <span className={styles.feedWhen}>{fmtRunTime(run.created_at)}</span>
-                        </div>
-                        <p className={styles.feedThought}>{run.reasoning}</p>
-                        <div
-                          className={`${styles.feedRunRow} ${selectedRunId === run.id ? styles.feedRunRowActive : ""}`}
-                          onClick={() => setSelectedRunId(run.id)}
-                        >
-                          <span className={styles.feedRunTool}>{run.tool_name}</span>
-                          <span className={styles.feedRunCmd}>{run.command}</span>
-                          <span className={run.status === "complete" ? styles.feedRunOk : styles.feedRunErr}>
-                            {run.status === "complete" ? "✓" : "✗"}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-                {campaign.last_agent_reasoning && (campaign.status === "active" || campaign.status === "awaiting_approval") && (
-                  <div className={`${styles.feedEntry} ${styles.feedEntryLive}`}>
-                    <div className={`${styles.feedIcon} ${styles.feedIconLive}`}>⬡</div>
-                    <div className={styles.feedBody}>
-                      <div className={styles.feedMeta}>
-                        <span className={styles.feedWho}>Agent</span>
-                        {campaign.iteration_count > 0 && <span className={styles.feedWhen}>iter {campaign.iteration_count}</span>}
-                        {campaign.status === "active" && (
-                          <span className={styles.feedLiveBadge}><span className={styles.feedPulse} />thinking</span>
-                        )}
-                        {campaign.status === "awaiting_approval" && (
-                          <span className={styles.feedApprovalBadge}>awaiting approval</span>
-                        )}
-                      </div>
-                      <p className={styles.feedThought}>{campaign.last_agent_reasoning}</p>
-                      {runs.find(r => streaming[r.id]) && (() => {
-                        const lr = runs.find(r => streaming[r.id]);
-                        return (
-                          <div
-                            className={`${styles.feedRunRow} ${selectedRunId === lr.id ? styles.feedRunRowActive : ""}`}
-                            onClick={() => setSelectedRunId(lr.id)}
-                          >
-                            <span className={styles.feedRunTool}>{lr.tool_name}</span>
-                            <span className={styles.feedRunCmd}>{lr.command}</span>
-                            <span className={styles.feedPulse} />
-                          </div>
-                        );
-                      })()}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-            <div className={styles.intelRail}>
-              <div className={styles.railSectionTitle}>
-                Findings <span className={styles.railCount}>{(session.findings||[]).length}</span>
-              </div>
-              {!(session.findings||[]).length && <p className={styles.railEmpty}>No findings yet.</p>}
-              {(session.findings||[]).map((f) => (
-                <div key={f.id} className={styles.railFinding} onClick={() => openFinding(f)} style={{ cursor: "pointer" }}>
-                  <div className={styles.railFindingTop}>
-                    <span className={`badge badge-${f.severity}`}>{f.severity}</span>
-                    <div className={styles.railFindingTitle}>{f.title}</div>
-                  </div>
-                  {f.notes && <div className={styles.railFindingNotes}>{f.notes}</div>}
-                </div>
-              ))}
-              <div className={styles.railSectionTitle} style={{ marginTop: 8 }}>Artifacts</div>
-              <div className={styles.artList}>
-                {["hosts","users","creds","hashes"].map(key => {
-                  const count = artifactCount(key);
-                  const expanded = expandedArtifacts.has(key);
-                  return (
-                    <div key={key}>
-                      <div className={`${styles.artRow} ${count ? styles.artRowClickable : ""}`} onClick={() => count && toggleArtifact(key)}>
-                        <span className={styles.artKey}>{key}</span>
-                        <span className={styles.artVal}>{count || "—"}</span>
-                        {count > 0 && <span className={styles.artChevron}>{expanded ? "▴" : "▾"}</span>}
-                      </div>
-                      {expanded && <div className={styles.artExpand}>{renderArtifactValues(key)}</div>}
-                    </div>
-                  );
-                })}
-              </div>
-              <div className={styles.railSectionTitle} style={{ marginTop: 8 }}>Progress</div>
-              <div className={styles.railProgress}>
-                <div className={styles.railProgressRow}>
-                  <span className={styles.railProgressLabel}>Iteration</span>
-                  <span className={styles.railProgressVal}>
-                    {campaign.iteration_count || 0}{campaign.max_iterations ? ` / ${campaign.max_iterations}` : ""}
-                  </span>
-                </div>
-                {campaign.max_iterations && (
-                  <div className={styles.railBar}>
-                    <div className={styles.railBarFill}
-                      style={{ width: `${Math.min(100, ((campaign.iteration_count||0)/campaign.max_iterations)*100)}%` }} />
-                  </div>
-                )}
-                <div className={styles.railProgressRow}>
-                  <span className={styles.railProgressLabel}>Findings</span>
-                  <span className={`${styles.railProgressVal} ${(session.findings||[]).length ? styles.railCountHigh : ""}`}>
-                    {(session.findings||[]).length}
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
+          <SingleAgentView
+            session={session}
+            campaign={campaign}
+            runs={runs}
+            streaming={streaming}
+            selectedRunId={selectedRunId}
+            onSelectRun={setSelectedRunId}
+            openFinding={openFinding}
+            fmtRunTime={fmtRunTime}
+            artifactCount={artifactCount}
+            renderArtifactValues={renderArtifactValues}
+            toggleArtifact={toggleArtifact}
+            expandedArtifacts={expandedArtifacts}
+          />
         )}
 
         {/* ── Pipeline AI session — Mission Control ── */}
         {isAiSession && isPipelineMode && (
-          <div className={styles.mcWorkspace}>
-            {pipelineRun && (
-              <div className={styles.mcProgressHdr}>
-                <span className={styles.mcProgressLabel}>
-                  {pipelineRun.status === "running" ? "Running" : pipelineRun.status === "completed" ? "Complete" : pipelineRun.status}
-                </span>
-                <span className={styles.mcProgressElapsed}>
-                  {fmtElapsed(pipelineRun.started_at || pipelineRun.created_at)}
-                </span>
-                <span className={styles.mcProgressPhase}>
-                  Phase {pipelineRun.current_phase || 1} of {pipelinePhases.length || "?"}
-                </span>
-              </div>
-            )}
-            <div className={styles.mcLanes}
-              style={{ gridTemplateColumns: `repeat(${Math.max(pipelinePhases.length, 1)}, 1fr)` }}>
-              {pipelinePhases.length === 0 && (
-                <div className={styles.mcLane}><p className={styles.mcLaneEmpty}>Pipeline starting…</p></div>
-              )}
-              {pipelinePhases.map((phase) => (
-                <div key={phase.phase_num} className={`${styles.mcLane} ${styles[`mcLane_${phase.status}`]}`}>
-                  <div className={styles.mcLaneHdr}>
-                    <span className={styles.mcLaneName}>Phase {phase.phase_num} · {phase.name}</span>
-                    <span className={`${styles.mcBadge} ${styles[`badge_${phase.status}`]}`}>
-                      {phase.status === "running"  && "●"}
-                      {phase.status === "complete" && "✓"}
-                      {phase.status === "waiting"  && "—"}
-                      {phase.status === "skipped"  && "skip"}
-                      {phase.status === "error"    && "✗"}
-                    </span>
-                  </div>
-                  {phase.specialists.map((spec) => {
-                    const specRunCount = runs.filter(r => r.campaign_id === spec.campaign_id).length;
-                    const st = spec.campaign_status;
-                    const elapsed = st === "active"
-                      ? fmtElapsed(spec.started_at)
-                      : st === "completed" && spec.started_at && spec.updated_at
-                        ? (() => {
-                            const secs = Math.floor((new Date(spec.updated_at) - new Date(spec.started_at)) / 1000);
-                            if (secs < 60) return `${secs}s`;
-                            if (secs < 3600) return `${Math.floor(secs/60)}m`;
-                            return `${Math.floor(secs/3600)}h ${Math.floor((secs%3600)/60)}m`;
-                          })()
-                        : null;
-                    return (
-                      <div key={spec.role} className={`${styles.mcSpecRow} ${st === "active" ? styles.mcSpecRowActive : st === "paused" ? styles.mcSpecRowPaused : st === "completed" ? styles.mcSpecRowDone : ""}`}>
-                        <span className={styles.mcSpecStatusDot} data-status={st} />
-                        <span className={styles.mcSpecName}>{spec.role}</span>
-                        <span className={`${styles.mcSpecIterBadge} ${st === "active" ? styles.mcSpecIterLive : ""}`}>
-                          {specRunCount > 0 ? specRunCount : ""}
-                        </span>
-                        {elapsed && <span className={styles.mcSpecElapsed}>{elapsed}</span>}
-                        {st === "paused" && (
-                          <button
-                            className={styles.mcSpecRetryBtn}
-                            title="Retry this specialist"
-                            onClick={async (e) => {
-                              e.stopPropagation();
-                              try { await api.campaigns.run(spec.campaign_id); } catch {}
-                            }}
-                          >↺</button>
-                        )}
-                      </div>
-                    );
-                  })}
-                  {phase.status === "waiting" && phase.gate_description && (
-                    <p className={styles.mcGate}>gate: {phase.gate_description}</p>
-                  )}
-                  {phase.status === "skipped" && (
-                    <p className={styles.mcGate}>{phase.skip_reason || "gate not met"}</p>
-                  )}
-                  {phase.synthesis_directives?.length > 0 && (
-                    <div
-                      className={`${styles.mcSynthLine} ${expandedSynthPhases.has(phase.phase_num) ? styles.mcSynthLineOpen : ""}`}
-                      onClick={() => setExpandedSynthPhases(prev => {
-                        const next = new Set(prev);
-                        if (next.has(phase.phase_num)) next.delete(phase.phase_num); else next.add(phase.phase_num);
-                        return next;
-                      })}
-                    >
-                      <span>⚡ {phase.synthesis_directives.length} chain{phase.synthesis_directives.length !== 1 ? "s" : ""}</span>
-                      <span className={styles.mcSynthChevron}>{expandedSynthPhases.has(phase.phase_num) ? "▴" : "▾"}</span>
-                      {expandedSynthPhases.has(phase.phase_num) && (
-                        <div className={styles.mcSynthDirectives}>
-                          {phase.synthesis_directives.map((d, i) => (
-                            <div key={i} className={styles.mcSynthDirective}>{d}</div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-            <div className={styles.mcBottom}>
-              <div className={styles.mcReasonPanel}>
-                <div className={styles.mcPanelHdr}>Reasoning</div>
-                <div className={styles.mcReasonScroll}>
-                  {pipelinePhases.length === 0 && (
-                    <p className={styles.mcReasonEmpty}>Pipeline hasn't started yet.</p>
-                  )}
-                  {[...pipelinePhases].reverse().map((phase, phaseIdx) => {
-                    const activeSpecs = phase.specialists.filter(s => s.last_agent_reasoning);
-                    const hasSynth = Boolean(phase.synthesis_reasoning);
-                    if (!activeSpecs.length && !hasSynth) return null;
-                    return (
-                      <div key={phase.phase_num}>
-                        {phaseIdx > 0 && <div className={styles.phaseDivider} />}
-                        <div className={styles.phaseDividerLabel}>
-                          <span>Phase {phase.phase_num}</span>
-                          <span className={styles.phaseDividerName}>{phase.name}</span>
-                        </div>
-                        {hasSynth && (
-                          <div className={styles.mcSynthBlock}>
-                            <div className={styles.mcSynthWho}>⚡ Synthesis</div>
-                            <p className={styles.mcSynthText}>{phase.synthesis_reasoning}</p>
-                            {phase.synthesis_directives?.length > 0 && (
-                              <div className={styles.mcSynthPill}>
-                                ⚡ {phase.synthesis_directives.length} chain{phase.synthesis_directives.length !== 1 ? "s" : ""} → Phase {phase.phase_num + 1}
-                              </div>
-                            )}
-                          </div>
-                        )}
-                        {activeSpecs.map(spec => {
-                          const allSpecRuns = runs.filter(r => r.campaign_id === spec.campaign_id);
-                          const specRunCount = allSpecRuns.length;
-                          const isExpanded = expandedSpecIds.has(spec.campaign_id);
-                          const specRuns = isExpanded ? allSpecRuns : allSpecRuns.slice(0, 10);
-                          return (
-                            <div key={spec.campaign_id} className={styles.mcSpecBlock}>
-                              <div className={`${styles.mcSpecWho} ${spec.campaign_status === "active" ? styles.mcSpecWhoLive : styles.mcSpecWhoDone}`}>
-                                {spec.campaign_status === "active" && <span className={styles.feedPulse} />}
-                                {spec.role}
-                                {specRunCount > 0 && <span className={styles.mcSpecIterLabel}> · {specRunCount} runs</span>}
-                              </div>
-                              <p className={styles.mcSpecThought}>{spec.last_agent_reasoning}</p>
-                              {specRuns.length > 0 && (
-                                <div className={styles.mcSpecRuns}>
-                                  {specRuns.map(r => (
-                                    <div
-                                      key={r.id}
-                                      className={`${styles.feedRunRow} ${selectedRunId === r.id ? styles.feedRunRowActive : ""}`}
-                                      onClick={() => setSelectedRunId(r.id)}
-                                    >
-                                      <span className={styles.feedRunTool}>{r.tool_name}</span>
-                                      <span className={styles.feedRunCmd}>{r.command}</span>
-                                      <span className={r.status === "complete" ? styles.feedRunOk : r.status === "running" ? styles.feedPulse : styles.feedRunErr}>
-                                        {r.status === "complete" ? "✓" : r.status === "running" ? "" : "✗"}
-                                      </span>
-                                    </div>
-                                  ))}
-                                  {specRunCount > 10 && (
-                                    <button
-                                      className={styles.mcSpecShowAll}
-                                      onClick={() => setExpandedSpecIds(prev => {
-                                        const next = new Set(prev);
-                                        if (next.has(spec.campaign_id)) next.delete(spec.campaign_id); else next.add(spec.campaign_id);
-                                        return next;
-                                      })}
-                                    >
-                                      {isExpanded ? "Show less" : `Show all ${specRunCount} runs`}
-                                    </button>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-              <div className={styles.mcRightPanel}>
-                <div className={styles.mcPanelHdr}>
-                  Findings <span className={styles.railCount}>{(session.findings||[]).length}</span>
-                  {(session.findings||[]).length > 0 && (
-                    <button className={styles.chainBtn} onClick={() => setShowChainModal(true)} title="Attack chain view">
-                      <GitBranch size={11} />
-                    </button>
-                  )}
-                </div>
-                {(session.findings||[]).map((f) => {
-                  const firstRunId = (f.evidence_run_ids||[])[0];
-                  const specRole = firstRunId ? specRoleForRun(firstRunId) : null;
-                  return (
-                  <div key={f.id} className={styles.railFinding} onClick={() => openFinding(f)} style={{ cursor: "pointer" }}>
-                    <div className={styles.railFindingTop}>
-                      <span className={`badge badge-${f.severity}`}>{f.severity}</span>
-                      <div className={styles.railFindingTitle}>{f.title}</div>
-                    </div>
-                    {specRole && <div className={styles.railFindingSpec}>{specRole}</div>}
-                    {f.notes && <div className={styles.railFindingNotes}>{f.notes}</div>}
-                  </div>
-                  );
-                })}
-                {!(session.findings||[]).length && <p className={styles.railEmpty}>No findings yet.</p>}
-                <div className={styles.mcPanelHdr} style={{ marginTop: 12 }}>Artifacts</div>
-                <div className={styles.artList}>
-                  {["hosts","users","creds","hashes","spns","notes","services","tech"].map(key => {
-                    const count = artifactCount(key);
-                    const expanded = expandedArtifacts.has(key);
-                    return (
-                      <div key={key}>
-                        <div className={`${styles.artRow} ${count ? styles.artRowClickable : ""}`} onClick={() => count && toggleArtifact(key)}>
-                          <span className={styles.artKey}>{key}</span>
-                          {count > 0 && <span className={styles.artChevron}>{expanded ? "▴" : "▾"}</span>}
-                          <span className={styles.artVal}>{count || "—"}</span>
-                        </div>
-                        {expanded && <div className={styles.artExpand}>{renderArtifactValues(key)}</div>}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          </div>
+          <MissionControlView
+            session={session}
+            campaign={campaign}
+            pipelineRun={pipelineRun}
+            pipelinePhases={pipelinePhases}
+            runs={runs}
+            runsById={runsById}
+            selectedRunId={selectedRunId}
+            onSelectRun={setSelectedRunId}
+            openFinding={openFinding}
+            onShowChainModal={() => setShowChainModal(true)}
+            fmtElapsed={fmtElapsed}
+            fmtRunTime={fmtRunTime}
+            artifactCount={artifactCount}
+            renderArtifactValues={renderArtifactValues}
+            toggleArtifact={toggleArtifact}
+            expandedArtifacts={expandedArtifacts}
+          />
         )}
 
         {/* ── Manual / non-AI session — existing 3-column layout ── */}
@@ -2911,344 +2562,3 @@ export default function SessionDetailPage() {
   );
 }
 
-// ── Report renderer ──────────────────────────────────────────────────────────
-
-const SEV_PALETTE = {
-  critical: { bg: "rgba(239,68,68,0.12)", border: "#ef4444", text: "#ef4444" },
-  high:     { bg: "rgba(249,115,22,0.12)", border: "#f97316", text: "#f97316" },
-  medium:   { bg: "rgba(234,179,8,0.12)",  border: "#eab308", text: "#eab308" },
-  low:      { bg: "rgba(59,130,246,0.12)", border: "#3b82f6", text: "#3b82f6" },
-  info:     { bg: "rgba(107,114,128,0.12)",border: "#6b7280", text: "#6b7280" },
-};
-
-const SECTION_COLORS = {
-  "Engagement Summary": "#60a5fa",
-  "Attack Surface":     "#34d399",
-  "Findings":           "#f87171",
-  "Attack Chains":      "#f97316",
-  "Coverage Gaps":      "#a78bfa",
-};
-
-function inlineStyle(text) {
-  // Returns spans for **bold**, `code`, and severity keywords
-  const parts = [];
-  const re = /(\*\*[^*]+\*\*)|(`[^`]+`)/g;
-  let last = 0, m;
-  while ((m = re.exec(text)) !== null) {
-    if (m.index > last) parts.push(<span key={last}>{text.slice(last, m.index)}</span>);
-    if (m[0].startsWith("**")) {
-      parts.push(<strong key={m.index}>{m[0].slice(2, -2)}</strong>);
-    } else {
-      parts.push(
-        <code key={m.index} style={{ background: "var(--bg-card)", padding: "1px 5px", borderRadius: 3, fontFamily: "var(--font-mono)", fontSize: "0.9em" }}>
-          {m[0].slice(1, -1)}
-        </code>
-      );
-    }
-    last = m.index + m[0].length;
-  }
-  if (last < text.length) parts.push(<span key={last}>{text.slice(last)}</span>);
-  return parts.length ? parts : text;
-}
-
-function colorSeverityBadge(line) {
-  const sevMatch = line.match(/^###\s+(CRITICAL|HIGH|MEDIUM|LOW|INFO)\s+(.*)/i);
-  if (!sevMatch) return null;
-  const sev = sevMatch[1].toLowerCase();
-  const title = sevMatch[2];
-  const pal = SEV_PALETTE[sev] || SEV_PALETTE.info;
-  return (
-    <div style={{ display: "flex", alignItems: "baseline", gap: 10, margin: "20px 0 6px" }}>
-      <span style={{ background: pal.bg, border: `1px solid ${pal.border}`, color: pal.text, borderRadius: 4, padding: "2px 8px", fontSize: 10, fontWeight: 700, fontFamily: "var(--font-mono)", letterSpacing: "0.08em", flexShrink: 0 }}>
-        {sev.toUpperCase()}
-      </span>
-      <span style={{ fontWeight: 700, fontSize: 14, color: "var(--text-primary)" }}>{title}</span>
-    </div>
-  );
-}
-
-function ReportRenderer({ markdown }) {
-  const lines = markdown.split("\n");
-  const elements = [];
-  let i = 0;
-  while (i < lines.length) {
-    const line = lines[i];
-
-    // Code block
-    if (line.trimStart().startsWith("```")) {
-      const lang = line.trim().slice(3);
-      const codeLines = [];
-      i++;
-      while (i < lines.length && !lines[i].trimStart().startsWith("```")) {
-        codeLines.push(lines[i]);
-        i++;
-      }
-      elements.push(
-        <pre key={elements.length} style={{ background: "#0d1117", border: "1px solid var(--border)", borderRadius: 6, padding: "10px 14px", margin: "8px 0", overflowX: "auto", fontFamily: "var(--font-mono)", fontSize: 11, lineHeight: 1.6, color: "#e2e8f0" }}>
-          {codeLines.join("\n")}
-        </pre>
-      );
-      i++;
-      continue;
-    }
-
-    // H1
-    if (line.startsWith("# ")) {
-      elements.push(
-        <h1 key={elements.length} style={{ fontSize: 18, fontWeight: 700, color: "var(--accent)", borderBottom: "2px solid var(--accent)", paddingBottom: 8, marginBottom: 4 }}>
-          {line.slice(2)}
-        </h1>
-      );
-      i++; continue;
-    }
-
-    // Blockquote (reviewer line)
-    if (line.startsWith("> ")) {
-      elements.push(
-        <div key={elements.length} style={{ borderLeft: "3px solid var(--border)", paddingLeft: 12, margin: "4px 0 16px", color: "var(--text-muted)", fontSize: 12 }}>
-          {inlineStyle(line.slice(2))}
-        </div>
-      );
-      i++; continue;
-    }
-
-    // H2 — section headers with color coding
-    if (line.startsWith("## ")) {
-      const title = line.slice(3);
-      const color = Object.entries(SECTION_COLORS).find(([k]) => title.includes(k))?.[1] || "var(--text-secondary)";
-      elements.push(
-        <div key={elements.length} style={{ display: "flex", alignItems: "center", gap: 8, margin: "24px 0 10px", borderBottom: `1px solid ${color}40` }}>
-          <span style={{ width: 4, height: 18, borderRadius: 2, background: color, flexShrink: 0 }} />
-          <h2 style={{ fontSize: 14, fontWeight: 700, color, margin: 0, letterSpacing: "0.04em", textTransform: "uppercase" }}>{title}</h2>
-        </div>
-      );
-      i++; continue;
-    }
-
-    // H3 with severity badge detection
-    if (line.startsWith("### ")) {
-      const badge = colorSeverityBadge(line);
-      elements.push(badge || (
-        <h3 key={elements.length} style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)", margin: "16px 0 4px" }}>
-          {line.slice(4)}
-        </h3>
-      ));
-      i++; continue;
-    }
-
-    // HR
-    if (/^---+$/.test(line.trim())) {
-      elements.push(<hr key={elements.length} style={{ border: "none", borderTop: "1px solid var(--border)", margin: "16px 0" }} />);
-      i++; continue;
-    }
-
-    // Table
-    if (line.startsWith("|")) {
-      const tableLines = [];
-      while (i < lines.length && lines[i].startsWith("|")) {
-        tableLines.push(lines[i]);
-        i++;
-      }
-      const rows = tableLines.filter(l => !/^\|[-| :]+\|$/.test(l.trim()));
-      elements.push(
-        <table key={elements.length} style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, margin: "8px 0" }}>
-          <tbody>
-            {rows.map((r, ri) => {
-              const cells = r.split("|").filter((_, ci) => ci > 0 && ci < r.split("|").length - 1);
-              return (
-                <tr key={ri} style={{ background: ri % 2 === 0 ? "var(--bg-card)" : "transparent" }}>
-                  {cells.map((c, ci) => (
-                    <td key={ci} style={{ padding: "5px 10px", borderBottom: "1px solid var(--border)", color: ci === 0 ? "var(--text-muted)" : "var(--text-primary)", fontWeight: ci === 0 ? 600 : 400 }}>
-                      {inlineStyle(c.trim())}
-                    </td>
-                  ))}
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      );
-      continue;
-    }
-
-    // Numbered list
-    if (/^\d+\.\s/.test(line)) {
-      const listLines = [];
-      while (i < lines.length && /^\d+\.\s/.test(lines[i])) {
-        listLines.push(lines[i].replace(/^\d+\.\s/, ""));
-        i++;
-      }
-      elements.push(
-        <ol key={elements.length} style={{ paddingLeft: 20, margin: "4px 0 8px", fontSize: 12, lineHeight: 1.7 }}>
-          {listLines.map((l, li) => <li key={li} style={{ color: "var(--text-primary)" }}>{inlineStyle(l)}</li>)}
-        </ol>
-      );
-      continue;
-    }
-
-    // Bullet list
-    if (line.startsWith("- ") || line.startsWith("* ")) {
-      const listLines = [];
-      while (i < lines.length && (lines[i].startsWith("- ") || lines[i].startsWith("* "))) {
-        listLines.push(lines[i].slice(2));
-        i++;
-      }
-      elements.push(
-        <ul key={elements.length} style={{ paddingLeft: 18, margin: "4px 0 8px", fontSize: 12, lineHeight: 1.7 }}>
-          {listLines.map((l, li) => <li key={li} style={{ color: "var(--text-primary)" }}>{inlineStyle(l)}</li>)}
-        </ul>
-      );
-      continue;
-    }
-
-    // Empty line
-    if (!line.trim()) {
-      elements.push(<div key={elements.length} style={{ height: 6 }} />);
-      i++; continue;
-    }
-
-    // Normal paragraph
-    elements.push(
-      <p key={elements.length} style={{ fontSize: 12, lineHeight: 1.7, margin: "2px 0", color: "var(--text-primary)" }}>
-        {inlineStyle(line)}
-      </p>
-    );
-    i++;
-  }
-
-  return (
-    <div style={{ padding: "20px 24px", fontFamily: "var(--font-sans, system-ui)" }}>
-      {elements}
-    </div>
-  );
-}
-
-// ── Attack chain SVG ──────────────────────────────────────────────────────────
-
-const SEV_COLOR_CHAIN = {
-  critical: "#ef4444",
-  high: "#f97316",
-  medium: "#eab308",
-  low: "#3b82f6",
-  info: "#6b7280",
-};
-
-function AttackChainView({ findings, onNodeClick }) {
-  if (!findings.length) {
-    return <p style={{ color: "var(--text-muted)", fontSize: 12, padding: "12px 0" }}>No findings logged.</p>;
-  }
-
-  // Build tree: depth-first layout
-  const byId = Object.fromEntries(findings.map(f => [f.id, f]));
-
-  // Detect cycles via DFS — any node that is part of a cycle becomes a root
-  // so the SVG never gets NaN/Infinity dimensions.
-  const cycleNodes = new Set();
-  function hasCycle(id, visited, stack) {
-    visited.add(id); stack.add(id);
-    const parent = byId[id]?.chains_from_id;
-    if (parent && byId[parent]) {
-      if (stack.has(parent)) { cycleNodes.add(id); cycleNodes.add(parent); return true; }
-      if (!visited.has(parent) && hasCycle(parent, visited, stack)) return true;
-    }
-    stack.delete(id);
-    return false;
-  }
-  const _v = new Set(), _s = new Set();
-  for (const f of findings) if (!_v.has(f.id)) hasCycle(f.id, _v, _s);
-
-  const childrenOf = {};
-  const roots = [];
-  for (const f of findings) {
-    if (!cycleNodes.has(f.id) && f.chains_from_id && byId[f.chains_from_id] && !cycleNodes.has(f.chains_from_id)) {
-      (childrenOf[f.chains_from_id] = childrenOf[f.chains_from_id] || []).push(f.id);
-    } else {
-      roots.push(f.id);
-    }
-  }
-
-  // Assign (col, row) positions via DFS
-  const positions = {};
-  let globalRow = 0;
-  function place(id, col) {
-    const kids = childrenOf[id] || [];
-    if (!kids.length) {
-      positions[id] = { col, row: globalRow++ };
-      return;
-    }
-    const startRow = globalRow;
-    for (const kid of kids) place(kid, col + 1);
-    // center parent vertically over its children
-    const endRow = globalRow - 1;
-    positions[id] = { col, row: (startRow + endRow) / 2 };
-  }
-  for (const r of roots) place(r, 0);
-
-  const NODE_W = 160, NODE_H = 52, COL_GAP = 48, ROW_GAP = 16;
-  const maxCol = Math.max(...Object.values(positions).map(p => p.col));
-  const maxRow = Math.max(...Object.values(positions).map(p => p.row));
-  const svgW = (maxCol + 1) * (NODE_W + COL_GAP);
-  const svgH = (maxRow + 1) * (NODE_H + ROW_GAP) + ROW_GAP;
-
-  function cx(pos) { return pos.col * (NODE_W + COL_GAP) + NODE_W / 2; }
-  function cy(pos) { return pos.row * (NODE_H + ROW_GAP) + NODE_H / 2; }
-
-  const edges = [];
-  for (const f of findings) {
-    if (f.chains_from_id && positions[f.chains_from_id] && positions[f.id]) {
-      const p = positions[f.chains_from_id];
-      const c = positions[f.id];
-      const x1 = cx(p) + NODE_W / 2, y1 = cy(p);
-      const x2 = cx(c) - NODE_W / 2, y2 = cy(c);
-      const mx = (x1 + x2) / 2;
-      edges.push({ key: f.id, d: `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}` });
-    }
-  }
-
-  return (
-    <div style={{ overflowX: "auto", overflowY: "auto", maxHeight: 420 }}>
-      {!edges.length && (
-        <p style={{ color: "var(--text-muted)", fontSize: 11, marginBottom: 8 }}>
-          No chains mapped yet — the agent will link findings as it discovers exploitable chains.
-        </p>
-      )}
-      <svg width={svgW} height={svgH} style={{ display: "block", minWidth: svgW }}>
-        <defs>
-          <marker id="arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
-            <path d="M0,0 L0,6 L6,3 z" fill="var(--text-muted)" />
-          </marker>
-        </defs>
-        {edges.map(e => (
-          <path key={e.key} d={e.d} fill="none" stroke="var(--text-muted)" strokeWidth="1.5"
-            strokeDasharray="4 3" markerEnd="url(#arrow)" />
-        ))}
-        {findings.map(f => {
-          const pos = positions[f.id];
-          if (!pos) return null;
-          const x = pos.col * (NODE_W + COL_GAP);
-          const y = pos.row * (NODE_H + ROW_GAP);
-          const color = SEV_COLOR_CHAIN[f.severity] || "#6b7280";
-          return (
-            <g key={f.id} style={{ cursor: "pointer" }} onClick={() => onNodeClick(f)}>
-              <rect x={x} y={y} width={NODE_W} height={NODE_H} rx={6}
-                fill="var(--bg-card)" stroke={color} strokeWidth="1.5" />
-              <rect x={x} y={y} width={NODE_W} height={4} rx={3} fill={color} />
-              <text x={x + NODE_W / 2} y={y + 18} textAnchor="middle"
-                fill={color} fontSize="9" fontWeight="600" fontFamily="monospace">
-                {f.severity.toUpperCase()}
-              </text>
-              <foreignObject x={x + 6} y={y + 22} width={NODE_W - 12} height={NODE_H - 26}>
-                <div xmlns="http://www.w3.org/1999/xhtml"
-                  style={{ fontSize: 10, color: "var(--text-primary)", lineHeight: 1.3,
-                    overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2,
-                    WebkitBoxOrient: "vertical" }}>
-                  {f.title}
-                </div>
-              </foreignObject>
-            </g>
-          );
-        })}
-      </svg>
-    </div>
-  );
-}
