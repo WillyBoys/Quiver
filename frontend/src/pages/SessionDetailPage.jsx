@@ -2992,9 +2992,8 @@ function ReportRenderer({ markdown }) {
     // H3 with severity badge detection
     if (line.startsWith("### ")) {
       const badge = colorSeverityBadge(line);
-      const k = elements.length;
-      elements.push(badge ? React.cloneElement(badge, { key: k }) : (
-        <h3 key={k} style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)", margin: "16px 0 4px" }}>
+      elements.push(badge || (
+        <h3 key={elements.length} style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)", margin: "16px 0 4px" }}>
           {line.slice(4)}
         </h3>
       ));
