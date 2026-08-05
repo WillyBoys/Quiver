@@ -147,7 +147,13 @@ async def trigger_campaign(
     if campaign.status not in ("active", "awaiting_approval"):
         campaign.status = "active"
         await db.commit()
-    background_tasks.add_task(run_campaign_loop, campaign_id)
+    # Pipeline specialists need their role prompt re-injected and exit report / pipeline
+    # auto-advance handling — route through run_specialist_from_db instead of the raw loop.
+    if (campaign.description or "").startswith("pipeline_run:"):
+        from app.agent.pipeline import run_specialist_from_db
+        background_tasks.add_task(run_specialist_from_db, campaign_id)
+    else:
+        background_tasks.add_task(run_campaign_loop, campaign_id)
     logger.info("CAMPAIGN RUN | id=%s triggered manually", campaign_id)
     return {"message": "Agent loop triggered", "campaign_id": campaign_id}
 

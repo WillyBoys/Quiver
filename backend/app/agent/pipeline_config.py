@@ -5,7 +5,7 @@ from dataclasses import dataclass
 class SpecialistConfig:
     role: str
     role_prompt: str
-    max_iterations: int = 20
+    max_iterations: int = 30
 
 
 @dataclass
@@ -26,7 +26,7 @@ EXTERNAL_PHASES: list[PhaseConfig] = [
         specialists=[
             SpecialistConfig(
                 role="subdomain-recon",
-                max_iterations=25,
+                max_iterations=30,
                 role_prompt="""\
 You are the SUBDOMAIN-RECON specialist for this penetration test.
 Your primary focus: passive reconnaissance — enumerate subdomains, DNS records, ASN/CIDR ranges, and certificate transparency logs without touching the target directly.
@@ -38,7 +38,7 @@ If you encounter credential leaks in public sources, save them as cred artifacts
             ),
             SpecialistConfig(
                 role="secret-hunt",
-                max_iterations=12,
+                max_iterations=30,
                 role_prompt="""\
 You are the SECRET-HUNT specialist for this penetration test.
 Your primary focus: surface exposed credentials and sensitive data early — cloud storage, code repositories, and exposed configuration files.
@@ -56,7 +56,7 @@ Save any cloud storage endpoints or public repositories discovered as host artif
         specialists=[
             SpecialistConfig(
                 role="port-scan",
-                max_iterations=25,
+                max_iterations=30,
                 role_prompt="""\
 You are the PORT-SCAN specialist for this penetration test.
 Your primary focus: discover live hosts and map all open ports and service versions across the entire scope.
@@ -68,7 +68,7 @@ Save notable service versions as note artifacts — the next phase specialists w
             ),
             SpecialistConfig(
                 role="web-fingerprint",
-                max_iterations=12,
+                max_iterations=30,
                 role_prompt="""\
 You are the WEB-FINGERPRINT specialist for this penetration test.
 Your primary focus: identify web technology stacks, WAF presence, and security response headers across all web-facing hosts.
@@ -101,7 +101,7 @@ Log any vulnerabilities you discover along the way as findings.""",
             ),
             SpecialistConfig(
                 role="vuln-scan",
-                max_iterations=25,
+                max_iterations=30,
                 role_prompt="""\
 You are the VULN-SCAN specialist for this penetration test.
 Your primary focus: identify vulnerabilities across all hosts and endpoints using automated scanning.
@@ -112,7 +112,7 @@ Save any service version findings that map to specific CVEs as note artifacts �
             ),
             SpecialistConfig(
                 role="ssl-audit",
-                max_iterations=10,
+                max_iterations=30,
                 role_prompt="""\
 You are the SSL-AUDIT specialist for this penetration test.
 Your primary focus: identify TLS misconfigurations, weak ciphers, certificate issues, and missing transport security headers.
@@ -131,7 +131,7 @@ Be thorough — TLS weaknesses chain into MITM attacks and are often underreport
         specialists=[
             SpecialistConfig(
                 role="exploit",
-                max_iterations=25,
+                max_iterations=30,
                 role_prompt="""\
 You are the EXPLOIT specialist for this penetration test.
 Your primary focus: validate confirmed vulnerabilities with minimal-impact proof-of-concept execution and chain findings together.
@@ -140,7 +140,7 @@ Save any credentials, session tokens, or secrets discovered during exploitation 
             ),
             SpecialistConfig(
                 role="credential-attack",
-                max_iterations=18,
+                max_iterations=30,
                 role_prompt="""\
 You are the CREDENTIAL-ATTACK specialist for this penetration test.
 Your primary focus: test discovered credentials against all accessible services and perform targeted password spraying.
@@ -162,7 +162,7 @@ INTERNAL_PHASES: list[PhaseConfig] = [
         specialists=[
             SpecialistConfig(
                 role="network-discovery",
-                max_iterations=25,
+                max_iterations=30,
                 role_prompt="""\
 You are the NETWORK-DISCOVERY specialist for this internal penetration test.
 Your primary focus: map the internal network — live hosts, open ports, and running services across the target subnet.
@@ -174,7 +174,7 @@ Save anything that identifies a domain controller (port 88, 389, 636, 3268, 3269
             ),
             SpecialistConfig(
                 role="ad-discovery",
-                max_iterations=15,
+                max_iterations=30,
                 role_prompt="""\
 You are the AD-DISCOVERY specialist for this internal penetration test.
 Your primary focus: identify the Active Directory environment — domain name, forest, domain controller IPs, and basic AD structure.
@@ -204,7 +204,7 @@ Log any misconfigurations (null sessions, anonymous LDAP bind, weak password pol
             ),
             SpecialistConfig(
                 role="kerberos-enum",
-                max_iterations=15,
+                max_iterations=30,
                 role_prompt="""\
 You are the KERBEROS-ENUM specialist for this internal penetration test.
 Your primary focus: enumerate valid domain users and accounts via Kerberos, identify accounts with special Kerberos properties.
@@ -214,7 +214,7 @@ Save any accounts identified as AS-REP roastable (no pre-auth required) as note 
             ),
             SpecialistConfig(
                 role="bloodhound",
-                max_iterations=12,
+                max_iterations=30,
                 role_prompt="""\
 You are the BLOODHOUND specialist for this internal penetration test.
 Your primary focus: collect BloodHound graph data to map attack paths through Active Directory.
@@ -232,7 +232,7 @@ Log any high-value attack paths identified in the collection output (e.g. "User 
         specialists=[
             SpecialistConfig(
                 role="asrep-roast",
-                max_iterations=15,
+                max_iterations=30,
                 role_prompt="""\
 You are the ASREP-ROAST specialist for this internal penetration test.
 Your primary focus: extract AS-REP hashes for domain accounts that do not require Kerberos pre-authentication.
@@ -243,7 +243,7 @@ Log each captured hash as a finding (severity: high — AS-REP roastable account
             ),
             SpecialistConfig(
                 role="kerberoast",
-                max_iterations=15,
+                max_iterations=30,
                 role_prompt="""\
 You are the KERBEROAST specialist for this internal penetration test.
 Your primary focus: extract TGS hashes for service accounts with registered SPNs.
@@ -255,7 +255,7 @@ Log each captured hash as a finding (severity: high — Kerberoastable service a
             ),
             SpecialistConfig(
                 role="hash-capture",
-                max_iterations=12,
+                max_iterations=30,
                 role_prompt="""\
 You are the HASH-CAPTURE specialist for this internal penetration test.
 Your primary focus: capture NTLMv2 hashes from network authentication attempts via LLMNR/NBT-NS/mDNS poisoning.
@@ -275,7 +275,7 @@ Save the capture log file path as a note artifact for reference.""",
         specialists=[
             SpecialistConfig(
                 role="cracking",
-                max_iterations=15,
+                max_iterations=30,
                 role_prompt="""\
 You are the CRACKING specialist for this internal penetration test.
 Your primary focus: crack captured password hashes offline to recover plaintext credentials.
@@ -285,7 +285,7 @@ Log each cracked password as a finding (severity: high) — include the account 
             ),
             SpecialistConfig(
                 role="lateral-move",
-                max_iterations=25,
+                max_iterations=30,
                 role_prompt="""\
 You are the LATERAL-MOVE specialist for this internal penetration test.
 Your primary focus: authenticate to internal hosts using discovered credentials and assess the impact of each foothold.
@@ -295,7 +295,7 @@ Log each successful authentication as a finding with severity reflecting the pri
             ),
             SpecialistConfig(
                 role="secretsdump",
-                max_iterations=15,
+                max_iterations=30,
                 role_prompt="""\
 You are the SECRETSDUMP specialist for this internal penetration test.
 Your primary focus: extract credential material from accessible Windows hosts and the domain controller.

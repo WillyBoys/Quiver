@@ -515,34 +515,36 @@ export default function MissionControlView({
                             : ""
                     }`}
                   >
-                    <span className={styles.mcSpecStatusDot} data-status={st} />
-                    <span
-                      className={styles.mcSpecName}
-                      style={{ cursor: "pointer" }}
-                      onClick={() => setSelectedSpecialistId(spec.campaign_id)}
-                    >
-                      {spec.role}
-                    </span>
-                    <span
-                      className={`${styles.mcSpecIterBadge} ${
-                        st === "active" ? styles.mcSpecIterLive : ""
-                      }`}
-                    >
-                      {specRunCount > 0 ? specRunCount : ""}
-                    </span>
-                    {elapsed && <span className={styles.mcSpecElapsed}>{elapsed}</span>}
-                    {st === "paused" && (
-                      <button
-                        className={styles.mcSpecRetryBtn}
-                        title="Retry this specialist"
-                        onClick={async (e) => {
-                          e.stopPropagation();
-                          try { await api.campaigns.run(spec.campaign_id); } catch {}
-                        }}
+                    <span className={styles.mcSpecLeft}>
+                      <span className={styles.mcSpecStatusDot} data-status={st} />
+                      <span
+                        className={styles.mcSpecName}
+                        style={{ cursor: "pointer" }}
+                        onClick={() => setSelectedSpecialistId(spec.campaign_id)}
                       >
-                        ↺
-                      </button>
-                    )}
+                        {spec.role}
+                      </span>
+                    </span>
+                    <span className={styles.mcSpecRight}>
+                      {elapsed && <span className={styles.mcSpecElapsed}>{elapsed}</span>}
+                      {specRunCount > 0 && (
+                        <span className={`${styles.mcSpecIterBadge} ${st === "active" ? styles.mcSpecIterLive : ""}`}>
+                          {specRunCount}
+                        </span>
+                      )}
+                      {st === "paused" && (
+                        <button
+                          className={styles.mcSpecRetryBtn}
+                          title="Resume specialist"
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            try { await api.campaigns.run(spec.campaign_id); } catch {}
+                          }}
+                        >
+                          ▶
+                        </button>
+                      )}
+                    </span>
                   </div>
                 );
               })}

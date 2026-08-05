@@ -792,7 +792,7 @@ DEFAULT_TOOLS = [
     # ── CLOUD ─────────────────────────────────────────────────────────────────
     {
         "name": "cloud_enum",
-        "description": "Enumerate publicly exposed AWS S3, Azure Blob, and GCP Storage resources for a target",
+        "description": "Enumerate publicly exposed AWS S3, Azure Blob, and GCP Storage resources for a target. Internally tests a large built-in list of name permutations (-prod, -dev, -backup, -assets, etc.) against the keyword in a single run — call it once per distinct name (e.g. once for the company name, once more only if a genuinely different brand/product name applies). Do not re-run it manually varying suffixes; the tool already covers that.",
         "category": "cloud",
         "binary": "cloud_enum",
         "default_flags": "",

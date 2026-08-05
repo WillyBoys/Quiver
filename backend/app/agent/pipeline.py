@@ -156,6 +156,8 @@ async def run_specialist(
     # Generate exit report for completed specialists — best-effort, never blocks the pipeline.
     if camp and camp.status == "completed":
         await _generate_specialist_exit_report(specialist_campaign_id, spec.role, camp)
+        # Check whether completing this specialist unblocks a paused pipeline.
+        await _maybe_resume_pipeline(specialist_campaign_id)
 
     logger.info("PIPELINE | specialist %s (%s) finished", specialist_campaign_id, spec.role)
 
@@ -218,14 +220,96 @@ Be specific — name hosts, ports, services, or CVEs where relevant. No headers,
         logger.warning("PIPELINE | specialist=%s exit report failed: %s", campaign_id, e)
 
 
+async def run_specialist_from_db(specialist_campaign_id: str) -> None:
+    """Resume a paused pipeline specialist directly by reconstructing its SpecialistConfig
+    from the persisted Campaign record. Called when the user resumes an individual specialist
+    via the campaigns /run endpoint instead of through the full pipeline orchestrator."""
+    async with AsyncSessionLocal() as db:
+        camp = (await db.execute(
+            select(Campaign).where(Campaign.id == specialist_campaign_id)
+        )).scalar_one_or_none()
+        if not camp:
+            logger.warning("PIPELINE | run_specialist_from_db: campaign %s not found", specialist_campaign_id)
+            return
+
+    role = _extract_role(camp.name)
+    # Synthesis directives are already baked into role_prompt from the original run.
+    spec = SpecialistConfig(
+        role=role,
+        role_prompt=camp.role_prompt or "",
+        max_iterations=camp.max_iterations or 30,
+    )
+    await run_specialist(specialist_campaign_id, spec, synthesis_directives=None)
+
+
+async def _maybe_resume_pipeline(specialist_campaign_id: str) -> None:
+    """After a specialist completes, check whether it was the last unfinished one in its
+    phase. If so, and the parent pipeline is paused waiting for that phase, re-trigger it
+    so synthesis and phase advancement happen automatically."""
+    parent_id: str | None = None
+    phase_num: int = 0
+
+    async with AsyncSessionLocal() as db:
+        spec = (await db.execute(
+            select(Campaign).where(Campaign.id == specialist_campaign_id)
+        )).scalar_one_or_none()
+        if not spec or not (spec.description or "").startswith("pipeline_run:"):
+            return
+
+        m = re.match(r"pipeline_run:(.+):phase:(\d+)$", spec.description)
+        if not m:
+            return
+        pipeline_run_id, phase_num = m.group(1), int(m.group(2))
+        phase_desc = f"pipeline_run:{pipeline_run_id}:phase:{phase_num}"
+
+        phase_camps = (await db.execute(
+            select(Campaign).where(Campaign.description == phase_desc)
+        )).scalars().all()
+
+        if not phase_camps or not all(c.status == "completed" for c in phase_camps):
+            return
+
+        pipeline_run = (await db.execute(
+            select(PipelineRun).where(PipelineRun.id == pipeline_run_id)
+        )).scalar_one_or_none()
+        if not pipeline_run or pipeline_run.status != "paused":
+            return
+        if pipeline_run.current_phase != phase_num:
+            return
+
+        parent = (await db.execute(
+            select(Campaign).where(Campaign.id == pipeline_run.campaign_id)
+        )).scalar_one_or_none()
+        if not parent or parent.status != "paused":
+            return
+
+        parent.status = "active"
+        await db.commit()
+        parent_id = parent.id
+
+    if parent_id:
+        from app.agent.engine import run_campaign_loop, _active_campaign_loops
+        if parent_id not in _active_campaign_loops:
+            logger.info(
+                "PIPELINE | all phase %d specialists completed — auto-resuming pipeline %s",
+                phase_num, parent_id,
+            )
+            asyncio.create_task(run_campaign_loop(parent_id))
+
+
 async def run_phase(
     phase: PhaseConfig,
     parent: Campaign,
     pipeline_run_id: str,
     pipeline_record_id: str,
     synthesis_directives: list[dict] | None = None,
-) -> None:
-    """Create specialist campaigns and run them concurrently."""
+) -> bool:
+    """Create specialist campaigns and run them concurrently.
+
+    Returns True when all specialists completed, False when any are paused
+    (hit their iteration cap without finishing). The caller should halt
+    pipeline advancement and wait for user retry when this returns False.
+    """
     logger.info("PIPELINE | campaign=%s starting phase %d: %s",
                 parent.id, phase.phase_num, phase.name)
 
@@ -312,8 +396,27 @@ async def run_phase(
                     phase.phase_num, len(still_running), still_running)
         await asyncio.sleep(APPROVAL_POLL_INTERVAL)
 
+    # Block advancement if any specialist hit its iteration cap without completing.
+    paused_roles = []
+    async with AsyncSessionLocal() as db:
+        for camp, spec in specialist_pairs:
+            c = (await db.execute(
+                select(Campaign).where(Campaign.id == camp.id)
+            )).scalar_one_or_none()
+            if c and c.status == "paused":
+                paused_roles.append(spec.role)
+
+    if paused_roles:
+        logger.warning(
+            "PIPELINE | phase %d: %d specialist(s) paused without completing — "
+            "blocking phase advancement: %s",
+            phase.phase_num, len(paused_roles), paused_roles,
+        )
+        return False
+
     logger.info("PIPELINE | campaign=%s phase %d complete: %s",
                 parent.id, phase.phase_num, phase.name)
+    return True
 
 
 # ── Synthesis agent ─────────────────────────────────────────────────────────────
@@ -583,13 +686,43 @@ async def run_pipeline(campaign_id: str) -> None:
             # Record phase start time so synthesis can filter runs to this phase
             phase_start_at = datetime.now(timezone.utc)
 
-            await run_phase(
+            phase_complete = await run_phase(
                 phase,
                 parent_fresh,
                 pipeline_record_id,
                 pipeline_record_id,
                 synthesis_directives if synthesis_directives else None,
             )
+
+            if not phase_complete:
+                logger.warning(
+                    "PIPELINE | campaign=%s pausing at phase %d — "
+                    "one or more specialists did not complete",
+                    parent_id, phase.phase_num,
+                )
+                async with AsyncSessionLocal() as db:
+                    rec = (await db.execute(
+                        select(PipelineRun).where(PipelineRun.id == pipeline_record_id)
+                    )).scalar_one_or_none()
+                    if rec:
+                        rec.status = "paused"
+                        rec.skipped_phases = skipped
+                        await db.commit()
+                async with AsyncSessionLocal() as db:
+                    camp = (await db.execute(
+                        select(Campaign).where(Campaign.id == parent_id)
+                    )).scalar_one_or_none()
+                    if camp and camp.status == "active":
+                        camp.status = "paused"
+                        camp.last_agent_reasoning = (
+                            f"Phase {phase.phase_num} ({phase.name}) paused — "
+                            f"{len(paused_roles)} specialist(s) hit their iteration cap: "
+                            f"{', '.join(paused_roles)}. "
+                            "Resume to continue — only the unfinished specialists will re-run, "
+                            "picking up from where they left off."
+                        )
+                        await db.commit()
+                return
 
             # Run synthesis between phases (not after the final one)
             is_last_phase = phase_idx == len(phases) - 1

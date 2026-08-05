@@ -2175,6 +2175,8 @@
   0%, 100% { box-shadow: 0 0 0 1px var(--accent-dim), 0 0 5px rgba(57, 211, 83, 0.1); }
   50%       { box-shadow: 0 0 0 1px rgba(57, 211, 83, 0.55), 0 0 12px rgba(57, 211, 83, 0.22); }
 }
+.mcSpecLeft  { display: flex; align-items: center; gap: 5px; overflow: hidden; min-width: 0; flex: 1; }
+.mcSpecRight { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 .mcSpecName { font-family: var(--font-mono); color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mcSpecRowActive .mcSpecName { color: var(--text-primary); }
 .mcSpecIterBadge { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); flex-shrink: 0; }
