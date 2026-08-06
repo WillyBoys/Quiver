@@ -24,7 +24,7 @@ Network and infrastructure attack surface enumeration from the perspective of an
 - SQLi detection (sqlmap)
 - Free-form bash probes (approval-gated)
 
-**Status:** Built. Kali Linux base image with 30+ pre-configured tools. Claude and local LLM (Ollama) both supported.
+**Status:** Built. Kali Linux base image with 30+ pre-configured tools. Claude and local LLM (Ollama) both supported. Runs either as a single sequential ReAct agent or as a **multi-agent pipeline** — parallel specialist agents phased as Passive Recon → Active Discovery → Enumeration → Exploitation, with an LLM synthesis step between phases that hands the next phase specific attack-chain directives instead of generic observations. Pipeline mode is built and functional; it's currently in a tuning pass (specialist role prompts, iteration budgets) based on observed runs before it's considered validated end-to-end.
 
 ---
 
@@ -43,7 +43,7 @@ Post-access enumeration and lateral movement from the perspective of an attacker
 - NTLM relay (Responder + ntlmrelayx — manual-only, agent-aware)
 - SNMP enumeration (snmpwalk)
 
-**Status:** Built — pending field validation. The tool coverage, 6-phase methodology, ARTIFACTS-based phase gating, and credential chaining are all implemented, but the agent has not yet been tested against a real AD environment. Expect rough edges and edge cases to surface during first engagements.
+**Status:** Built — pending field validation. The tool coverage, 6-phase methodology, ARTIFACTS-based phase gating, and credential chaining are all implemented, but the agent has not yet been tested against a real AD environment. Expect rough edges and edge cases to surface during first engagements. Also available as a multi-agent pipeline (Discovery → Enumeration → Credential Access → Lateral Movement, run as parallel specialists per phase) — the phase config is fully written but has had no validation against a real AD lab yet, one level further from field-tested than the single-agent path above.
 
 ---
 
@@ -68,6 +68,7 @@ This is what differentiates Quiver from running Shannon and a network scanner in
 
 ### Built
 - **Campaigns** — scoped AI agent runs with configurable providers (Claude API, Claude Code OAuth, local LLM)
+- **Multi-agent pipeline mode** — a per-campaign toggle runs a phased set of parallel specialist agents instead of one sequential agent; a Python state machine (not an LLM) advances phases based on gate conditions against session artifacts, with an LLM synthesis agent reasoning across findings between phases. A dedicated Mission Control panel shows live phase/specialist status, synthesis output, and per-specialist pause/resume. Available for both External and Internal tracks; currently being tuned against real runs before it's called fully validated
 - **Human approval gates** — agent pauses for dangerous commands; resume on approval; full approval history
 - **Session management** — one session per engagement; tracks target, scope, notes, status
 - **Findings tracker** — log findings with severity; attach tool runs as evidence; agent deduplicates and updates existing findings; attack chain step numbering
@@ -83,6 +84,8 @@ This is what differentiates Quiver from running Shannon and a network scanner in
 - **Resizable workspace panels** — all three columns and the right-panel sections (Notes, Run History, Findings) are drag-resizable; main nav sidebar is collapsible to icon-only
 
 ### In Progress / Planned
+- **Multi-agent pipeline tuning** — right-sizing per-specialist iteration budgets and role-prompt stop conditions based on observed runs (only one specialist re-tuned so far); a full external engagement end-to-end run hasn't yet been formally signed off
+- **Multi-agent pipeline — internal track validation** — the phase config is written but untested against a real Active Directory lab
 - **Shannon finding import** — structured import of Shannon deliverables into Quiver session findings layer
 - **Client/project management** — track multiple clients and engagements, status at a glance
 - **Remediation retesting** — store original PoC; rerun to verify fix after client remediation
