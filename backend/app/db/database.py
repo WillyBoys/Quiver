@@ -30,17 +30,78 @@ async def init_db():
         # Enable WAL mode so reads never block writes (persists in the DB file)
         await conn.execute(text("PRAGMA journal_mode=WAL"))
         await conn.execute(text("PRAGMA busy_timeout=5000"))
-        # Drop pipeline_runs if it has the old schema (had a 'phase' NOT NULL column;
-        # current model uses 'current_phase'). create_all() recreates it correctly.
+        # Migrate pipeline_runs off the old NOT NULL 'phase' column (renamed to
+        # 'current_phase' in this model) by rebuilding the table instead of dropping
+        # it outright — this preserves existing pipeline run history rather than
+        # silently deleting it. SQLite can't rename/relax a NOT NULL column in place,
+        # so the old table is renamed aside, a fresh one is created with the current
+        # schema, and matching columns are copied across.
+        old_pipeline_columns: list[str] = []
+        needs_pipeline_runs_migration = False
         try:
             result = await conn.execute(text("PRAGMA table_info(pipeline_runs)"))
-            columns = [row[1] for row in result.fetchall()]
-            if columns and "phase" in columns:
-                await conn.execute(text("DROP TABLE pipeline_runs"))
-                logger.info("Dropped old pipeline_runs table (schema migration: phase → current_phase)")
+            old_pipeline_columns = [row[1] for row in result.fetchall()]
+            needs_pipeline_runs_migration = bool(
+                old_pipeline_columns and "phase" in old_pipeline_columns
+                and "current_phase" not in old_pipeline_columns
+            )
+            if needs_pipeline_runs_migration:
+                await conn.execute(text("ALTER TABLE pipeline_runs RENAME TO pipeline_runs_old"))
         except Exception as e:
             logger.warning("pipeline_runs schema check failed: %s", e)
+            needs_pipeline_runs_migration = False
+
         await conn.run_sync(Base.metadata.create_all)
+
+        if needs_pipeline_runs_migration:
+            # Columns the current model requires (NOT NULL, no SQL-level server_default)
+            # that a genuinely old "P1" table (per the comment further down) may not have
+            # had at all. A plain INSERT...SELECT would omit these entirely and hit a
+            # NOT NULL constraint failure, so fall back to each column's Python-side
+            # default value when the old table doesn't have it.
+            _FALLBACKS = {
+                "engagement_type": "'external'",
+                "status": "'running'",
+                "phase_count": "0",
+                "specialist_results": "'{}'",
+                "synthesis_outputs": "'[]'",
+                "skipped_phases": "'[]'",
+                "error": "''",
+                "started_at": "CURRENT_TIMESTAMP",
+                "created_at": "CURRENT_TIMESTAMP",
+                "updated_at": "CURRENT_TIMESTAMP",
+                "session_id": "NULL",
+                "completed_at": "NULL",
+            }
+            try:
+                from app.models.pipeline import PipelineRun
+                new_columns = [c.name for c in PipelineRun.__table__.columns]
+                insert_cols = []
+                select_exprs = []
+                for col in new_columns:
+                    insert_cols.append(col)
+                    if col == "current_phase":
+                        # Old rows may predate even the 'phase' column having a value.
+                        select_exprs.append("COALESCE(phase, 1)")
+                    elif col in old_pipeline_columns:
+                        fallback = _FALLBACKS.get(col)
+                        # The column can exist in the old table yet still hold NULL
+                        # for a row — guard against that, not just the column's absence.
+                        select_exprs.append(f"COALESCE({col}, {fallback})" if fallback else col)
+                    else:
+                        select_exprs.append(_FALLBACKS.get(col, "NULL"))
+                await conn.execute(text(
+                    f"INSERT INTO pipeline_runs ({', '.join(insert_cols)}) "
+                    f"SELECT {', '.join(select_exprs)} FROM pipeline_runs_old"
+                ))
+                moved = (await conn.execute(text("SELECT COUNT(*) FROM pipeline_runs_old"))).scalar()
+                await conn.execute(text("DROP TABLE pipeline_runs_old"))
+                logger.info("Migrated pipeline_runs.phase -> current_phase, preserved %d row(s)", moved)
+            except Exception as e:
+                logger.warning(
+                    "pipeline_runs data migration failed — old data preserved in "
+                    "pipeline_runs_old for manual recovery: %s", e
+                )
         # Migrate: add checklist_state to existing sessions tables that pre-date this column
         try:
             await conn.execute(text("ALTER TABLE sessions ADD COLUMN checklist_state JSON DEFAULT '{}'"))
