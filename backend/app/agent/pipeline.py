@@ -303,12 +303,13 @@ async def run_phase(
     pipeline_run_id: str,
     pipeline_record_id: str,
     synthesis_directives: list[dict] | None = None,
-) -> bool:
+) -> list[str]:
     """Create specialist campaigns and run them concurrently.
 
-    Returns True when all specialists completed, False when any are paused
-    (hit their iteration cap without finishing). The caller should halt
-    pipeline advancement and wait for user retry when this returns False.
+    Returns the list of specialist roles that are still paused (hit their
+    iteration cap without finishing) — empty when all specialists completed.
+    The caller should halt pipeline advancement and wait for user retry when
+    this is non-empty.
     """
     logger.info("PIPELINE | campaign=%s starting phase %d: %s",
                 parent.id, phase.phase_num, phase.name)
@@ -412,11 +413,11 @@ async def run_phase(
             "blocking phase advancement: %s",
             phase.phase_num, len(paused_roles), paused_roles,
         )
-        return False
+        return paused_roles
 
     logger.info("PIPELINE | campaign=%s phase %d complete: %s",
                 parent.id, phase.phase_num, phase.name)
-    return True
+    return []
 
 
 # ── Synthesis agent ─────────────────────────────────────────────────────────────
@@ -686,7 +687,7 @@ async def run_pipeline(campaign_id: str) -> None:
             # Record phase start time so synthesis can filter runs to this phase
             phase_start_at = datetime.now(timezone.utc)
 
-            phase_complete = await run_phase(
+            paused_roles = await run_phase(
                 phase,
                 parent_fresh,
                 pipeline_record_id,
@@ -694,7 +695,7 @@ async def run_pipeline(campaign_id: str) -> None:
                 synthesis_directives if synthesis_directives else None,
             )
 
-            if not phase_complete:
+            if paused_roles:
                 logger.warning(
                     "PIPELINE | campaign=%s pausing at phase %d — "
                     "one or more specialists did not complete",

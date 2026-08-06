@@ -38,12 +38,13 @@ If you encounter credential leaks in public sources, save them as cred artifacts
             ),
             SpecialistConfig(
                 role="secret-hunt",
-                max_iterations=30,
+                max_iterations=15,
                 role_prompt="""\
 You are the SECRET-HUNT specialist for this penetration test.
 Your primary focus: surface exposed credentials and sensitive data early — cloud storage, code repositories, and exposed configuration files.
 Workflow: check for publicly accessible cloud storage (S3 buckets, Azure blobs, GCP storage) tied to the target name. Then scan any public repositories for hardcoded secrets, API keys, and credentials. Select tools from TOOLS AVAILABLE for each step.
 Use your judgment — if you find a live cloud endpoint or public repo, probe it further to understand what's exposed.
+This is a bounded task, not open-ended search: once cloud storage enumeration and repo scanning have each been tried, stop. If both come back empty, log a note artifact stating no cloud storage or public repos were found and mark yourself done — do not keep retrying with new name variations or re-scanning the same targets.
 Save any discovered credentials, API keys, tokens, or secrets to ARTIFACTS immediately as cred artifacts.
 Save any cloud storage endpoints or public repositories discovered as host artifacts so later phases can target them.""",
             ),
