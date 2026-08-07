@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Play, Plus, Trash2, X, FolderOpen, Search, Download, Link2, Cpu, Pause, Settings, Sparkles, Pencil, List, GitBranch, FileText } from "lucide-react";
+import { ArrowLeft, Play, Plus, Trash2, X, FolderOpen, Search, Download, Link2, Cpu, Pause, Settings, Sparkles, Pencil, List, GitBranch, FileText, Copy, Check } from "lucide-react";
 import { api, createRunSocket } from "../utils/api.js";
 import TerminalPane from "../components/terminal/TerminalPane.jsx";
 import ChecklistPane from "../components/checklist/ChecklistPane.jsx";
@@ -102,6 +102,8 @@ export default function SessionDetailPage() {
   const [findingsView, setFindingsView] = useState("list"); // "list" | "chain"
   const [selectedFinding, setSelectedFinding] = useState(null); // finding detail modal
   const [showChainModal, setShowChainModal] = useState(false);  // attack chain modal
+  const [selectedArtifact, setSelectedArtifact] = useState(null); // artifact detail modal — { section, label, value }
+  const [copiedArtifact, setCopiedArtifact] = useState(false);
 
   useEffect(() => {
     api.sessions.get(sessionId).then(async (s) => {
@@ -811,6 +813,18 @@ export default function SessionDetailPage() {
 
   const openFinding = (f) => setSelectedFinding(f);
 
+  const openArtifact = (section, label, value) => {
+    setCopiedArtifact(false);
+    setSelectedArtifact({ section, label, value });
+  };
+
+  const copyArtifactValue = () => {
+    if (!selectedArtifact) return;
+    navigator.clipboard.writeText(String(selectedArtifact.value));
+    setCopiedArtifact(true);
+    setTimeout(() => setCopiedArtifact(false), 2000);
+  };
+
   const specRoleForRun = (runId) => {
     const r = runsById[runId];
     if (!r) return null;
@@ -837,18 +851,19 @@ export default function SessionDetailPage() {
     const v = artifacts[key];
     if (!v) return null;
     if (Array.isArray(v)) return v.map((item, i) => (
-      <div key={i} className={styles.artExpandRow}>{item}</div>
+      <div key={i} className={styles.artExpandRow} onClick={() => openArtifact(key, null, item)}>{item}</div>
     ));
-    return Object.entries(v).map(([k, val]) => (
-      <div key={k} className={styles.artExpandRow}>
-        <span className={styles.artExpandKey}>{k}</span>
-        {val != null && (
-          <span className={styles.artExpandVal}>
-            {Array.isArray(val) ? val.join(", ") : val}
-          </span>
-        )}
-      </div>
-    ));
+    return Object.entries(v).map(([k, val]) => {
+      const displayVal = val != null ? (Array.isArray(val) ? val.join(", ") : val) : null;
+      return (
+        <div key={k} className={styles.artExpandRow} onClick={() => openArtifact(key, k, displayVal)}>
+          <span className={styles.artExpandKey}>{k}</span>
+          {displayVal != null && (
+            <span className={styles.artExpandVal}>{displayVal}</span>
+          )}
+        </div>
+      );
+    });
   };
 
   const runningToolIds = useMemo(
@@ -1389,26 +1404,26 @@ export default function SessionDetailPage() {
                         {(artifacts.hosts || []).length > 0 && (
                           <div className={styles.artifactSection}>
                             <div className={styles.artifactSectionLabel}>Hosts</div>
-                            {artifacts.hosts.map((h, i) => <div key={i} className={styles.artifactItem}><code>{h}</code></div>)}
+                            {artifacts.hosts.map((h, i) => <div key={i} className={styles.artifactItem} onClick={() => openArtifact("hosts", null, h)}><code>{h}</code></div>)}
                           </div>
                         )}
                         {(artifacts.users || []).length > 0 && (
                           <div className={styles.artifactSection}>
                             <div className={styles.artifactSectionLabel}>Users</div>
-                            {artifacts.users.map((u, i) => <div key={i} className={styles.artifactItem}><code>{u}</code></div>)}
+                            {artifacts.users.map((u, i) => <div key={i} className={styles.artifactItem} onClick={() => openArtifact("users", null, u)}><code>{u}</code></div>)}
                           </div>
                         )}
                         {(artifacts.spns || []).length > 0 && (
                           <div className={styles.artifactSection}>
                             <div className={styles.artifactSectionLabel}>SPNs</div>
-                            {artifacts.spns.map((s, i) => <div key={i} className={styles.artifactItem}><code className={styles.artifactMono}>{s}</code></div>)}
+                            {artifacts.spns.map((s, i) => <div key={i} className={styles.artifactItem} onClick={() => openArtifact("spns", null, s)}><code className={styles.artifactMono}>{s}</code></div>)}
                           </div>
                         )}
                         {Object.keys(artifacts.hashes || {}).length > 0 && (
                           <div className={styles.artifactSection}>
                             <div className={styles.artifactSectionLabel}>Hashes</div>
                             {Object.entries(artifacts.hashes).map(([user, hash]) => (
-                              <div key={user} className={styles.artifactItemKV}>
+                              <div key={user} className={styles.artifactItemKV} onClick={() => openArtifact("hashes", user, hash)}>
                                 <span className={styles.artifactKey}>{user}</span>
                                 <code className={styles.artifactHash}>{hash.length > 44 ? hash.slice(0, 44) + "…" : hash}</code>
                               </div>
@@ -1419,7 +1434,7 @@ export default function SessionDetailPage() {
                           <div className={styles.artifactSection}>
                             <div className={styles.artifactSectionLabel}>Credentials</div>
                             {Object.entries(artifacts.creds).map(([user, pass_]) => (
-                              <div key={user} className={styles.artifactItemKV}>
+                              <div key={user} className={styles.artifactItemKV} onClick={() => openArtifact("creds", user, pass_)}>
                                 <span className={styles.artifactKey}>{user}</span>
                                 <code>{pass_}</code>
                               </div>
@@ -1429,7 +1444,7 @@ export default function SessionDetailPage() {
                         {(artifacts.notes || []).length > 0 && (
                           <div className={styles.artifactSection}>
                             <div className={styles.artifactSectionLabel}>Notes</div>
-                            {artifacts.notes.map((n, i) => <div key={i} className={styles.artifactItem}>{n}</div>)}
+                            {artifacts.notes.map((n, i) => <div key={i} className={styles.artifactItem} onClick={() => openArtifact("notes", null, n)}>{n}</div>)}
                           </div>
                         )}
                       </>
@@ -2517,6 +2532,32 @@ export default function SessionDetailPage() {
                   })}
                 </div>
               )}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Artifact detail modal ───────────────────────────────────────── */}
+      {selectedArtifact && (() => {
+        const { section, label, value } = selectedArtifact;
+        return (
+          <div className={styles.modalOverlay} onClick={() => setSelectedArtifact(null)}>
+            <div className={styles.findingModal} onClick={e => e.stopPropagation()}>
+              <div className={styles.findingModalHdr}>
+                <div className={styles.findingModalTitle}>
+                  <span className={styles.artModalSection}>{section}</span>
+                  {label && <span>{label}</span>}
+                </div>
+                <button className={styles.drawerClose} onClick={() => setSelectedArtifact(null)}><X size={14} /></button>
+              </div>
+              <div className={styles.findingModalSection}>
+                <div className={styles.findingModalSectionLabel}>Value</div>
+                <p className={styles.artModalValue}>{value}</p>
+                <button className={styles.artModalCopyBtn} onClick={copyArtifactValue}>
+                  {copiedArtifact ? <Check size={12} /> : <Copy size={12} />}
+                  {copiedArtifact ? "Copied" : "Copy"}
+                </button>
+              </div>
             </div>
           </div>
         );
