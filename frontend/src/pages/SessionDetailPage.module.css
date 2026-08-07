@@ -2382,6 +2382,7 @@
   padding: 4px 14px 6px;
   display: flex; flex-direction: column; gap: 2px;
   border-bottom: 1px solid var(--border);
+  max-height: 44px; overflow-y: auto; /* ~2 rows visible — click a row for the full value */
 }
 .artExpandRow {
   display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
@@ -2620,6 +2621,7 @@
 }
 .chainModalSub {
   font-size: 11px; color: var(--text-muted);
+  margin-right: auto;
 }
 .chainModalBody {
   flex: 1; overflow: auto; padding: 20px;
