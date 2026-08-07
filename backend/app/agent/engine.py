@@ -5,7 +5,7 @@ import uuid as _uuid_mod
 import asyncio
 import logging
 from datetime import datetime, timezone
-from sqlalchemy import select, func
+from sqlalchemy import select, func, or_
 from app.db.database import AsyncSessionLocal
 from app.models.campaign import Campaign, ApprovalRequest
 from app.models.run import Run
@@ -20,12 +20,24 @@ from app.execution import (
     build_command,
     _run_buffers,
     _run_done_events,
+    _artifact_locks,
 )
 
 logger = logging.getLogger(__name__)
 
 _finding_locks: dict[str, asyncio.Lock] = {}
+# _artifact_locks is defined in execution.py and imported above so both
+# _save_inline_artifact (here) and _extract_john_creds (execution.py) share the same lock dict.
 _active_campaign_loops: set[str] = set()  # campaign IDs whose loop task is currently executing
+_bg_tasks: set[asyncio.Task] = set()       # strong refs to fire-and-forget tasks so GC can't collect them
+
+
+def _bg_task(coro) -> asyncio.Task:
+    """Create a tracked background task. Keeps a strong reference until the task completes."""
+    t = asyncio.create_task(coro)
+    _bg_tasks.add(t)
+    t.add_done_callback(_bg_tasks.discard)
+    return t
 
 
 def _normalize_host(target: str) -> str:
@@ -70,16 +82,19 @@ def _build_param_values(tool, target: str, llm_params: dict) -> dict:
 
 def _merge_artifact(current: dict, item: dict) -> dict:
     result = {
-        "users": list(current.get("users") or []),
-        "hashes": dict(current.get("hashes") or {}),
-        "creds":  dict(current.get("creds") or {}),
-        "hosts":  list(current.get("hosts") or []),
-        "spns":   list(current.get("spns") or []),
-        "notes":  list(current.get("notes") or []),
+        "users":    list(current.get("users") or []),
+        "hashes":   dict(current.get("hashes") or {}),
+        "creds":    dict(current.get("creds") or {}),
+        "hosts":    list(current.get("hosts") or []),
+        "spns":     list(current.get("spns") or []),
+        "notes":    list(current.get("notes") or []),
+        "services": {k: list(v) for k, v in (current.get("services") or {}).items()},
+        "tech":     {k: list(v) for k, v in (current.get("tech") or {}).items()},
     }
-    t = item.get("type", "")
+    t     = item.get("type", "")
     value = (item.get("value") or "").strip()
     user  = (item.get("user") or "").strip()
+    host  = (item.get("host") or user).strip()  # "host" field preferred; fall back to "user"
     if not value:
         return result
     if   t == "user" and value not in result["users"]:  result["users"].append(value)
@@ -88,22 +103,32 @@ def _merge_artifact(current: dict, item: dict) -> dict:
     elif t == "host" and value not in result["hosts"]:  result["hosts"].append(value)
     elif t == "spn"  and value not in result["spns"]:   result["spns"].append(value)
     elif t == "note" and value not in result["notes"]:  result["notes"].append(value)
+    elif t == "service" and host:
+        bucket = result["services"].setdefault(host, [])
+        if value not in bucket:
+            bucket.append(value)
+    elif t == "tech" and host:
+        bucket = result["tech"].setdefault(host, [])
+        if value not in bucket:
+            bucket.append(value)
     return result
 
 
 async def _save_inline_artifact(session_id: str, artifact: dict) -> None:
-    from app.models.session import Session as EngagementSession
     from sqlalchemy.orm.attributes import flag_modified
-    async with AsyncSessionLocal() as db:
-        result = await db.execute(
-            select(EngagementSession).where(EngagementSession.id == session_id)
-        )
-        sess = result.scalar_one_or_none()
-        if not sess:
-            return
-        sess.artifacts = _merge_artifact(dict(sess.artifacts or {}), artifact)
-        flag_modified(sess, "artifacts")
-        await db.commit()
+    if session_id not in _artifact_locks:
+        _artifact_locks[session_id] = asyncio.Lock()
+    async with _artifact_locks[session_id]:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(
+                select(EngagementSession).where(EngagementSession.id == session_id)
+            )
+            sess = result.scalar_one_or_none()
+            if not sess:
+                return
+            sess.artifacts = _merge_artifact(dict(sess.artifacts or {}), artifact)
+            flag_modified(sess, "artifacts")
+            await db.commit()
     logger.info("ARTIFACT | session=%s type=%s value=%.60s", session_id, artifact.get("type"), artifact.get("value", ""))
 
 
@@ -276,7 +301,7 @@ async def _save_inline_finding(session_id: str, finding: dict, reasoning: str, r
                         ev = list(f.get("evidence_run_ids") or [])
                         if run_id not in ev:
                             ev.append(run_id)
-                            result = [{**x, "evidence_run_ids": ev} if x.get("id") == f["id"] else x for x in existing]
+                            result = [{**x, "evidence_run_ids": ev} if x.get("id") == f.get("id") else x for x in existing]
                             sess.findings = result
                             await db.commit()
                     logger.info("AGENT | session=%s inline finding merged into existing: %s", session_id, f["title"])
@@ -344,6 +369,7 @@ async def _generate_and_save_summary(campaign_id: str, session_id: str, provider
             # Always create a summary run so it appears in the session terminal.
             summary_run = Run(
                 session_id=session_id,
+                campaign_id=campaign_id,
                 tool_id="agent",
                 tool_name="_summary",
                 command="",
@@ -425,6 +451,7 @@ async def _attempt_fix(campaign: Campaign, failed_run: Run, tool, provider: str)
 
         run = Run(
             session_id=campaign.session_id,
+            campaign_id=campaign.id,
             tool_id=retry_tool.id if retry_tool else "agent",
             tool_name=tool_name,
             command=command,
@@ -522,13 +549,12 @@ async def run_campaign_agent(campaign_id: str) -> str:
         if action.get("done"):
             logger.info("AGENT | campaign=%s complete: %s", campaign_id, action.get("reasoning", ""))
             session_id_for_summary = campaign.session_id
+            is_pipeline_specialist = (campaign.description or "").startswith("pipeline_run:")
             campaign.status = "completed"
             campaign.last_run_at = datetime.now(timezone.utc)
             await db.commit()
-            if session_id_for_summary:
-                asyncio.create_task(
-                    _generate_and_save_summary(campaign_id, session_id_for_summary, provider)
-                )
+            if session_id_for_summary and not is_pipeline_specialist:
+                _bg_task(_generate_and_save_summary(campaign_id, session_id_for_summary, provider))
             return "completed"
 
         tool_name = action.get("tool_name", "").strip()
@@ -553,15 +579,11 @@ async def run_campaign_agent(campaign_id: str) -> str:
             return "scope_violation"
 
         if inline_finding and isinstance(inline_finding, dict) and campaign.session_id:
-            asyncio.create_task(
-                _save_inline_finding(campaign.session_id, inline_finding, reasoning, pregenerated_run_id)
-            )
+            _bg_task(_save_inline_finding(campaign.session_id, inline_finding, reasoning, pregenerated_run_id))
 
         inline_artifact = action.get("artifact")
         if inline_artifact and isinstance(inline_artifact, dict) and campaign.session_id:
-            asyncio.create_task(
-                _save_inline_artifact(campaign.session_id, inline_artifact)
-            )
+            _bg_task(_save_inline_artifact(campaign.session_id, inline_artifact))
 
         # Look up tool — binary name first (LLM is told to use binary names),
         # then fall back to full name match
@@ -599,14 +621,17 @@ async def run_campaign_agent(campaign_id: str) -> str:
             cmd_list = cmd_parts
             command = " ".join(cmd_list)
 
-        # Hard duplicate guard: block re-running a command that already completed successfully.
-        # Failed/errored runs are allowed to be retried.
+        # Hard duplicate guard: block re-running a command that already completed successfully
+        # by THIS campaign. Parallel pipeline specialists each get their own dedup scope so
+        # they don't block each other. Runs with no campaign_id (old data) are treated as
+        # belonging to any campaign for backward compatibility.
         if campaign.session_id:
             dup = (await db.execute(
                 select(Run)
                 .where(Run.session_id == campaign.session_id)
                 .where(Run.command == command)
                 .where(Run.status == "complete")
+                .where(or_(Run.campaign_id == None, Run.campaign_id == campaign_id))
             )).scalars().first()
             if dup:
                 logger.warning("AGENT | campaign=%s duplicate blocked (already succeeded): %s",
@@ -645,6 +670,7 @@ async def run_campaign_agent(campaign_id: str) -> str:
         run = Run(
             id=pregenerated_run_id,
             session_id=campaign.session_id,
+            campaign_id=campaign_id,
             tool_id=tool.id if tool else "agent",
             tool_name=tool_name,
             command=command,
@@ -702,7 +728,6 @@ async def run_campaign_loop(campaign_id: str) -> None:
       - safety cap of 30 iterations is reached
     """
     DEFAULT_MAX_ITERATIONS = 50
-    MAX_CONSECUTIVE_DUPES = 5
     STOP_STATUSES = {"completed", "not_found", "pending_approval", "waiting_approval", "auth_error"}
 
     if campaign_id in _active_campaign_loops:
@@ -710,15 +735,30 @@ async def run_campaign_loop(campaign_id: str) -> None:
         return
     _active_campaign_loops.add(campaign_id)
     try:
-        # Resolve per-campaign cap; None in DB means unlimited (use a safe ceiling of 500)
+        # Resolve per-campaign config in a short-lived DB session so the connection
+        # is not held open for the full pipeline lifetime (which can run for hours).
         async with AsyncSessionLocal() as db:
             _c = (await db.execute(select(Campaign).where(Campaign.id == campaign_id))).scalar_one_or_none()
             if _c is None:
                 MAX_ITERATIONS = DEFAULT_MAX_ITERATIONS
-            elif _c.max_iterations is None or _c.max_iterations <= 0:
-                MAX_ITERATIONS = 500  # None/0 = unlimited sentinel
+                is_pipeline_mode = False
+                is_pipeline_specialist = False
+                MAX_CONSECUTIVE_DUPES = 5
             else:
-                MAX_ITERATIONS = _c.max_iterations
+                is_pipeline_mode = getattr(_c, "pipeline_mode", "single") == "pipeline"
+                is_pipeline_specialist = (getattr(_c, "description", "") or "").startswith("pipeline_run:")
+                MAX_CONSECUTIVE_DUPES = 15 if is_pipeline_specialist else 5
+                if _c.max_iterations is None or _c.max_iterations <= 0:
+                    MAX_ITERATIONS = 500  # None/0 = unlimited sentinel
+                else:
+                    MAX_ITERATIONS = _c.max_iterations
+
+        # Dispatch pipeline AFTER the DB context closes — run_pipeline can run for hours
+        # and must not hold a connection-pool slot for that entire duration.
+        if is_pipeline_mode:
+            from app.agent.pipeline import run_pipeline
+            await run_pipeline(campaign_id)
+            return
 
         consecutive_dupes = 0
 
@@ -835,6 +875,7 @@ async def execute_approval(approval_id: str) -> bool:
 
         run = Run(
             session_id=campaign.session_id,
+            campaign_id=campaign.id,
             tool_id="agent",
             tool_name=approval.tool_name,
             command=approval.command,
@@ -865,11 +906,7 @@ async def execute_approval(approval_id: str) -> bool:
         except ValueError:
             approval_cmd_list = approval.command.split()
 
-    asyncio.create_task(
-        execute_run_background(run_id, approval_cmd_list, session_id, approval.tool_name)
-    )
-    asyncio.create_task(
-        _run_approved_then_resume(run_id, approval.command, session_id, approval.tool_name, campaign_id)
-    )
+    _bg_task(execute_run_background(run_id, approval_cmd_list, session_id, approval.tool_name))
+    _bg_task(_run_approved_then_resume(run_id, approval.command, session_id, approval.tool_name, campaign_id))
     logger.info("AGENT | approval %s approved, executing: %s", approval_id, approval.command)
     return True

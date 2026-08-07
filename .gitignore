@@ -1,9 +1,12 @@
 data/*.db
+data/*.db-shm
+data/*.db-wal
 data/*.log
 data/*.sqlite
 data/*.sqlite3
 # Session output directories — UUID-named, contain tool run output files per engagement
 data/*-*/
+data/session/
 data/wordlists/*
 data/custom_wordlists/*
 !data/wordlists/.gitkeep

@@ -1,10 +1,15 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Play, Plus, Trash2, X, FolderOpen, Search, Download, Link2, Cpu, Pause, Settings, Sparkles, Pencil, List, GitBranch, FileText } from "lucide-react";
+import { ArrowLeft, Play, Plus, Trash2, X, FolderOpen, Search, Download, Link2, Cpu, Pause, Settings, Sparkles, Pencil, List, GitBranch, FileText, Copy, Check } from "lucide-react";
 import { api, createRunSocket } from "../utils/api.js";
 import TerminalPane from "../components/terminal/TerminalPane.jsx";
 import ChecklistPane from "../components/checklist/ChecklistPane.jsx";
 import styles from "./SessionDetailPage.module.css";
+import useSessionPoller from "../hooks/useSessionPoller.js";
+import SingleAgentView from "../components/session/SingleAgentView.jsx";
+import MissionControlView from "../components/session/MissionControlView.jsx";
+import ReportRenderer from "../components/session/ReportRenderer.jsx";
+import AttackChainView from "../components/session/AttackChainView.jsx";
 
 const SEVERITY_OPTS = ["critical", "high", "medium", "low", "info"];
 const SHELL_TAB = "__shell__";
@@ -29,6 +34,8 @@ export default function SessionDetailPage() {
   const [newFinding, setNewFinding] = useState({ title: "", severity: "high", notes: "", evidence_run_ids: [] });
   const [editingFinding, setEditingFinding] = useState(null);
   const [linkingFindingId, setLinkingFindingId] = useState(null);
+  const [showApprovalModal, setShowApprovalModal] = useState(false);
+  const [pendingApprovals, setPendingApprovals] = useState([]);
 
   // Notes editor state
   const [notesValue, setNotesValue] = useState("");
@@ -48,9 +55,14 @@ export default function SessionDetailPage() {
   const [newTargetValue, setNewTargetValue] = useState("");
 
   const [campaign, setCampaign] = useState(null);
+  const [pipelineRun, setPipelineRun] = useState(null);
+  const [pipelinePhases, setPipelinePhases] = useState([]);
   const [agentSidebarView, setAgentSidebarView] = useState("reasoning"); // "reasoning" | "tools" | "checklist"
+  const [selectedRunId, setSelectedRunId] = useState(null);
+  const [expandedArtifacts, setExpandedArtifacts] = useState(new Set());
   const connectedRunIds = useRef(new Set());
   const openSocketsRef = useRef([]);
+  const drawerScrollRef = useRef(null);
   const [leftWidth, setLeftWidth] = useState(260);
   const [rightWidth, setRightWidth] = useState(240);
   const [notesSectionHeight, setNotesSectionHeight] = useState(130);
@@ -58,7 +70,7 @@ export default function SessionDetailPage() {
   const [artifactBoxHeight, setArtifactBoxHeight] = useState(150);
   const dragRef = useRef({ active: false, handle: null, startX: 0, startY: 0, startLeft: 0, startRight: 0, startHeight: 0, startNotesHeight: 0, startArtifactHeight: 0 });
   const [showAgentSetup, setShowAgentSetup] = useState(false);
-  const [agentForm, setAgentForm] = useState({ ai_provider: "claude", risk_level: "passive", max_iterations: "50", unlimited: false });
+  const [agentForm, setAgentForm] = useState({ ai_provider: "claude", risk_level: "passive", max_iterations: "50", unlimited: false, pipeline_mode: "single" });
   const [scheduleMode, setScheduleMode] = useState("now"); // "now" | "later"
   const [scheduledAt, setScheduledAt] = useState(""); // datetime-local value
   const [agentSubmitting, setAgentSubmitting] = useState(false);
@@ -88,6 +100,10 @@ export default function SessionDetailPage() {
   const [confirmDialog, setConfirmDialog] = useState(null); // { message, onConfirm }
   const [aiAnalysis, setAiAnalysis] = useState({});        // runId -> { status, text, model, error }
   const [findingsView, setFindingsView] = useState("list"); // "list" | "chain"
+  const [selectedFinding, setSelectedFinding] = useState(null); // finding detail modal
+  const [showChainModal, setShowChainModal] = useState(false);  // attack chain modal
+  const [selectedArtifact, setSelectedArtifact] = useState(null); // artifact detail modal — { section, label, value }
+  const [copiedArtifact, setCopiedArtifact] = useState(false);
 
   useEffect(() => {
     api.sessions.get(sessionId).then(async (s) => {
@@ -155,55 +171,52 @@ export default function SessionDetailPage() {
     };
   }, [sessionId]);
 
-  // Poll for new agent-created runs + campaign status; auto-connect streaming for new running runs
-  useEffect(() => {
-    if (!session?.campaign_id) return;
-    const campaignId = session.campaign_id;
-
-    function connectNewRunningRuns(fetchedRuns) {
-      const running = fetchedRuns.filter(
-        (r) => r.status === "running" && !connectedRunIds.current.has(r.id)
-      );
-      for (const run of running) {
-        connectedRunIds.current.add(run.id);
-        setLiveOutput((o) => ({ ...o, [run.id]: o[run.id] || "" }));
-        setStreaming((s) => ({ ...s, [run.id]: true }));
-        setOpenTabs((t) => (t.includes(run.id) ? t : [...t, run.id]));
-        setActiveRunId(run.id);
-        const ws2 = createRunSocket(run.id, {
-          onOutput: (line) => setLiveOutput((o) => ({ ...o, [run.id]: (o[run.id] || "") + line })),
-          onDone: (msg) => {
-            setStreaming((s) => ({ ...s, [run.id]: false }));
-            setRuns((prev) => prev.map((r) => r.id === run.id ? { ...r, status: msg.status } : r));
-          },
-          onError: (err) => {
-            setStreaming((s) => ({ ...s, [run.id]: false }));
-            setLiveOutput((o) => ({ ...o, [run.id]: (o[run.id] || "") + `\n[ERROR] ${err}` }));
-          },
-        });
-        openSocketsRef.current.push(ws2);
-      }
-    }
-
-    api.campaigns.get(campaignId).then(setCampaign);
-    api.runs.listForSession(sessionId).then((r) => { setRuns(r); connectNewRunningRuns(r); });
-
-    const interval = setInterval(() => {
-      api.runs.listForSession(sessionId).then((r) => { setRuns(r); connectNewRunningRuns(r); });
-      api.campaigns.get(campaignId).then(setCampaign);
-      // Merge only findings + checklist + artifacts from the server so in-progress notes edits aren't clobbered
-      api.sessions.get(sessionId).then((fresh) => {
-        setSession((prev) => prev ? { ...prev, findings: fresh.findings, checklist_state: fresh.checklist_state } : prev);
-        setArtifacts(fresh.artifacts || {});
+  function connectNewRunningRuns(fetchedRuns) {
+    const running = fetchedRuns.filter(
+      (r) => r.status === "running" && !connectedRunIds.current.has(r.id)
+    );
+    for (const run of running) {
+      connectedRunIds.current.add(run.id);
+      setLiveOutput((o) => ({ ...o, [run.id]: o[run.id] || "" }));
+      setStreaming((s) => ({ ...s, [run.id]: true }));
+      setOpenTabs((t) => (t.includes(run.id) ? t : [...t, run.id]));
+      setActiveRunId(run.id);
+      const ws2 = createRunSocket(run.id, {
+        onOutput: (line) => setLiveOutput((o) => ({ ...o, [run.id]: (o[run.id] || "") + line })),
+        onDone: (msg) => {
+          setStreaming((s) => ({ ...s, [run.id]: false }));
+          setRuns((prev) => prev.map((r) => r.id === run.id ? { ...r, status: msg.status } : r));
+        },
+        onError: (err) => {
+          setStreaming((s) => ({ ...s, [run.id]: false }));
+          setLiveOutput((o) => ({ ...o, [run.id]: (o[run.id] || "") + `\n[ERROR] ${err}` }));
+        },
       });
-    }, 4000);
-    return () => {
-      clearInterval(interval);
-      openSocketsRef.current.forEach(ws => { try { ws.close(); } catch {} });
-      openSocketsRef.current = [];
-    };
-  }, [session?.campaign_id, sessionId]);
+      openSocketsRef.current.push(ws2);
+    }
+  }
 
+  useSessionPoller({
+    sessionId,
+    campaignId: session?.campaign_id || null,
+    pipelineMode: campaign?.pipeline_mode === "pipeline",
+    onRuns: (fetchedRuns) => {
+      setRuns(fetchedRuns);
+      connectNewRunningRuns(fetchedRuns);
+    },
+    onCampaign: setCampaign,
+    onSession: (fresh) => {
+      setSession((prev) => prev ? { ...prev, findings: fresh.findings, checklist_state: fresh.checklist_state } : prev);
+      setArtifacts(fresh.artifacts || {});
+      setSelectedFinding((prev) => {
+        if (!prev) return prev;
+        const updated = (fresh.findings || []).find(f => f.id === prev.id);
+        return updated || prev;
+      });
+    },
+    onPipeline: setPipelineRun,
+    onPipelinePhases: setPipelinePhases,
+  });
 
   const enabledTools = useMemo(() => tools.filter((t) => t.enabled), [tools]);
   const filteredTools = useMemo(() => {
@@ -609,7 +622,7 @@ export default function SessionDetailPage() {
         scope: settingsForm.scope,
         engagement_type: settingsForm.engagement_type,
         initial_context: ic,
-        notes: session.notes,
+        notes: notesValue,
         status: session.status,
         findings: session.findings,
         targets: session.targets,
@@ -625,7 +638,11 @@ export default function SessionDetailPage() {
 
   function downloadAiReport(report) {
     const target = report || selectedReport;
-    if (!target?.content) return;
+    if (!target?.content) {
+      // Content not yet loaded — open the report so it loads, then the user can download
+      setSelectedReport(target);
+      return;
+    }
     const slug = (target.name || session.name || "report").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
     const blob = new Blob([target.content], { type: "text/markdown" });
     const url = URL.createObjectURL(blob);
@@ -725,6 +742,7 @@ export default function SessionDetailPage() {
         schedule:        scheduleIso,
         session_id:      sessionId,
         max_iterations:  agentForm.unlimited ? null : (parseInt(agentForm.max_iterations) || 50),
+        pipeline_mode:   agentForm.pipeline_mode || "single",
       });
       // Link back to session so the session knows its campaign
       await api.sessions.update(sessionId, { ...session, campaign_id: newCampaign.id });
@@ -784,6 +802,70 @@ export default function SessionDetailPage() {
   }
 
   const runsById = useMemo(() => Object.fromEntries(runs.map((r) => [r.id, r])), [runs]);
+
+  useEffect(() => {
+    if (!selectedRunId || !drawerScrollRef.current) return;
+    if (!streaming[selectedRunId]) return; // only auto-scroll live runs
+    const el = drawerScrollRef.current;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    if (nearBottom) el.scrollTop = el.scrollHeight;
+  }, [selectedRunId, liveOutput[selectedRunId]]);
+
+  const openFinding = (f) => setSelectedFinding(f);
+
+  const openArtifact = (section, label, value) => {
+    setCopiedArtifact(false);
+    setSelectedArtifact({ section, label, value });
+  };
+
+  const copyArtifactValue = () => {
+    if (!selectedArtifact) return;
+    navigator.clipboard.writeText(String(selectedArtifact.value));
+    setCopiedArtifact(true);
+    setTimeout(() => setCopiedArtifact(false), 2000);
+  };
+
+  const specRoleForRun = (runId) => {
+    const r = runsById[runId];
+    if (!r) return null;
+    for (const phase of pipelinePhases) {
+      const spec = phase.specialists.find(s => s.campaign_id === r.campaign_id);
+      if (spec) return spec.role;
+    }
+    return null;
+  };
+
+  const toggleArtifact = (key) => setExpandedArtifacts(prev => {
+    const next = new Set(prev);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    return next;
+  });
+
+  const artifactCount = (key) => {
+    const v = artifacts[key];
+    if (!v) return 0;
+    return Array.isArray(v) ? v.length : Object.keys(v).length;
+  };
+
+  const renderArtifactValues = (key) => {
+    const v = artifacts[key];
+    if (!v) return null;
+    if (Array.isArray(v)) return v.map((item, i) => (
+      <div key={i} className={styles.artExpandRow} onClick={() => openArtifact(key, null, item)}>{item}</div>
+    ));
+    return Object.entries(v).map(([k, val]) => {
+      const displayVal = val != null ? (Array.isArray(val) ? val.join(", ") : val) : null;
+      return (
+        <div key={k} className={styles.artExpandRow} onClick={() => openArtifact(key, k, displayVal)}>
+          <span className={styles.artExpandKey}>{k}</span>
+          {displayVal != null && (
+            <span className={styles.artExpandVal}>{displayVal}</span>
+          )}
+        </div>
+      );
+    });
+  };
+
   const runningToolIds = useMemo(
     () => new Set(runs.filter((r) => streaming[r.id]).map((r) => r.tool_id)),
     [runs, streaming]
@@ -796,6 +878,17 @@ export default function SessionDetailPage() {
   const activeRun = runsById[activeRunId] || null;
   const activeOutput = liveOutput[activeRunId] || activeRun?.output || "";
   const isActiveStreaming = streaming[activeRunId] || false;
+
+  function fmtElapsed(isoStart) {
+    if (!isoStart) return "";
+    // Append Z if the string has no timezone info — SQLite strips the UTC offset on round-trip
+    const ts = /[Z+]/.test(isoStart) ? isoStart : isoStart + "Z";
+    const secs = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
+    if (secs <= 0) return "0s";
+    if (secs < 60) return `${secs}s`;
+    if (secs < 3600) return `${Math.floor(secs/60)}m ${secs%60}s`;
+    return `${Math.floor(secs/3600)}h ${Math.floor((secs%3600)/60)}m`;
+  }
 
   function fmtRunTime(isoStr) {
     if (!isoStr) return "";
@@ -817,6 +910,9 @@ export default function SessionDetailPage() {
   }
 
   if (!session) return <div className={styles.loading}>Loading session...</div>;
+
+  const isAiSession = Boolean(session.campaign_id && campaign);
+  const isPipelineMode = campaign?.pipeline_mode === "pipeline";
 
   return (
     <div className={styles.page}>
@@ -846,6 +942,25 @@ export default function SessionDetailPage() {
                   <option value="local">Local AI (Ollama)</option>
                 </select>
               </label>
+              <div className={styles.label}>Agent Mode
+                <div className={styles.scheduleToggle}>
+                  <button type="button"
+                    className={`${styles.scheduleBtn} ${agentForm.pipeline_mode === "single" ? styles.scheduleBtnActive : ""}`}
+                    onClick={() => setAgentForm({ ...agentForm, pipeline_mode: "single" })}>
+                    Single Agent
+                  </button>
+                  <button type="button"
+                    className={`${styles.scheduleBtn} ${agentForm.pipeline_mode === "pipeline" ? styles.scheduleBtnActive : ""}`}
+                    onClick={() => setAgentForm({ ...agentForm, pipeline_mode: "pipeline" })}>
+                    Pipeline (Beta)
+                  </button>
+                </div>
+                <span className={styles.iterationHint}>
+                  {agentForm.pipeline_mode === "pipeline"
+                    ? "Parallel specialist agents run each phase — faster on large scopes."
+                    : "One agent reasons through the full engagement — maximum creativity and adaptability."}
+                </span>
+              </div>
               <label className={styles.label}>Approval Mode
                 <select className="input" value={agentForm.risk_level}
                   onChange={(e) => setAgentForm({ ...agentForm, risk_level: e.target.value })}>
@@ -1000,6 +1115,15 @@ export default function SessionDetailPage() {
                   })()}
                 </span>
                 <span className={styles.infoBarProvider}>{campaign.ai_provider === "claude" ? "Claude" : "Local AI"}</span>
+                {campaign.status === "awaiting_approval" && (
+                  <button className={styles.approvalBadge} onClick={async () => {
+                    const all = await api.approvals.list("pending");
+                    setPendingApprovals(all.filter(a => a.campaign_id === campaign.id));
+                    setShowApprovalModal(true);
+                  }}>
+                    ⚠ Approvals
+                  </button>
+                )}
                 {campaign.status !== "completed" && (
                   <button className={styles.agentToggleBtn} onClick={handleAgentToggle}>
                     {campaign.status === "active"
@@ -1061,6 +1185,50 @@ export default function SessionDetailPage() {
       </div>
 
       <div className={styles.workspace}>
+
+        {/* ── Single-agent AI session — Narrative + Intel rail ── */}
+        {isAiSession && !isPipelineMode && (
+          <SingleAgentView
+            session={session}
+            campaign={campaign}
+            runs={runs}
+            streaming={streaming}
+            selectedRunId={selectedRunId}
+            onSelectRun={setSelectedRunId}
+            openFinding={openFinding}
+            fmtRunTime={fmtRunTime}
+            artifactCount={artifactCount}
+            renderArtifactValues={renderArtifactValues}
+            toggleArtifact={toggleArtifact}
+            expandedArtifacts={expandedArtifacts}
+          />
+        )}
+
+        {/* ── Pipeline AI session — Mission Control ── */}
+        {isAiSession && isPipelineMode && (
+          <MissionControlView
+            session={session}
+            campaign={campaign}
+            pipelineRun={pipelineRun}
+            pipelinePhases={pipelinePhases}
+            runs={runs}
+            runsById={runsById}
+            selectedRunId={selectedRunId}
+            onSelectRun={setSelectedRunId}
+            openFinding={openFinding}
+            onShowChainModal={() => setShowChainModal(true)}
+            fmtElapsed={fmtElapsed}
+            fmtRunTime={fmtRunTime}
+            artifactCount={artifactCount}
+            renderArtifactValues={renderArtifactValues}
+            toggleArtifact={toggleArtifact}
+            expandedArtifacts={expandedArtifacts}
+          />
+        )}
+
+        {/* ── Manual / non-AI session — existing 3-column layout ── */}
+        {!isAiSession && (
+          <>
         {/* Left: reasoning terminal (agent sessions) or tool picker / checklist (manual) */}
         <aside className={styles.toolPicker} style={{ width: leftWidth, minWidth: leftWidth }}>
           {/* Unified toggle — Reasoning tab only appears when agent is active */}
@@ -1078,8 +1246,77 @@ export default function SessionDetailPage() {
               onClick={() => session.campaign_id ? setAgentSidebarView("checklist") : setSidebarView("checklist")}>Checklist</button>
           </div>
 
+          {/* Pipeline panel */}
+          {session.campaign_id && agentSidebarView === "reasoning" && campaign?.pipeline_mode === "pipeline" && (
+            <div className={styles.pipelinePanel}>
+              {pipelinePhases.length === 0 && (
+                <p className={styles.pipelineEmpty}>
+                  {pipelineRun ? "Loading phases…" : "Pipeline hasn't started yet."}
+                </p>
+              )}
+              {pipelinePhases.map((phase) => (
+                <div key={phase.phase_num} className={styles.pipelinePhaseBlock}>
+                  <div className={styles.pipelinePhaseHeader}>
+                    <span className={styles.pipelinePhaseName}>
+                      Phase {phase.phase_num} — {phase.name}
+                    </span>
+                    <span className={`${styles.pipelineBadge} ${styles[`badge_${phase.status}`]}`}>
+                      {phase.status === "running"  && "● running"}
+                      {phase.status === "complete" && "✓ complete"}
+                      {phase.status === "waiting"  && "waiting"}
+                      {phase.status === "skipped"  && "– skipped"}
+                      {phase.status === "error"    && "✗ error"}
+                    </span>
+                  </div>
+
+                  {phase.status === "waiting" && phase.gate_description && (
+                    <p className={styles.pipelineGate}>gate: {phase.gate_description}</p>
+                  )}
+                  {phase.status === "skipped" && (
+                    <p className={styles.pipelineGate}>
+                      {phase.skip_reason || phase.gate_description || "gate not met"}
+                    </p>
+                  )}
+
+                  {phase.specialists.map((spec) => (
+                    <div key={spec.role} className={styles.pipelineSpecialist}>
+                      <div className={styles.pipelineSpecHeader}>
+                        <span className={styles.pipelineSpecRole}>{spec.role}</span>
+                        <div className={styles.pipelineSpecMeta}>
+                          {spec.iteration_count > 0 && (
+                            <span className={styles.pipelineSpecIter}>{spec.iteration_count} iter</span>
+                          )}
+                          <span className={`${styles.pipelineSpecStatus} ${styles[`specStatus_${spec.campaign_status}`]}`}>
+                            {spec.campaign_status === "active"             && "● running"}
+                            {spec.campaign_status === "awaiting_approval"  && "⚠ approval"}
+                            {spec.campaign_status === "completed"          && "✓ done"}
+                            {spec.campaign_status === "paused"             && "‖ paused"}
+                          </span>
+                        </div>
+                      </div>
+                      {spec.campaign_status === "active" && spec.last_agent_reasoning && (
+                        <p className={styles.pipelineSpecReasoning}>{spec.last_agent_reasoning}</p>
+                      )}
+                    </div>
+                  ))}
+
+                  {phase.synthesis_directives && phase.synthesis_directives.length > 0 && (
+                    <div className={styles.pipelineSynthesis}>
+                      <span className={styles.pipelineSynthesisLabel}>synthesis</span>
+                      {phase.synthesis_directives.map((d, di) => (
+                        <p key={di} className={`${styles.pipelineDirective} ${styles[`priority_${d.priority}`]}`}>
+                          {d.directive}
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* Agent reasoning view */}
-          {session.campaign_id && agentSidebarView === "reasoning" && (
+          {session.campaign_id && agentSidebarView === "reasoning" && campaign?.pipeline_mode !== "pipeline" && (
             <div className={styles.reasoningFeed}>
               {campaign?.last_agent_reasoning && (campaign.status === "active" || campaign.status === "awaiting_approval") && (
                 <div className={styles.reasoningThinking}>
@@ -1167,26 +1404,26 @@ export default function SessionDetailPage() {
                         {(artifacts.hosts || []).length > 0 && (
                           <div className={styles.artifactSection}>
                             <div className={styles.artifactSectionLabel}>Hosts</div>
-                            {artifacts.hosts.map((h, i) => <div key={i} className={styles.artifactItem}><code>{h}</code></div>)}
+                            {artifacts.hosts.map((h, i) => <div key={i} className={styles.artifactItem} onClick={() => openArtifact("hosts", null, h)}><code>{h}</code></div>)}
                           </div>
                         )}
                         {(artifacts.users || []).length > 0 && (
                           <div className={styles.artifactSection}>
                             <div className={styles.artifactSectionLabel}>Users</div>
-                            {artifacts.users.map((u, i) => <div key={i} className={styles.artifactItem}><code>{u}</code></div>)}
+                            {artifacts.users.map((u, i) => <div key={i} className={styles.artifactItem} onClick={() => openArtifact("users", null, u)}><code>{u}</code></div>)}
                           </div>
                         )}
                         {(artifacts.spns || []).length > 0 && (
                           <div className={styles.artifactSection}>
                             <div className={styles.artifactSectionLabel}>SPNs</div>
-                            {artifacts.spns.map((s, i) => <div key={i} className={styles.artifactItem}><code className={styles.artifactMono}>{s}</code></div>)}
+                            {artifacts.spns.map((s, i) => <div key={i} className={styles.artifactItem} onClick={() => openArtifact("spns", null, s)}><code className={styles.artifactMono}>{s}</code></div>)}
                           </div>
                         )}
                         {Object.keys(artifacts.hashes || {}).length > 0 && (
                           <div className={styles.artifactSection}>
                             <div className={styles.artifactSectionLabel}>Hashes</div>
                             {Object.entries(artifacts.hashes).map(([user, hash]) => (
-                              <div key={user} className={styles.artifactItemKV}>
+                              <div key={user} className={styles.artifactItemKV} onClick={() => openArtifact("hashes", user, hash)}>
                                 <span className={styles.artifactKey}>{user}</span>
                                 <code className={styles.artifactHash}>{hash.length > 44 ? hash.slice(0, 44) + "…" : hash}</code>
                               </div>
@@ -1197,7 +1434,7 @@ export default function SessionDetailPage() {
                           <div className={styles.artifactSection}>
                             <div className={styles.artifactSectionLabel}>Credentials</div>
                             {Object.entries(artifacts.creds).map(([user, pass_]) => (
-                              <div key={user} className={styles.artifactItemKV}>
+                              <div key={user} className={styles.artifactItemKV} onClick={() => openArtifact("creds", user, pass_)}>
                                 <span className={styles.artifactKey}>{user}</span>
                                 <code>{pass_}</code>
                               </div>
@@ -1207,7 +1444,7 @@ export default function SessionDetailPage() {
                         {(artifacts.notes || []).length > 0 && (
                           <div className={styles.artifactSection}>
                             <div className={styles.artifactSectionLabel}>Notes</div>
-                            {artifacts.notes.map((n, i) => <div key={i} className={styles.artifactItem}>{n}</div>)}
+                            {artifacts.notes.map((n, i) => <div key={i} className={styles.artifactItem} onClick={() => openArtifact("notes", null, n)}>{n}</div>)}
                           </div>
                         )}
                       </>
@@ -1636,10 +1873,12 @@ export default function SessionDetailPage() {
                 )}
               </div>
             ) : (
-              <AttackChainView findings={session.findings || []} onNodeClick={(f) => setFindingsView("list")} />
+              <AttackChainView findings={session.findings || []} onNodeClick={(f) => { setSelectedFinding(f); }} />
             )}
           </div>
         </aside>
+          </>
+        )}
       </div>
 
       {/* Wordlist picker modal */}
@@ -1694,8 +1933,8 @@ export default function SessionDetailPage() {
         const activeFinding = session.findings?.find((f) => f.id === linkingFindingId);
         const selectedIds = activeFinding ? getEvidenceIds(activeFinding) : [];
         return (
-          <div className={styles.modal}>
-            <div className={styles.modalBox}>
+          <div className={styles.modal} onClick={() => setLinkingFindingId(null)}>
+            <div className={styles.modalBox} onClick={e => e.stopPropagation()}>
               <h2 className={styles.modalTitle}>Link Evidence Runs</h2>
               <div className={styles.form}>
                 {completedRuns.length === 0 ? (
@@ -1733,8 +1972,8 @@ export default function SessionDetailPage() {
 
       {/* Finding modal */}
       {showFinding && (
-        <div className={styles.modal}>
-          <div className={styles.modalBox}>
+        <div className={styles.modal} onClick={() => setShowFinding(false)}>
+          <div className={styles.modalBox} onClick={e => e.stopPropagation()}>
             <h2 className={styles.modalTitle}>Log Finding</h2>
             <div className={styles.form}>
               <label className={styles.label}>Title
@@ -2173,331 +2412,197 @@ export default function SessionDetailPage() {
           </div>
         </div>
       )}
-    </div>
-  );
-}
 
-// ── Report renderer ──────────────────────────────────────────────────────────
-
-const SEV_PALETTE = {
-  critical: { bg: "rgba(239,68,68,0.12)", border: "#ef4444", text: "#ef4444" },
-  high:     { bg: "rgba(249,115,22,0.12)", border: "#f97316", text: "#f97316" },
-  medium:   { bg: "rgba(234,179,8,0.12)",  border: "#eab308", text: "#eab308" },
-  low:      { bg: "rgba(59,130,246,0.12)", border: "#3b82f6", text: "#3b82f6" },
-  info:     { bg: "rgba(107,114,128,0.12)",border: "#6b7280", text: "#6b7280" },
-};
-
-const SECTION_COLORS = {
-  "Engagement Summary": "#60a5fa",
-  "Attack Surface":     "#34d399",
-  "Findings":           "#f87171",
-  "Attack Chains":      "#f97316",
-  "Coverage Gaps":      "#a78bfa",
-};
-
-function inlineStyle(text) {
-  // Returns spans for **bold**, `code`, and severity keywords
-  const parts = [];
-  const re = /(\*\*[^*]+\*\*)|(`[^`]+`)/g;
-  let last = 0, m;
-  while ((m = re.exec(text)) !== null) {
-    if (m.index > last) parts.push(<span key={last}>{text.slice(last, m.index)}</span>);
-    if (m[0].startsWith("**")) {
-      parts.push(<strong key={m.index}>{m[0].slice(2, -2)}</strong>);
-    } else {
-      parts.push(
-        <code key={m.index} style={{ background: "var(--bg-card)", padding: "1px 5px", borderRadius: 3, fontFamily: "var(--font-mono)", fontSize: "0.9em" }}>
-          {m[0].slice(1, -1)}
-        </code>
-      );
-    }
-    last = m.index + m[0].length;
-  }
-  if (last < text.length) parts.push(<span key={last}>{text.slice(last)}</span>);
-  return parts.length ? parts : text;
-}
-
-function colorSeverityBadge(line) {
-  const sevMatch = line.match(/^###\s+(CRITICAL|HIGH|MEDIUM|LOW|INFO)\s+(.*)/i);
-  if (!sevMatch) return null;
-  const sev = sevMatch[1].toLowerCase();
-  const title = sevMatch[2];
-  const pal = SEV_PALETTE[sev] || SEV_PALETTE.info;
-  return (
-    <div style={{ display: "flex", alignItems: "baseline", gap: 10, margin: "20px 0 6px" }}>
-      <span style={{ background: pal.bg, border: `1px solid ${pal.border}`, color: pal.text, borderRadius: 4, padding: "2px 8px", fontSize: 10, fontWeight: 700, fontFamily: "var(--font-mono)", letterSpacing: "0.08em", flexShrink: 0 }}>
-        {sev.toUpperCase()}
-      </span>
-      <span style={{ fontWeight: 700, fontSize: 14, color: "var(--text-primary)" }}>{title}</span>
-    </div>
-  );
-}
-
-function ReportRenderer({ markdown }) {
-  const lines = markdown.split("\n");
-  const elements = [];
-  let i = 0;
-  while (i < lines.length) {
-    const line = lines[i];
-
-    // Code block
-    if (line.trimStart().startsWith("```")) {
-      const lang = line.trim().slice(3);
-      const codeLines = [];
-      i++;
-      while (i < lines.length && !lines[i].trimStart().startsWith("```")) {
-        codeLines.push(lines[i]);
-        i++;
-      }
-      elements.push(
-        <pre key={i} style={{ background: "#0d1117", border: "1px solid var(--border)", borderRadius: 6, padding: "10px 14px", margin: "8px 0", overflowX: "auto", fontFamily: "var(--font-mono)", fontSize: 11, lineHeight: 1.6, color: "#e2e8f0" }}>
-          {codeLines.join("\n")}
-        </pre>
-      );
-      i++;
-      continue;
-    }
-
-    // H1
-    if (line.startsWith("# ")) {
-      elements.push(
-        <h1 key={i} style={{ fontSize: 18, fontWeight: 700, color: "var(--accent)", borderBottom: "2px solid var(--accent)", paddingBottom: 8, marginBottom: 4 }}>
-          {line.slice(2)}
-        </h1>
-      );
-      i++; continue;
-    }
-
-    // Blockquote (reviewer line)
-    if (line.startsWith("> ")) {
-      elements.push(
-        <div key={i} style={{ borderLeft: "3px solid var(--border)", paddingLeft: 12, margin: "4px 0 16px", color: "var(--text-muted)", fontSize: 12 }}>
-          {inlineStyle(line.slice(2))}
-        </div>
-      );
-      i++; continue;
-    }
-
-    // H2 — section headers with color coding
-    if (line.startsWith("## ")) {
-      const title = line.slice(3);
-      const color = Object.entries(SECTION_COLORS).find(([k]) => title.includes(k))?.[1] || "var(--text-secondary)";
-      elements.push(
-        <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, margin: "24px 0 10px", borderBottom: `1px solid ${color}40` }}>
-          <span style={{ width: 4, height: 18, borderRadius: 2, background: color, flexShrink: 0 }} />
-          <h2 style={{ fontSize: 14, fontWeight: 700, color, margin: 0, letterSpacing: "0.04em", textTransform: "uppercase" }}>{title}</h2>
-        </div>
-      );
-      i++; continue;
-    }
-
-    // H3 with severity badge detection
-    if (line.startsWith("### ")) {
-      const badge = colorSeverityBadge(line);
-      elements.push(badge || (
-        <h3 key={i} style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)", margin: "16px 0 4px" }}>
-          {line.slice(4)}
-        </h3>
-      ));
-      i++; continue;
-    }
-
-    // HR
-    if (/^---+$/.test(line.trim())) {
-      elements.push(<hr key={i} style={{ border: "none", borderTop: "1px solid var(--border)", margin: "16px 0" }} />);
-      i++; continue;
-    }
-
-    // Table
-    if (line.startsWith("|")) {
-      const tableLines = [];
-      while (i < lines.length && lines[i].startsWith("|")) {
-        tableLines.push(lines[i]);
-        i++;
-      }
-      const rows = tableLines.filter(l => !/^\|[-| :]+\|$/.test(l.trim()));
-      elements.push(
-        <table key={i} style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, margin: "8px 0" }}>
-          <tbody>
-            {rows.map((r, ri) => {
-              const cells = r.split("|").filter((_, ci) => ci > 0 && ci < r.split("|").length - 1);
-              return (
-                <tr key={ri} style={{ background: ri % 2 === 0 ? "var(--bg-card)" : "transparent" }}>
-                  {cells.map((c, ci) => (
-                    <td key={ci} style={{ padding: "5px 10px", borderBottom: "1px solid var(--border)", color: ci === 0 ? "var(--text-muted)" : "var(--text-primary)", fontWeight: ci === 0 ? 600 : 400 }}>
-                      {inlineStyle(c.trim())}
-                    </td>
-                  ))}
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      );
-      continue;
-    }
-
-    // Numbered list
-    if (/^\d+\.\s/.test(line)) {
-      const listLines = [];
-      while (i < lines.length && /^\d+\.\s/.test(lines[i])) {
-        listLines.push(lines[i].replace(/^\d+\.\s/, ""));
-        i++;
-      }
-      elements.push(
-        <ol key={i} style={{ paddingLeft: 20, margin: "4px 0 8px", fontSize: 12, lineHeight: 1.7 }}>
-          {listLines.map((l, li) => <li key={li} style={{ color: "var(--text-primary)" }}>{inlineStyle(l)}</li>)}
-        </ol>
-      );
-      continue;
-    }
-
-    // Bullet list
-    if (line.startsWith("- ") || line.startsWith("* ")) {
-      const listLines = [];
-      while (i < lines.length && (lines[i].startsWith("- ") || lines[i].startsWith("* "))) {
-        listLines.push(lines[i].slice(2));
-        i++;
-      }
-      elements.push(
-        <ul key={i} style={{ paddingLeft: 18, margin: "4px 0 8px", fontSize: 12, lineHeight: 1.7 }}>
-          {listLines.map((l, li) => <li key={li} style={{ color: "var(--text-primary)" }}>{inlineStyle(l)}</li>)}
-        </ul>
-      );
-      continue;
-    }
-
-    // Empty line
-    if (!line.trim()) {
-      elements.push(<div key={i} style={{ height: 6 }} />);
-      i++; continue;
-    }
-
-    // Normal paragraph
-    elements.push(
-      <p key={i} style={{ fontSize: 12, lineHeight: 1.7, margin: "2px 0", color: "var(--text-primary)" }}>
-        {inlineStyle(line)}
-      </p>
-    );
-    i++;
-  }
-
-  return (
-    <div style={{ padding: "20px 24px", fontFamily: "var(--font-sans, system-ui)" }}>
-      {elements}
-    </div>
-  );
-}
-
-// ── Attack chain SVG ──────────────────────────────────────────────────────────
-
-const SEV_COLOR_CHAIN = {
-  critical: "#ef4444",
-  high: "#f97316",
-  medium: "#eab308",
-  low: "#3b82f6",
-  info: "#6b7280",
-};
-
-function AttackChainView({ findings, onNodeClick }) {
-  if (!findings.length) {
-    return <p style={{ color: "var(--text-muted)", fontSize: 12, padding: "12px 0" }}>No findings logged.</p>;
-  }
-
-  // Build tree: depth-first layout
-  const byId = Object.fromEntries(findings.map(f => [f.id, f]));
-  const childrenOf = {};
-  const roots = [];
-  for (const f of findings) {
-    if (f.chains_from_id && byId[f.chains_from_id]) {
-      (childrenOf[f.chains_from_id] = childrenOf[f.chains_from_id] || []).push(f.id);
-    } else {
-      roots.push(f.id);
-    }
-  }
-
-  // Assign (col, row) positions via DFS
-  const positions = {};
-  let globalRow = 0;
-  function place(id, col) {
-    const kids = childrenOf[id] || [];
-    if (!kids.length) {
-      positions[id] = { col, row: globalRow++ };
-      return;
-    }
-    const startRow = globalRow;
-    for (const kid of kids) place(kid, col + 1);
-    // center parent vertically over its children
-    const endRow = globalRow - 1;
-    positions[id] = { col, row: (startRow + endRow) / 2 };
-  }
-  for (const r of roots) place(r, 0);
-
-  const NODE_W = 160, NODE_H = 52, COL_GAP = 48, ROW_GAP = 16;
-  const maxCol = Math.max(...Object.values(positions).map(p => p.col));
-  const maxRow = Math.max(...Object.values(positions).map(p => p.row));
-  const svgW = (maxCol + 1) * (NODE_W + COL_GAP);
-  const svgH = (maxRow + 1) * (NODE_H + ROW_GAP) + ROW_GAP;
-
-  function cx(pos) { return pos.col * (NODE_W + COL_GAP) + NODE_W / 2; }
-  function cy(pos) { return pos.row * (NODE_H + ROW_GAP) + NODE_H / 2; }
-
-  const edges = [];
-  for (const f of findings) {
-    if (f.chains_from_id && positions[f.chains_from_id] && positions[f.id]) {
-      const p = positions[f.chains_from_id];
-      const c = positions[f.id];
-      const x1 = cx(p) + NODE_W / 2, y1 = cy(p);
-      const x2 = cx(c) - NODE_W / 2, y2 = cy(c);
-      const mx = (x1 + x2) / 2;
-      edges.push({ key: f.id, d: `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}` });
-    }
-  }
-
-  return (
-    <div style={{ overflowX: "auto", overflowY: "auto", maxHeight: 420 }}>
-      {!edges.length && (
-        <p style={{ color: "var(--text-muted)", fontSize: 11, marginBottom: 8 }}>
-          No chains mapped yet — the agent will link findings as it discovers exploitable chains.
-        </p>
-      )}
-      <svg width={svgW} height={svgH} style={{ display: "block", minWidth: svgW }}>
-        <defs>
-          <marker id="arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
-            <path d="M0,0 L0,6 L6,3 z" fill="var(--text-muted)" />
-          </marker>
-        </defs>
-        {edges.map(e => (
-          <path key={e.key} d={e.d} fill="none" stroke="var(--text-muted)" strokeWidth="1.5"
-            strokeDasharray="4 3" markerEnd="url(#arrow)" />
-        ))}
-        {findings.map(f => {
-          const pos = positions[f.id];
-          if (!pos) return null;
-          const x = pos.col * (NODE_W + COL_GAP);
-          const y = pos.row * (NODE_H + ROW_GAP);
-          const color = SEV_COLOR_CHAIN[f.severity] || "#6b7280";
-          return (
-            <g key={f.id} style={{ cursor: "pointer" }} onClick={() => onNodeClick(f)}>
-              <rect x={x} y={y} width={NODE_W} height={NODE_H} rx={6}
-                fill="var(--bg-card)" stroke={color} strokeWidth="1.5" />
-              <rect x={x} y={y} width={NODE_W} height={4} rx={3} fill={color} />
-              <text x={x + NODE_W / 2} y={y + 18} textAnchor="middle"
-                fill={color} fontSize="9" fontWeight="600" fontFamily="monospace">
-                {f.severity.toUpperCase()}
-              </text>
-              <foreignObject x={x + 6} y={y + 22} width={NODE_W - 12} height={NODE_H - 26}>
-                <div xmlns="http://www.w3.org/1999/xhtml"
-                  style={{ fontSize: 10, color: "var(--text-primary)", lineHeight: 1.3,
-                    overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2,
-                    WebkitBoxOrient: "vertical" }}>
-                  {f.title}
+      {/* ── Finding detail modal ───────────────────────────────────────── */}
+      {/* ── Inline approval modal ──────────────────────────────────────── */}
+      {showApprovalModal && (
+        <div className={styles.modalOverlay} onClick={() => setShowApprovalModal(false)}>
+          <div className={styles.findingModal} style={{ maxWidth: 620 }} onClick={e => e.stopPropagation()}>
+            <div className={styles.findingModalHdr}>
+              <div className={styles.findingModalTitle}>⚠ Pending Approvals</div>
+              <button className={styles.drawerClose} onClick={() => setShowApprovalModal(false)}><X size={14} /></button>
+            </div>
+            {pendingApprovals.length === 0 ? (
+              <div className={styles.findingModalSection} style={{ color: "var(--text-muted)", fontSize: 12 }}>
+                No pending approvals found.
+              </div>
+            ) : pendingApprovals.map(appr => (
+              <div key={appr.id} className={styles.findingModalSection}>
+                <div className={styles.findingModalSectionLabel}>{appr.tool_name}</div>
+                <code style={{ display: "block", fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--text-primary)", background: "var(--bg-card)", padding: "6px 8px", borderRadius: 4, wordBreak: "break-all", marginBottom: 6 }}>
+                  {appr.command}
+                </code>
+                {appr.reasoning && (
+                  <p style={{ fontSize: 11, color: "var(--text-muted)", margin: "0 0 8px" }}>{appr.reasoning}</p>
+                )}
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button className="btn btn-primary" style={{ fontSize: 11, padding: "4px 12px" }} onClick={async () => {
+                    await api.approvals.approve(appr.id);
+                    setPendingApprovals(prev => prev.filter(a => a.id !== appr.id));
+                    api.campaigns.get(campaign.id).then(setCampaign);
+                    if (pendingApprovals.length <= 1) setShowApprovalModal(false);
+                  }}>Approve</button>
+                  <button className="btn btn-ghost" style={{ fontSize: 11, padding: "4px 12px" }} onClick={async () => {
+                    await api.approvals.reject(appr.id);
+                    setPendingApprovals(prev => prev.filter(a => a.id !== appr.id));
+                    api.campaigns.get(campaign.id).then(setCampaign);
+                    if (pendingApprovals.length <= 1) setShowApprovalModal(false);
+                  }}>Reject</button>
                 </div>
-              </foreignObject>
-            </g>
-          );
-        })}
-      </svg>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Attack chain modal ─────────────────────────────────────────── */}
+      {showChainModal && (
+        <div className={styles.modalOverlay} onClick={() => setShowChainModal(false)}>
+          <div className={styles.chainModal} onClick={e => e.stopPropagation()}>
+            <div className={styles.chainModalHdr}>
+              <span className={styles.chainModalTitle}>Attack Chain</span>
+              <span className={styles.chainModalSub}>{(session.findings||[]).length} finding{(session.findings||[]).length !== 1 ? "s" : ""}</span>
+              <button className={styles.drawerClose} onClick={() => setShowChainModal(false)}><X size={14} /></button>
+            </div>
+            <div className={styles.chainModalBody}>
+              <AttackChainView
+                findings={session.findings||[]}
+                onNodeClick={(f) => { setSelectedFinding(f); }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Finding detail modal (rendered last so it stacks above chain modal) */}
+      {selectedFinding && (() => {
+        const f = selectedFinding;
+        const parentFinding = f.chains_from_id
+          ? (session.findings||[]).find(p => p.id === f.chains_from_id)
+          : null;
+        const specRole = (f.evidence_run_ids||[])[0] ? specRoleForRun((f.evidence_run_ids||[])[0]) : null;
+        return (
+          <div className={styles.modalOverlayTop} onClick={() => setSelectedFinding(null)}>
+            <div className={styles.findingModal} onClick={e => e.stopPropagation()}>
+              <div className={styles.findingModalHdr}>
+                <div className={styles.findingModalTitle}>
+                  <span className={`badge badge-${f.severity}`}>{f.severity}</span>
+                  <span>{f.title}</span>
+                </div>
+                <button className={styles.drawerClose} onClick={() => setSelectedFinding(null)}><X size={14} /></button>
+              </div>
+              {specRole && (
+                <div className={styles.findingModalMeta}>
+                  <span className={styles.findingModalMetaLabel}>discovered by</span>
+                  <span className={styles.findingModalMetaVal}>{specRole}</span>
+                </div>
+              )}
+              {parentFinding && (
+                <div className={styles.findingModalMeta}>
+                  <span className={styles.findingModalMetaLabel}>chains from</span>
+                  <span className={`${styles.findingModalMetaVal} ${styles.findingModalChain}`}
+                    onClick={() => setSelectedFinding(parentFinding)}>
+                    ↳ {parentFinding.title}
+                  </span>
+                </div>
+              )}
+              {f.notes && (
+                <div className={styles.findingModalSection}>
+                  <div className={styles.findingModalSectionLabel}>Notes</div>
+                  <p className={styles.findingModalNotes}>{f.notes}</p>
+                </div>
+              )}
+              {(f.evidence_run_ids||[]).length > 0 && (
+                <div className={styles.findingModalSection}>
+                  <div className={styles.findingModalSectionLabel}>Evidence</div>
+                  {(f.evidence_run_ids||[]).map(rid => {
+                    const er = runsById[rid];
+                    if (!er) return null;
+                    return (
+                      <div key={rid}
+                        className={`${styles.feedRunRow} ${selectedRunId === rid ? styles.feedRunRowActive : ""}`}
+                        onClick={() => { setSelectedRunId(rid); setSelectedFinding(null); }}>
+                        <span className={styles.feedRunTool}>{er.tool_name}</span>
+                        <span className={styles.feedRunCmd}>{er.command}</span>
+                        <span className={er.status === "complete" ? styles.feedRunOk : styles.feedRunErr}>
+                          {er.status === "complete" ? "✓" : "✗"}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Artifact detail modal ───────────────────────────────────────── */}
+      {selectedArtifact && (() => {
+        const { section, label, value } = selectedArtifact;
+        return (
+          <div className={styles.modalOverlay} onClick={() => setSelectedArtifact(null)}>
+            <div className={styles.findingModal} onClick={e => e.stopPropagation()}>
+              <div className={styles.findingModalHdr}>
+                <div className={styles.findingModalTitle}>
+                  <span className={styles.artModalSection}>{section}</span>
+                  {label && <span>{label}</span>}
+                </div>
+                <button className={styles.drawerClose} onClick={() => setSelectedArtifact(null)}><X size={14} /></button>
+              </div>
+              <div className={styles.findingModalSection}>
+                <div className={styles.findingModalSectionLabel}>Value</div>
+                <p className={styles.artModalValue}>{value}</p>
+                <button className={styles.artModalCopyBtn} onClick={copyArtifactValue}>
+                  {copiedArtifact ? <Check size={12} /> : <Copy size={12} />}
+                  {copiedArtifact ? "Copied" : "Copy"}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Tool output drawer ─────────────────────────────────────────── */}
+      {selectedRunId && (() => {
+        const dr = (runsById || {})[selectedRunId];
+        if (!dr) return null;
+        const drOutput = liveOutput[selectedRunId] || dr.output || "";
+        const drIsLive = Boolean(streaming[selectedRunId]);
+        return (
+          <>
+            <div className={styles.drawerBackdrop} onClick={() => setSelectedRunId(null)} />
+            <div className={styles.outputDrawer}>
+              <div className={styles.drawerHeader}>
+                <div className={styles.drawerHeaderMeta}>
+                  <span className={styles.drawerTool}>{dr.tool_name}</span>
+                  {drIsLive && <span className={styles.drawerLivePill}>● live</span>}
+                  {dr.status === "complete" && <span className={styles.drawerOkPill}>✓ done</span>}
+                  {dr.status === "error" && <span className={styles.drawerErrPill}>✗ error</span>}
+                </div>
+                <button className={styles.drawerClose} onClick={() => setSelectedRunId(null)}>✕</button>
+              </div>
+              {dr.command && (
+                <div className={styles.drawerCmd}>{dr.command}</div>
+              )}
+              {dr.reasoning && (
+                <div className={styles.drawerReasoning}>
+                  <div className={styles.drawerReasoningLabel}>reasoning</div>
+                  <p className={styles.drawerReasoningText}>{dr.reasoning}</p>
+                </div>
+              )}
+              <div className={styles.drawerBody} ref={drawerScrollRef}>
+                {drOutput ? (
+                  <pre className={styles.drawerOutput}>{drOutput}</pre>
+                ) : (
+                  <p className={styles.drawerEmpty}>No output captured yet.</p>
+                )}
+              </div>
+            </div>
+          </>
+        );
+      })()}
     </div>
   );
 }
+

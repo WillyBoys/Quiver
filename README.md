@@ -61,7 +61,9 @@ All pentest tools and dependencies are bundled in the Docker image. 65 tools are
 
 **Manual Sessions** — you pick the tools, set parameters, and execute. Real-time CLI output streams to the browser. Every run is logged and can be attached as evidence to a finding. Best for point-in-time engagements and hands-on client work.
 
-**Autonomous AI Campaigns** — create a campaign with a target and let the AI agent take over. It runs a ReAct loop — choosing the next tool based on prior results, executing it, reading output, and iterating — until the engagement is complete. Best for recurring assessments and initial enumeration before a manual deep dive.
+**Autonomous AI Campaigns** — create a campaign with a target and let the AI agent take over. By default it runs a single-agent ReAct loop — choosing the next tool based on prior results, executing it, reading output, and iterating — until the engagement is complete. Best for recurring assessments and initial enumeration before a manual deep dive.
+
+**Multi-Agent Pipeline** — an alternative mode toggled at campaign creation. Instead of one sequential agent, the engagement runs as phases (Recon → Discovery → Enumeration → Exploitation) of parallel specialist agents, with an AI synthesis step between phases turning findings into specific attack-chain directives for the next phase. A Python state machine — not an LLM — handles phase gating and advancement. Available for External and Internal tracks; see [FEATURES.md](FEATURES.md#multi-agent-pipeline-mode).
 
 Both modes run simultaneously. An AI campaign against one target does not block manual work in another session.
 

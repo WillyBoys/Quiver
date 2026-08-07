@@ -24,7 +24,7 @@ class WordlistCreate(BaseModel):
 
 async def _walk_wordlists(well_known_paths: list, custom_dir: str) -> list:
     """Walk wordlist directories off the event loop to avoid blocking on large SecLists installs."""
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
 
     def _sync_walk() -> list:
         wordlists = []

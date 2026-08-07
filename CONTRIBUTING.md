@@ -60,8 +60,9 @@ If you're contributing a new built-in tool, also update `backend/app/db/seed.py`
 
 - Keep PRs focused — one logical change per PR
 - Describe what the change does and why in the PR description
-- If your change touches the agent loop (`backend/app/agent/`), include a brief note on how you tested it
+- If your change touches the agent loop (`backend/app/agent/engine.py`) or the multi-agent pipeline orchestrator (`backend/app/agent/pipeline.py`, `pipeline_config.py`), include a brief note on how you tested it
 - All changes must pass a clean `docker-compose up --build`
+- If your change touches `backend/app/agent/` or `backend/app/db/`, run the test suite in `backend/tests/` (install once with `pip install -r requirements-dev.txt` inside the container, then `python3 -m pytest tests/ -v`) and add a test for any bug fix where practical — this is how the pipeline pause/resume regression and a destructive migration bug were caught
 
 ---
 

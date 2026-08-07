@@ -25,6 +25,7 @@ class CampaignCreate(BaseModel):
     engagement_type: str = "external"
     session_id: Optional[str] = None
     max_iterations: Optional[int] = None  # None = unlimited
+    pipeline_mode: str = "single"  # "single" | "pipeline"
 
 
 class CampaignUpdate(BaseModel):
@@ -37,6 +38,7 @@ class CampaignUpdate(BaseModel):
     engagement_type: Optional[str] = None
     status: Optional[str] = None
     max_iterations: Optional[int] = None
+    pipeline_mode: Optional[str] = None
 
 
 @router.get("/")
@@ -63,6 +65,7 @@ async def create_campaign(body: CampaignCreate, db: AsyncSession = Depends(get_d
         engagement_type=body.engagement_type or "external",
         session_id=body.session_id or None,
         max_iterations=body.max_iterations if body.max_iterations and body.max_iterations > 0 else None,
+        pipeline_mode=body.pipeline_mode or "single",
     )
     db.add(campaign)
     await db.commit()
@@ -96,10 +99,22 @@ async def update_campaign(campaign_id: str, body: CampaignUpdate, db: AsyncSessi
         campaign.status = body.status
         if body.status == "paused":
             remove_campaign_job(campaign_id)
+            # Cascade pause to any active specialist campaigns spawned by this pipeline
+            if campaign.pipeline_mode == "pipeline":
+                spec_result = await db.execute(
+                    select(Campaign)
+                    .where(Campaign.session_id == campaign.session_id)
+                    .where(Campaign.description.like("pipeline_run:%"))
+                    .where(Campaign.status == "active")
+                )
+                for spec in spec_result.scalars().all():
+                    spec.status = "paused"
         elif body.status == "active" and campaign.schedule:
             add_campaign_job(campaign_id, campaign.schedule)
     if body.max_iterations is not None:
         campaign.max_iterations = body.max_iterations if body.max_iterations > 0 else None
+    if body.pipeline_mode is not None:
+        campaign.pipeline_mode = body.pipeline_mode
 
     if campaign.schedule and campaign.schedule != old_schedule:
         add_campaign_job(campaign_id, campaign.schedule)
@@ -132,7 +147,13 @@ async def trigger_campaign(
     if campaign.status not in ("active", "awaiting_approval"):
         campaign.status = "active"
         await db.commit()
-    background_tasks.add_task(run_campaign_loop, campaign_id)
+    # Pipeline specialists need their role prompt re-injected and exit report / pipeline
+    # auto-advance handling — route through run_specialist_from_db instead of the raw loop.
+    if (campaign.description or "").startswith("pipeline_run:"):
+        from app.agent.pipeline import run_specialist_from_db
+        background_tasks.add_task(run_specialist_from_db, campaign_id)
+    else:
+        background_tasks.add_task(run_campaign_loop, campaign_id)
     logger.info("CAMPAIGN RUN | id=%s triggered manually", campaign_id)
     return {"message": "Agent loop triggered", "campaign_id": campaign_id}
 
@@ -174,4 +195,5 @@ def _dict(c: Campaign) -> dict:
         "updated_at": c.updated_at.isoformat(),
         "last_run_at": c.last_run_at.isoformat() if c.last_run_at else None,
         "max_iterations": c.max_iterations,
+        "pipeline_mode": c.pipeline_mode or "single",
     }

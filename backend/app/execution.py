@@ -1,4 +1,5 @@
 import logging
+import re
 import time as _time
 import asyncio
 import os
@@ -12,6 +13,18 @@ logger = logging.getLogger(__name__)
 _running_processes: dict = {}
 _run_buffers: dict[str, list[str]] = {}
 _run_done_events: dict[str, asyncio.Event] = {}
+# Artifact write lock shared with engine.py (_save_inline_artifact) via import
+_artifact_locks: dict[str, asyncio.Lock] = {}
+
+
+def _flag_stem(tok: str) -> str:
+    """Return the leading flag name, stripping value suffixes.
+
+    Examples: '-p-' → '-p', '--output=file' → '--output', '-sV' → '-sV'.
+    Used so that '-p 80,443' in extra_flags suppresses '-p-' in default_flags.
+    """
+    m = re.match(r'^(-{1,2}[a-zA-Z][a-zA-Z0-9]*)', tok)
+    return m.group(1) if m else tok
 
 
 def build_command(tool, param_values: dict, extra_flags: str = "") -> list[str]:
@@ -24,12 +37,14 @@ def build_command(tool, param_values: dict, extra_flags: str = "") -> list[str]:
     parts = [tool.binary]
 
     # Collect flags already present in extra_flags — extra_flags wins over defaults.
+    # Store both the exact token AND its stem so '-p 80,443' suppresses '-p-' in defaults.
     extra_flag_tokens: set[str] = set()
     if extra_flags:
         try:
             for tok in shlex.split(extra_flags):
                 if tok.startswith("-"):
                     extra_flag_tokens.add(tok)
+                    extra_flag_tokens.add(_flag_stem(tok))
         except ValueError:
             pass
 
@@ -39,8 +54,8 @@ def build_command(tool, param_values: dict, extra_flags: str = "") -> list[str]:
         except ValueError:
             default_tokens = [tool.default_flags]
         for tok in default_tokens:
-            if tok.startswith("-") and tok in extra_flag_tokens:
-                continue  # extra_flags already supplies this flag
+            if tok.startswith("-") and (tok in extra_flag_tokens or _flag_stem(tok) in extra_flag_tokens):
+                continue  # extra_flags already supplies this flag or its stem
             parts.append(tok)
 
     for param in tool.parameters:
@@ -49,7 +64,7 @@ def build_command(tool, param_values: dict, extra_flags: str = "") -> list[str]:
         value = param_values.get(name, "")
         if not value:
             continue
-        if flag and flag in extra_flag_tokens:
+        if flag and (flag in extra_flag_tokens or _flag_stem(flag) in extra_flag_tokens):
             continue  # already supplied in extra_flags
         if flag:
             parts.append(flag)
@@ -257,17 +272,20 @@ async def _extract_john_creds(session_id: str, cmd_list: list[str]) -> None:
 
     logger.info("JOHN POST | session=%s | %d cracked password(s) found", session_id, len(cracked))
 
-    async with AsyncSessionLocal() as db:
-        result = await db.execute(select(Session).where(Session.id == session_id))
-        session = result.scalar_one_or_none()
-        if not session:
-            return
-        current = dict(session.artifacts or {})
-        creds = dict(current.get("creds", {}))
-        for username, password in cracked:
-            creds[username] = password
-        current["creds"] = creds
-        session.artifacts = current
-        flag_modified(session, "artifacts")
-        await db.commit()
-        logger.info("JOHN POST | session=%s | wrote %d cred(s) to artifacts", session_id, len(cracked))
+    if session_id not in _artifact_locks:
+        _artifact_locks[session_id] = asyncio.Lock()
+    async with _artifact_locks[session_id]:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(select(Session).where(Session.id == session_id))
+            session = result.scalar_one_or_none()
+            if not session:
+                return
+            current = dict(session.artifacts or {})
+            creds = dict(current.get("creds", {}))
+            for username, password in cracked:
+                creds[username] = password
+            current["creds"] = creds
+            session.artifacts = current
+            flag_modified(session, "artifacts")
+            await db.commit()
+            logger.info("JOHN POST | session=%s | wrote %d cred(s) to artifacts", session_id, len(cracked))

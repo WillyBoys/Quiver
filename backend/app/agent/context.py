@@ -1,13 +1,15 @@
 import ipaddress
 import logging
 import re
+import shlex
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, or_
 from app.models.run import Run
 from app.models.tool import Tool
 from app.models.campaign import Campaign
 from app.models.session import Session as EngagementSession
 from app.constants import TARGET_PARAM_NAMES
+from app.agent.roles import _specialist_role_prompts
 
 logger = logging.getLogger(__name__)
 
@@ -18,10 +20,12 @@ METHODOLOGY = {
     "external": """\
 Follow these phases IN ORDER. Use HISTORY and ARTIFACTS to determine your current phase.
 ALWAYS save discovered hosts, subdomains, credentials, and technology notes to ARTIFACTS — they persist across iterations and are your memory for chaining attacks.
+Select tools from TOOLS AVAILABLE that match each task — the list reflects what is actually installed.
 
 Phase 1 — Passive Recon & OSINT
-  Enumerate subdomains (bbot, dnsrecon), DNS records, and certificate transparency logs.
+  Enumerate subdomains, DNS records, and certificate transparency logs without touching the target directly.
   Identify ASN/CIDR ranges, technologies, and any exposed credentials or sensitive info.
+  Check for exposed secrets in public cloud storage and code repositories.
   Save every confirmed live subdomain and IP as a host artifact.
   Save domain, technology stack, and ASN context as note artifacts.
   Save any leaked credentials or API keys to ARTIFACTS immediately — credential chaining starts here.
@@ -33,16 +37,16 @@ Phase 2 — Active Service Discovery
   Save notable service versions and technology stack identifiers as note artifacts — they drive Phase 4 vuln selection.
 
 Phase 3 — Web Application Discovery (requires at least one host in ARTIFACTS)
-  Enumerate vhosts, directories (gobuster/ffuf/feroxbuster), detect web tech stack (whatweb/wafw00f).
+  Enumerate virtual hosts, directories, and files. Fingerprint the web technology stack and frameworks.
   Find login panels, admin interfaces, API endpoints, and exposed files (robots.txt, .env, .git, backup files).
   Save any newly discovered hosts or subdomains found during web enumeration to ARTIFACTS.
   Save credentials, API keys, or secrets found in exposed files to ARTIFACTS immediately.
 
 Phase 4 — Vulnerability Identification (requires hosts in ARTIFACTS)
-  Run nuclei templates against all hosts in ARTIFACTS.
-  Cross-reference service versions from ARTIFACTS notes against known CVEs (sslscan, exploitdb).
+  Run template-based vulnerability scans against all hosts in ARTIFACTS — prefer version-specific templates when service versions are known.
+  Cross-reference service versions from ARTIFACTS against known CVEs and exploit databases.
   Test default credentials on all identified services — save any successful login to ARTIFACTS as a cred artifact.
-  Check for secrets in source repositories and cloud storage (trufflehog, cloud_enum).
+  Check TLS configuration on HTTPS hosts for weak ciphers, outdated protocols, and certificate issues.
 
 Phase 5 — Exploitation & Validation (requires findings logged or credentials in ARTIFACTS)
   Exploit confirmed vulnerabilities with minimal-impact PoC (do not cause outages or data loss).
@@ -59,6 +63,7 @@ Phase 6 — Post-Exploitation (requires credentials or foothold in ARTIFACTS)
     "internal": """\
 Follow these phases IN ORDER. Use HISTORY and ARTIFACTS to determine your current phase.
 ALWAYS save discovered usernames, hashes, creds, hosts, and SPNs to ARTIFACTS — they persist across iterations and are your memory for chaining attacks.
+Select tools from TOOLS AVAILABLE that match each task — the list reflects what is actually installed.
 
 Phase 1 — Network Discovery
   Sweep all subnets in SCOPE to identify live hosts. Full TCP port scan of discovered hosts.
@@ -70,17 +75,18 @@ Phase 2 — AD & Service Enumeration
   Start with null/anonymous sessions — many environments leak user lists, password policy, and share listings without credentials.
   Hunt SMB shares on every live host — scripts, configs, and Group Policy Preferences (GPP) files in SYSVOL frequently contain plaintext credentials.
   Enumerate domain users via Kerberos (no lockout risk) or SID brute-force if no wordlist is available.
+  Collect AD graph data to map attack paths and object control relationships.
   With valid credentials: dump LDAP objects, check LAPS passwords, retrieve SYSVOL contents.
   Save every discovered username and SPN to ARTIFACTS — they unlock Phase 3.
 
 Phase 3 — Credential Access (requires at least one user in ARTIFACTS)
   AS-REP roasting: request hashes for accounts with pre-authentication disabled — no credentials needed.
   Kerberoasting: request TGS tickets for SPN accounts — needs any valid domain credential.
-  Write hash output files to SESSION OUTPUT DIR so john can crack them; save cracked credentials to ARTIFACTS.
+  Write hash output files to SESSION OUTPUT DIR and crack them offline; save cracked credentials to ARTIFACTS.
   Secretsdump: if any credentials exist in ARTIFACTS, this is often the highest-yield move — dumps SAM, LSA secrets, and with the right rights: all NTDS hashes via DCSync.
   GPP/SYSVOL: check NETLOGON and SYSVOL shares for XML, batch, and ini files containing embedded credentials.
   Password spraying: last resort — check lockout policy from ARTIFACTS first and stay well under the threshold.
-  SMB signing: if signing is disabled across hosts, flag for NTLM relay. Responder and ntlmrelayx require manual execution from a host on the target subnet.
+  SMB signing: if signing is disabled across hosts, flag for NTLM relay.
 
 Phase 4 — Lateral Movement (requires credentials or hashes in ARTIFACTS)
   Validate credentials across all discovered hosts before attempting access.
@@ -89,21 +95,22 @@ Phase 4 — Lateral Movement (requires credentials or hashes in ARTIFACTS)
   Save any newly discovered credentials, hashes, or privileged access to ARTIFACTS.
 
 Phase 5 — Privilege Escalation
-  BloodHound maps the full AD attack graph — look for paths to Domain Admin via ACL abuse, group membership, or object control (WriteDACL, GenericAll, GenericWrite).
-  ADCS: enumerate certificate templates for misconfigurations (ESC1-8) — a vulnerable template can yield Domain Admin equivalent without touching credentials.
-  Delegation: unconstrained delegation on any host is a significant escalation path; constrained delegation may allow impersonation to specific services.
+  Review AD graph attack paths for routes to Domain Admin via ACL abuse, group membership, or object control (WriteDACL, GenericAll, GenericWrite).
+  Enumerate certificate templates for misconfigurations (ESC1-8) — a vulnerable template can yield Domain Admin equivalent.
+  Unconstrained delegation on any host is a significant escalation path; constrained delegation may allow impersonation to specific services.
   If any account has DS-Replication rights, DCSync to dump all domain hashes directly.
 
 Phase 6 — Domain Dominance
-  Achieve Domain Admin. Dump NTDS.dit via DCSync to capture all domain hashes.
+  Achieve Domain Admin. Dump all domain hashes via DCSync or NTDS.dit extraction.
   Document the full attack chain: initial access → enumeration → credential → lateral → DA.
   Save DA credentials to ARTIFACTS.""",
 
     "web": """\
 Follow OWASP Top 10 phases IN ORDER. Use HISTORY to determine current phase, then act accordingly.
+Select tools from TOOLS AVAILABLE that match each task — the list reflects what is actually installed.
 
 Phase 1 — Recon & Discovery (OWASP A05)
-  Directory/endpoint brute-force (gobuster/ffuf). Fingerprint tech stack and frameworks.
+  Enumerate directories, endpoints, and files via fuzzing. Fingerprint the tech stack and frameworks.
   Check robots.txt, sitemap, .git, .env, backup files. Find admin panels and API docs.
 
 Phase 2 — Authentication Testing (OWASP A07)
@@ -111,7 +118,7 @@ Phase 2 — Authentication Testing (OWASP A07)
   Password reset flaws, username enumeration via timing/response. MFA bypass techniques.
 
 Phase 3 — Injection & Input Validation (OWASP A03)
-  SQL injection in all inputs, headers, cookies — manual probes then sqlmap.
+  SQL injection in all inputs, headers, cookies — manual probes then automated confirmation.
   Command injection, SSTI (Jinja2/Twig), XPath, LDAP injection.
   Path traversal (../), file inclusion (LFI/RFI), XXE in XML endpoints.
 
@@ -135,7 +142,7 @@ Phase 7 — API Testing (OWASP A09)
 
 Phase 8 — Misconfigurations & Outdated Components (OWASP A05, A06)
   Security headers: CSP, HSTS, X-Frame-Options, Referrer-Policy. CORS wildcard origins.
-  TLS: SSLv3/TLS 1.0/weak ciphers. Outdated component CVEs (nuclei templates).
+  TLS: outdated protocols and weak ciphers. Outdated component CVEs.
   Exposed error messages, stack traces, debug endpoints, server version headers.""",
 }
 
@@ -172,15 +179,36 @@ def _primary_target(scope: list[str], kind: str) -> str:
 
 
 async def build_agent_prompt(campaign: Campaign, db: AsyncSession) -> str:
+    # Pipeline specialists share a session with sibling campaigns — scope their
+    # history strictly to their own campaign so they don't reason over each other's runs.
+    # Single-agent campaigns include NULL campaign_id runs for backward compatibility.
+    is_pipeline_specialist = bool(
+        campaign.session_id and (campaign.description or "").startswith("pipeline_run:")
+    )
+    max_runs = 20 if is_pipeline_specialist else MAX_RUNS
+    max_output = 1000 if is_pipeline_specialist else MAX_OUTPUT_PER_RUN
+
     runs = []
     if campaign.session_id:
-        result = await db.execute(
-            select(Run)
-            .where(Run.session_id == campaign.session_id)
-            .where(Run.status.in_(["complete", "error"]))
-            .order_by(Run.created_at.desc())
-            .limit(MAX_RUNS)
-        )
+        if is_pipeline_specialist:
+            history_q = (
+                select(Run)
+                .where(Run.session_id == campaign.session_id)
+                .where(Run.campaign_id == campaign.id)
+                .where(Run.status.in_(["complete", "error"]))
+                .order_by(Run.created_at.desc())
+                .limit(max_runs)
+            )
+        else:
+            history_q = (
+                select(Run)
+                .where(Run.session_id == campaign.session_id)
+                .where(or_(Run.campaign_id == None, Run.campaign_id == campaign.id))
+                .where(Run.status.in_(["complete", "error"]))
+                .order_by(Run.created_at.desc())
+                .limit(max_runs)
+            )
+        result = await db.execute(history_q)
         runs = list(reversed(result.scalars().all()))
 
     # Resolve engagement type from the linked session
@@ -235,17 +263,25 @@ async def build_agent_prompt(campaign: Campaign, db: AsyncSession) -> str:
     tool_lines = []
     for binary in ordered_binaries:
         t = tool_map[binary]
-        target_param = next(
-            (p for p in (t.parameters or []) if p.get("name") in TARGET_PARAM_NAMES),
-            None,
-        )
         extra_required = [
             p for p in (t.parameters or [])
             if p.get("name") not in TARGET_PARAM_NAMES and p.get("required")
         ]
+        # Build an example command using each parameter's placeholder so the LLM
+        # can see exactly what default_flags and parameters are already handled.
+        # This prevents the LLM from re-adding flags the tool definition already provides.
+        example_params: dict = {}
+        for p in (t.parameters or []):
+            ph = p.get("placeholder", "")
+            if ph:
+                example_params[p["name"]] = ph
+        try:
+            from app.execution import build_command as _bc
+            example_cmd = " ".join(_bc(t, example_params, extra_flags=""))
+        except Exception:
+            example_cmd = binary
         parts = [f"  - {binary}: {t.description or t.name}"]
-        if target_param:
-            parts.append(f"target={target_param.get('placeholder', primary)!r}")
+        parts.append(f"example: {example_cmd}")
         for p in extra_required:
             parts.append(f"{p['name']}={p.get('placeholder', '...')!r}")
         tool_lines.append(" | ".join(parts))
@@ -255,15 +291,18 @@ async def build_agent_prompt(campaign: Campaign, db: AsyncSession) -> str:
     action_lines = []
     already_run_commands: list[str] = []
     for run in runs:
-        out = (run.output or "")[:MAX_OUTPUT_PER_RUN]
-        if len(run.output or "") > MAX_OUTPUT_PER_RUN:
+        out = (run.output or "")[:max_output]
+        if len(run.output or "") > max_output:
             out += "..."
         action_lines.append(
             f"  [{run.tool_name}] {run.command}\n"
             f"  Status: {run.status}\n"
             f"  Output: {out or '(no output)'}\n"
         )
-        if run.command:
+        # Dedup list is campaign-scoped: parallel pipeline specialists each track their
+        # own history so they don't block each other. Old runs (campaign_id=None) are
+        # included for backward compatibility with pre-campaign_id data.
+        if run.command and (run.campaign_id is None or run.campaign_id == campaign.id):
             already_run_commands.append(f"  - {run.command}")
 
     actions_str = "\n".join(action_lines) or "  (none yet)"
@@ -297,6 +336,10 @@ async def build_agent_prompt(campaign: Campaign, db: AsyncSession) -> str:
         artifacts_lines.append("  Users: " + ", ".join(raw_artifacts["users"]))
     if raw_artifacts.get("spns"):
         artifacts_lines.append("  SPNs: " + ", ".join(raw_artifacts["spns"]))
+    for host, svcs in (raw_artifacts.get("services") or {}).items():
+        artifacts_lines.append(f"  Services  {host}: {', '.join(svcs)}")
+    for host, techs in (raw_artifacts.get("tech") or {}).items():
+        artifacts_lines.append(f"  Tech  {host}: {', '.join(techs)}")
     for user, h in (raw_artifacts.get("hashes") or {}).items():
         artifacts_lines.append(f"  Hash  {user}: {h}")
     for user, pw in (raw_artifacts.get("creds") or {}).items():
@@ -352,15 +395,24 @@ async def build_agent_prompt(campaign: Campaign, db: AsyncSession) -> str:
         if initial_context_str else ""
     )
 
-    return f"""You are a penetration tester AI. Choose the single best NEXT action against the target scope.
+    # Pipeline specialists have a precise role_prompt that already defines their lane.
+    # Injecting the full multi-phase methodology creates conflicting instructions.
+    if is_pipeline_specialist:
+        methodology_block = ""
+    else:
+        methodology_block = (
+            f"\nENGAGEMENT METHODOLOGY ({eng_label} — follow phases in order):\n{methodology_str}\n"
+        )
+
+    role_prefix = _specialist_role_prompts.get(campaign.id, "") or (campaign.role_prompt or "")
+    intro_line = role_prefix if role_prefix else "You are a penetration tester AI. Choose the single best NEXT action against the target scope."
+
+    return f"""{intro_line}
 
 SCOPE (test all entries — work through each systematically):
 {scope_str}
 SESSION OUTPUT DIR (write all tool output files here — use this path for -outputfile flags and any file redirects): {data_dir}/
-{context_section}
-ENGAGEMENT METHODOLOGY ({eng_label} — follow phases in order):
-{methodology_str}
-
+{context_section}{methodology_block}
 TOOLS AVAILABLE (use binary name as tool_name):
 {tools_str}
 
@@ -398,11 +450,11 @@ RULES (follow all):
 - tool_name MUST be one of the binaries listed in TOOLS AVAILABLE above
 - target must be one of the SCOPE entries above, or a specific discovered host/IP/endpoint found during enumeration
 - DO NOT use any command listed in COMMANDS ALREADY RUN
-- extra_flags: optional string of additional CLI flags to append; leave empty string if not needed
+- extra_flags: ADDITIONAL flags only — the example command shown for each tool is already built from its defaults and parameters. Do NOT re-add flags or positional arguments already present in the example. Leave empty string if not needed.
 - bash special rule: when tool_name is "bash", put the COMPLETE shell command in extra_flags. The bash tool requires human approval and is your escape hatch for custom probes, chained commands, or anything no other tool covers.
 - finding: ONLY include when the CURRENT step's output confirms a real vulnerability. Prefer updating an existing finding (with its id) over creating a near-duplicate.
 - chains_from: optional — only set when the current finding directly depended on a prior finding to be exploitable.
-- artifact: ONLY include when the current step's output reveals something worth storing for later (credentials, hashes, usernames, hosts, SPNs). Types: "user" (value=username), "hash" (user=username, value=full-hash-string), "cred" (user=username, value=plaintext-password), "host" (value="IP description"), "spn" (value=full-SPN-string), "note" (value=domain-level-info). For hash and cred, include a "user" key. Omit artifact if nothing new was found.
+- artifact: ONLY include when the current step's output reveals something worth storing for later. Types: "user" (value=username), "hash" (user=username, value=full-hash-string), "cred" (user=username, value=plaintext-password), "host" (value="IP or hostname description"), "spn" (value=full-SPN-string), "note" (value=domain-level-info), "service" (host="IP or hostname", value="port/proto version — e.g. 22/ssh OpenSSH 8.9"), "tech" (host="IP or hostname or domain", value="framework/version — e.g. Apache 2.4.49"). For hash/cred use a "user" key; for service/tech use a "host" key. Omit artifact if nothing new was found.
 - Reply with exactly one line of JSON, no line breaks inside"""
 
 
@@ -420,6 +472,8 @@ ERROR OUTPUT:
 {error_output[:600]}
 
 TARGET: {primary}
+
+IMPORTANT: extra_flags must contain ONLY additional flags not already in the failed command above. Do NOT repeat flags already present in the failed command — the system will append extra_flags to the reconstructed base command.
 
 If the error reveals a simple fixable mistake (wrong flag, wrong path, missing argument, typo), return:
 {{"retry":true,"thought":"what went wrong and exactly how to fix it","tool_name":"binary","target":"<scope_entry>","parameters":{{}},"extra_flags":"","reasoning":"one sentence"}}

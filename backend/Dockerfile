@@ -32,6 +32,16 @@ RUN curl -fL --retry 3 --retry-delay 2 \
     -o /usr/local/bin/kerbrute && chmod +x /usr/local/bin/kerbrute \
     || echo "WARNING: kerbrute download failed — binary will not be available"
 
+# subfinder — not in Kali apt; download pre-built binary from ProjectDiscovery releases
+RUN VER=$(curl -fsSL "https://api.github.com/repos/projectdiscovery/subfinder/releases/latest" \
+          | grep '"tag_name"' | cut -d'"' -f4 | tr -d 'v') && \
+    curl -fsSL "https://github.com/projectdiscovery/subfinder/releases/download/v${VER}/subfinder_${VER}_linux_amd64.zip" \
+         -o /tmp/subfinder.zip && \
+    unzip -q /tmp/subfinder.zip subfinder -d /usr/local/bin && \
+    chmod +x /usr/local/bin/subfinder && \
+    rm -f /tmp/subfinder.zip \
+    || echo "WARNING: subfinder download failed — binary will not be available"
+
 # SpiSuite — not in Kali; build from source
 RUN curl -L https://go.dev/dl/go1.24.5.linux-amd64.tar.gz | tar xz -C /usr/local && \
     git clone --depth=1 https://github.com/waffl3ss/SpiSuite.git /opt/SpiSuite && \
@@ -41,12 +51,14 @@ RUN curl -L https://go.dev/dl/go1.24.5.linux-amd64.tar.gz | tar xz -C /usr/local
 
 # trufflehog — not in Kali; official install script
 RUN curl -sSfL https://raw.githubusercontent.com/trufflesecurity/trufflehog/main/scripts/install.sh \
-    | sh -s -- -b /usr/local/bin
+    | sh -s -- -b /usr/local/bin && \
+    printf '#!/bin/sh\nexec trufflehog git "$@"\n' \
+        > /usr/local/bin/trufflehog-git && chmod +x /usr/local/bin/trufflehog-git
 
 # cloud_enum — not in Kali
 RUN git clone --depth=1 https://github.com/initstring/cloud_enum /opt/cloud_enum && \
     pip install --no-cache-dir --break-system-packages dnspython requests requests-futures && \
-    printf '#!/bin/sh\nexec python3 /opt/cloud_enum/cloud_enum.py "$@"\n' \
+    printf '#!/bin/sh\nexec /usr/bin/python3 /opt/cloud_enum/cloud_enum.py "$@"\n' \
         > /usr/local/bin/cloud_enum && chmod +x /usr/local/bin/cloud_enum
 
 # nxc protocol wrappers — nxc SMB/LDAP/WinRM/MSSQL/RDP each get their own binary

@@ -139,6 +139,19 @@ DEFAULT_TOOLS = [
         "is_builtin": True,
     },
     {
+        "name": "subfinder",
+        "description": "Fast passive subdomain enumeration using 40+ OSINT sources — lightweight first pass before active DNS brute-forcing",
+        "category": "recon",
+        "binary": "subfinder",
+        "default_flags": "-silent",
+        "parameters": [
+            {"name": "domain", "flag": "-d", "placeholder": "target.com", "required": True, "description": "Target domain"},
+        ],
+        "agent_mode": "passive",
+        "workflow_tags": ["external", "web"],
+        "is_builtin": True,
+    },
+    {
         "name": "Subdominator",
         "description": "Passive subdomain enumeration using 73+ OSINT sources (requires Python 3.13+; add to user-pip.txt to install)",
         "category": "recon",
@@ -600,10 +613,10 @@ DEFAULT_TOOLS = [
     },
     {
         "name": "impacket-getST",
-        "description": "Request a Kerberos service ticket via S4U2Self/S4U2Proxy — enables impersonation under constrained delegation and silver ticket attacks. Use after findDelegation identifies a delegation-enabled account.",
+        "description": "Request a Kerberos service ticket via S4U2Self/S4U2Proxy — enables impersonation under constrained delegation and silver ticket attacks. Use after findDelegation identifies a delegation-enabled account. Requires -spn <SPN> in extra_flags (e.g. -spn cifs/TARGET.domain.local) plus optionally -impersonate <user>.",
         "category": "enum",
         "binary": "impacket-getST",
-        "default_flags": "-spn",
+        "default_flags": "",
         "parameters": [
             {"name": "target", "placeholder": "DOMAIN/user:password", "required": True, "description": "Auth string: DOMAIN/user:pass (or -hashes :NTHASH for pass-the-hash)"},
             {"name": "dc", "flag": "-dc-ip", "placeholder": "10.10.10.1", "required": True, "description": "Domain controller IP"},
@@ -779,7 +792,7 @@ DEFAULT_TOOLS = [
     # ── CLOUD ─────────────────────────────────────────────────────────────────
     {
         "name": "cloud_enum",
-        "description": "Enumerate publicly exposed AWS S3, Azure Blob, and GCP Storage resources for a target",
+        "description": "Enumerate publicly exposed AWS S3, Azure Blob, and GCP Storage resources for a target. Internally tests a large built-in list of name permutations (-prod, -dev, -backup, -assets, etc.) against the keyword in a single run — call it once per distinct name (e.g. once for the company name, once more only if a genuinely different brand/product name applies). Do not re-run it manually varying suffixes; the tool already covers that.",
         "category": "cloud",
         "binary": "cloud_enum",
         "default_flags": "",
@@ -795,8 +808,8 @@ DEFAULT_TOOLS = [
         "name": "trufflehog",
         "description": "Scan git repos for leaked secrets and credentials, with live API validation",
         "category": "secrets",
-        "binary": "trufflehog",
-        "default_flags": "git --only-verified",
+        "binary": "trufflehog-git",
+        "default_flags": "--only-verified",
         "parameters": [
             {"name": "repo", "placeholder": "https://github.com/org/repo", "required": True, "description": "Git repository URL"},
         ],

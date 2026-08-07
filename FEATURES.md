@@ -95,6 +95,36 @@ Use **Approval Mode** for client environments where every action needs sign-off.
 
 ---
 
+## Multi-Agent Pipeline Mode
+
+An alternative to the single sequential campaign: instead of one agent working through tools one at a time, the engagement is split into phases, each run by several focused specialist agents in parallel.
+
+**Choosing a mode:**
+- Set at campaign creation — a **Single Agent / Pipeline** toggle next to the AI provider selector
+- Single Agent runs the classic ReAct loop described above
+- Pipeline runs the phased specialist flow described below
+- Both share the same tools, scope guard, findings layer, and ARTIFACTS store — pipeline mode is a different way of running the same underlying agent loop, not a separate system
+
+**How a pipeline runs:**
+- A Python state machine — not an LLM — advances phases; it checks each phase's gate condition against the session's ARTIFACTS (e.g. "at least one host discovered," "credentials or findings logged") and either runs the phase or skips it with a logged reason
+- Each phase runs several specialist agents concurrently (e.g. Passive Recon runs a subdomain-recon specialist and a secret-hunt specialist side by side); each specialist has a focused role prompt but sees the full tool list and shares the same session state as every other specialist
+- Between phases, a synthesis agent (reasoning only, no tool calls) reviews everything the phase found and produces specific attack-chain directives — not generic advice — which get injected into the next phase's specialist prompts as priority targets
+- A phase that hits its iteration cap without finishing pauses rather than advancing; the pipeline pauses too until it's resumed
+
+**Track availability:**
+- **External** — Passive Recon → Active Discovery → Enumeration → Exploitation
+- **Internal** — Discovery → Enumeration → Credential Access → Lateral Movement
+
+**Mission Control (pipeline session view):**
+- One lane per phase, showing status (running / complete / waiting / skipped / error)
+- Each specialist's live status and iteration count within its lane
+- Gate condition shown on phases still waiting; skip reason shown on skipped phases
+- Synthesis output shown as an expandable chain-directive chip between phases
+- A specialist that paused on its iteration cap gets an inline **Resume** button — only that specialist re-runs, not the whole pipeline
+- Clicking any specialist opens its runs and output, same as a single-agent campaign
+
+---
+
 ## Human Approval Gates
 
 When a tool is in **Approve** mode, the campaign pauses before executing and queues a pending approval:
