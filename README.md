@@ -57,7 +57,7 @@ All pentest tools and dependencies are bundled in the Docker image. 65 tools are
 
 ---
 
-## Two Ways to Work
+## Three Ways to Work
 
 **Manual Sessions** — you pick the tools, set parameters, and execute. Real-time CLI output streams to the browser. Every run is logged and can be attached as evidence to a finding. Best for point-in-time engagements and hands-on client work.
 
