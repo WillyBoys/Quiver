@@ -1,0 +1,47 @@
+[project]
+name = "quiver"
+version = "0.1.0"
+description = "AI-powered continuous penetration testing platform"
+license = "AGPL-3.0-only"
+license-files = ["LICENSE"]
+authors = [
+    { name = "WillyBoys", email = "125172858+WillyBoys@users.noreply.github.com" }
+]
+requires-python = ">=3.12"
+dependencies = []
+
+# Per-service dependencies are added as extras as each service is built
+# (api, worker, bridge), so each container image installs only what it needs.
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "ruff",
+]
+
+[build-system]
+requires = ["uv_build>=0.13.0,<0.14.0"]
+build-backend = "uv_build"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "E", "W",   # pycodestyle
+    "F",        # pyflakes
+    "I",        # import sorting
+    "B",        # bugbear
+    "UP",       # pyupgrade
+    "S",        # bandit (security)
+    "SIM",      # simplify
+    "RUF",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]  # assert is how pytest works
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
