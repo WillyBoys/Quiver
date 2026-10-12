@@ -29,3 +29,6 @@ build/
 
 # Internal AI development context — not for public repo
 CLAUDE_CODE_CONTEXT.md
+
+# Private Claude Code context — not for public repo
+CLAUDE.local.md

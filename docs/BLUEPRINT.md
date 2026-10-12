@@ -11,7 +11,7 @@ Quiver v2 is an **AI-powered continuous penetration testing platform**. It runs 
 **In scope for the proof of concept (PoC):**
 - Single operator, self-hosted via Docker Compose.
 - **External** track only (internet-facing attack surface).
-- Claude as the only LLM, reached through the `claude-bridge` sidecar (OAuth token) or an Anthropic API key.
+- Claude as the only LLM, reached through the `bridge` service with either a Claude Code OAuth token or an Anthropic API key (both supported from the start).
 - A dashboard to watch runs, approve risky actions, steer agents, and triage findings.
 
 **Designed for, but not built in the PoC:**
@@ -69,7 +69,7 @@ Worth carrying forward from v1 as *content*: tool definitions in `backend/app/db
           starts agent  │                       │ tool calls (MCP)
           sessions      │                       │
                 ┌───────▼───────────────────────┴────────┐
-                │      claude-bridge (Node, Agent SDK)   │
+                │   bridge (Python, Claude Agent SDK)    │
                 │ built-in tools disabled; only Quiver's │
                 │ MCP tools are exposed to the agent     │
                 └────────────────────────────────────────┘
@@ -194,8 +194,8 @@ candidate ──validated / operator──▶ confirmed ──same check ran, ne
 
 ## 7. Agents
 
-### 7.1 Runtime: claude-bridge
-The bridge moves from "prompt in, text out" (`claude --print`) to an **agent runtime** built on the Claude Agent SDK (TypeScript):
+### 7.1 Runtime: bridge
+The bridge moves from "prompt in, text out" (`claude --print`) to an **agent runtime** built on the Python Claude Agent SDK. It is code in `src/quiver/bridge/` that shares `core` schemas, but it runs in its **own container** with its own image, so the Claude credential never sits in the worker that processes target output:
 - Built-in tools (Bash, file editing, web access) are **disabled**.
 - The agent's only tools are Quiver's, served by the worker as an **MCP server**.
 - The bridge streams agent events (messages, tool calls, thinking summaries) back to the worker, which writes them to the event log.
@@ -203,7 +203,7 @@ The bridge moves from "prompt in, text out" (`claude --print`) to an **agent run
 - **Approvals never block a tool call.** An approval-gated or deferred tool returns at once with `queued: <approval or job id>`. The agent continues with other work or ends its turn. When the operator decides (or the deferred job runs), the worker resumes the session with the result as a new message.
 - The runtime must not load host or user Claude settings, memory files, or plugins. Its configuration comes only from Quiver.
 
-**Authentication modes:** the bridge accepts either `CLAUDE_CODE_OAUTH_TOKEN` (the PoC default) or `ANTHROPIC_API_KEY`. The worker talks to an `AgentRuntime` interface, so a direct Anthropic SDK implementation can be added later without touching the orchestrator.
+**Authentication modes:** the bridge accepts either `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`. Both paths are built and tested from the start; unattended scheduled runs should prefer the API key. The worker talks to an `AgentRuntime` interface, so a direct Anthropic SDK implementation can be added later without touching the orchestrator.
 
 > Hosting Quiver for other users would change the authentication story. Subscription OAuth is for the PoC only; review Anthropic's terms before any hosted deployment.
 
@@ -302,7 +302,7 @@ Markdown report export from the findings view. DOCX/PDF later.
 | API and worker | Python 3.12, FastAPI, SQLAlchemy 2 (async), Alembic migrations; one Python package (`uv`-managed) built into separate API and worker images |
 | Live updates | Postgres `LISTEN/NOTIFY` → API → SSE |
 | Database | PostgreSQL 16 |
-| Agent runtime | Node 20, Claude Agent SDK, in `claude-bridge` |
+| Agent runtime | Python Claude Agent SDK, in the `bridge` container |
 | Tool protocol | MCP (worker hosts the server; bridge connects to it) |
 | Frontend | React + Vite |
 | Packaging | Docker Compose; Kali-based worker image |
@@ -311,15 +311,15 @@ Markdown report export from the findings view. DOCX/PDF later.
 
 ```
 quiver/
-├── pyproject.toml        # one Python package for core, api, and worker
+├── pyproject.toml        # one Python package for core, api, worker, and bridge
 ├── src/quiver/
 │   ├── core/             # shared models, schemas, identity keys, policy gate
 │   ├── api/              # FastAPI app: routes, auth, SSE event stream
 │   ├── worker/           # orchestrator, scheduler, runner, MCP server
 │   │   └── tracks/
 │   │       └── external/ # entity types, tools, parsers, playbook, phases, roles
+│   ├── bridge/           # agent runtime (own container; holds the Claude credential)
 │   └── migrations/       # Alembic
-├── bridge/               # agent runtime (language: see §16)
 ├── frontend/             # dashboard
 ├── docker/               # api.Dockerfile, worker.Dockerfile (Kali), bridge, frontend
 ├── tests/                # unit, replay fixtures, lab e2e
@@ -345,8 +345,9 @@ The policy gate lives in `core` as pure functions, so it can be tested without t
 
 - Which nuclei template categories count as "validation" (approval) versus "discovery" (auto)? When unsure, a category goes to approval.
 - How long to keep raw job output, and whether to encrypt client data at rest.
-- **Bridge language** (decide before M0): Node with the TypeScript Agent SDK, or a Python agent service using the Python Agent SDK, which would share `core` models. Either way it stays a separate container, so the Claude credential never sits in the worker that processes target output.
-- **Auth path:** whether the API-key path is built and tested from the start, not only OAuth. This matters most for scheduled, unattended runs; review Anthropic's terms for that use.
 - Which third-party provider ranges (CDNs, clouds, SaaS) to ship for the wildcard check in §4.1, and how to keep them updated.
 
-**Resolved:** reconciliation no longer needs "N consecutive misses". `fixed` requires the same check to re-run against a reachable entity and come back negative, and an unreachable entity becomes `stale` (§5.4).
+**Resolved:**
+- Bridge language: Python Agent SDK, in its own container (§7.1).
+- Auth: OAuth token and API key both supported from the start (§7.1). Review Anthropic's terms before relying on the subscription token for unattended runs.
+- Reconciliation no longer needs "N consecutive misses". `fixed` requires the same check to re-run against a reachable entity and come back negative, and an unreachable entity becomes `stale` (§5.4).
