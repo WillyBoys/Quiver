@@ -8,16 +8,25 @@ authors = [
     { name = "WillyBoys", email = "125172858+WillyBoys@users.noreply.github.com" }
 ]
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "alembic>=1.20.0",
+    "asyncpg>=0.32.0",
+    "pydantic-settings>=2.16.0",
+    "sqlalchemy[asyncio]>=2.1.4",
+]
 
 # Per-service dependencies are added as extras as each service is built
 # (api, worker, bridge), so each container image installs only what it needs.
 
 [project.optional-dependencies]
 api = [
+    "argon2-cffi>=25.1.0",
     "fastapi>=0.143.1",
     "uvicorn[standard]>=0.54.0",
 ]
+
+[project.scripts]
+quiver-admin = "quiver.cli:main"
 
 [dependency-groups]
 dev = [
@@ -26,6 +35,8 @@ dev = [
     "httpx2>=2.13.1",
     "pytest",
     "ruff",
+    "pytest-asyncio>=1.4.0",
+    "testcontainers[postgres]>=4.15.0",
 ]
 
 [build-system]
@@ -53,4 +64,7 @@ select = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
 addopts = "-ra --strict-markers"

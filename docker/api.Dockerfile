@@ -17,7 +17,7 @@ RUN uv sync --frozen --no-dev --no-install-project --extra api
 COPY src ./src
 RUN uv sync --frozen --no-dev --no-editable --extra api
 
-RUN useradd --system --uid 10001 --no-create-home quiver
+RUN useradd --uid 10001 --no-create-home --shell /usr/sbin/nologin quiver
 USER quiver
 ENV PATH="/app/.venv/bin:$PATH"
 

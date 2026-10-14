@@ -41,8 +41,31 @@ services:
       retries: 10
     restart: unless-stopped
 
+  # One-shot: applies database migrations, then exits. api and worker wait for it.
+  migrate:
+    <<: *hardened
+    image: quiver-api:local
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    command: ["quiver-admin", "migrate"]
+    restart: "no"
+    environment:
+      QUIVER_DB_HOST: db
+      QUIVER_DB_NAME: quiver
+      QUIVER_DB_USER: quiver
+      QUIVER_DB_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - postgres_password
+    networks:
+      - backend
+    depends_on:
+      db:
+        condition: service_healthy
+
   api:
     <<: *hardened
+    image: quiver-api:local
     build:
       context: .
       dockerfile: docker/api.Dockerfile
@@ -54,14 +77,15 @@ services:
       QUIVER_DB_USER: quiver
       QUIVER_DB_PASSWORD_FILE: /run/secrets/postgres_password
       QUIVER_SECRET_KEY_FILE: /run/secrets/api_secret_key
+      QUIVER_CORS_ORIGINS: '["http://127.0.0.1:${QUIVER_UI_PORT:-3000}", "http://localhost:${QUIVER_UI_PORT:-3000}"]'
     secrets:
       - postgres_password
       - api_secret_key
     networks:
       - backend
     depends_on:
-      db:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
       interval: 10s
@@ -84,8 +108,8 @@ services:
     networks:
       - backend
     depends_on:
-      db:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
   frontend:
     <<: *hardened

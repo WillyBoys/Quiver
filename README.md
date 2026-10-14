@@ -23,9 +23,12 @@ Requires Docker and Python 3 (for the one-time setup script).
 
 ```bash
 python3 scripts/init_secrets.py   # generates local secrets into ./secrets (never committed)
-docker compose up -d --build      # starts db, api, worker, frontend
+docker compose up -d --build      # starts db, runs migrations, then api, worker, frontend
+docker compose exec api quiver-admin set-password   # create your operator login (prompts)
 curl http://127.0.0.1:8000/health
 ```
+
+Run `set-password` again any time to change the password; doing so signs out every existing session.
 
 All ports are bound to `127.0.0.1`. To use Quiver from another machine, use an SSH tunnel; don't expose the ports. To change host ports, copy `.env.example` to `.env`.
 
