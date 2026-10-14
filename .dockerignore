@@ -1,0 +1,15 @@
+# Never send secrets or local state into an image build.
+secrets/
+.env
+.env.*
+data/
+CLAUDE.local.md
+
+.git/
+.venv/
+**/__pycache__/
+.pytest_cache/
+.ruff_cache/
+node_modules/
+tests/
+docs/

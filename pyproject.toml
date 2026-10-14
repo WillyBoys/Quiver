@@ -13,8 +13,17 @@ dependencies = []
 # Per-service dependencies are added as extras as each service is built
 # (api, worker, bridge), so each container image installs only what it needs.
 
+[project.optional-dependencies]
+api = [
+    "fastapi>=0.143.1",
+    "uvicorn[standard]>=0.54.0",
+]
+
 [dependency-groups]
 dev = [
+    # Local development and tests get every service's dependencies.
+    "quiver[api]",
+    "httpx2>=2.13.1",
     "pytest",
     "ruff",
 ]
@@ -40,7 +49,7 @@ select = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101"]  # assert is how pytest works
+"tests/**" = ["S101", "S105", "S106"]  # asserts and fixed test values are expected
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
