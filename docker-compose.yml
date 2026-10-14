@@ -1,0 +1,116 @@
+# Quiver v2 stack. First run:
+#   python3 scripts/init_secrets.py
+#   docker compose up -d --build
+#
+# Every published port is bound to 127.0.0.1. For remote access, use an SSH tunnel;
+# do not change the bind address (Blueprint §11).
+
+name: quiver
+
+# Hardening shared by Quiver's own services.
+x-hardened: &hardened
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  read_only: true
+  tmpfs:
+    - /tmp
+  restart: unless-stopped
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: quiver
+      POSTGRES_USER: quiver
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - postgres_password
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - backend
+    # No published port: only services on the backend network can reach the database.
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U quiver -d quiver"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  api:
+    <<: *hardened
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    ports:
+      - "127.0.0.1:${QUIVER_API_PORT:-8000}:8000"
+    environment:
+      QUIVER_DB_HOST: db
+      QUIVER_DB_NAME: quiver
+      QUIVER_DB_USER: quiver
+      QUIVER_DB_PASSWORD_FILE: /run/secrets/postgres_password
+      QUIVER_SECRET_KEY_FILE: /run/secrets/api_secret_key
+    secrets:
+      - postgres_password
+      - api_secret_key
+    networks:
+      - backend
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  worker:
+    <<: *hardened
+    build:
+      context: .
+      dockerfile: docker/worker.Dockerfile
+    environment:
+      QUIVER_DB_HOST: db
+      QUIVER_DB_NAME: quiver
+      QUIVER_DB_USER: quiver
+      QUIVER_DB_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - postgres_password
+    networks:
+      - backend
+    depends_on:
+      db:
+        condition: service_healthy
+
+  frontend:
+    <<: *hardened
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+    ports:
+      - "127.0.0.1:${QUIVER_UI_PORT:-3000}:8080"
+    # nginx writes its pid and temp files here; everything else stays read-only.
+    tmpfs:
+      - /tmp
+      - /var/cache/nginx
+    networks:
+      - frontend
+
+secrets:
+  # Created by scripts/init_secrets.py. Compose refuses to start if any file is missing.
+  postgres_password:
+    file: ./secrets/postgres_password
+  api_secret_key:
+    file: ./secrets/api_secret_key
+
+volumes:
+  pgdata:
+
+networks:
+  backend:
+  frontend:

@@ -9,7 +9,14 @@ uv sync                              # install deps (Python 3.12, managed by uv)
 uv run pytest                        # tests
 uv run ruff check . && uv run ruff format --check .   # lint + format check
 uvx pre-commit install               # once per clone: gitleaks, ruff, file checks on commit
+
+python3 scripts/init_secrets.py      # once: generate ./secrets (gitignored)
+docker compose up -d --build         # full stack; API on 127.0.0.1:8000, UI on 127.0.0.1:3000
+docker compose logs -f api           # follow a service's logs
+docker compose down                  # stop (add -v to also delete the database volume)
 ```
+
+Service dependencies are extras in `pyproject.toml` (`api`, later `worker` and `bridge`); each image installs only its own. The `dev` group includes every extra, so local tests have everything.
 
 ## Layout
 
@@ -23,6 +30,8 @@ One Python package, `src/quiver/`, built into separate container images per serv
 | `src/quiver/worker/tracks/<track>/` | Per-track entity types, tools, parsers, playbook, phases, roles |
 | `src/quiver/bridge/` | Agent runtime (Claude Agent SDK); its own container |
 | `tests/` | Unit tests, replay fixtures, lab end-to-end |
+| `docker/` | One Dockerfile per service; `docker-compose.yml` at the root |
+| `scripts/init_secrets.py` | Generates secret files under `secrets/` (stdlib only, idempotent) |
 
 ## Invariants — never break these
 
@@ -32,6 +41,8 @@ One Python package, `src/quiver/`, built into separate container images per serv
 - **Deny if definitely wrong, ask if uncertain, allow only if definitely safe.** When a check cannot decide, the gate returns NEEDS_APPROVAL, never ALLOW.
 - **Tool output is untrusted.** It is target-controlled. Label it as data when it is passed to an agent; never let it influence policy decisions.
 - **The LLM never decides identity.** Entity and finding identity comes from deterministic keys (Blueprint §5.3).
+- **Containers stay hardened:** published ports bind to `127.0.0.1` only; services run as non-root with `cap_drop: ALL`, `no-new-privileges`, and a read-only root filesystem; the database publishes no port; no Docker socket is mounted anywhere. A service that needs an exception (e.g. the worker needing `NET_RAW` for raw-socket scans) adds only that capability, with a comment explaining why.
+- **Secrets are files, not environment variables.** They are mounted from `secrets/` as Docker secrets and read via `*_FILE` settings, so they don't appear in `docker inspect`.
 - **Secrets never enter the repo or logs.** Claude credentials live only in the bridge container. Agents refer to credentials by ID, never by value.
 
 ## Conventions
