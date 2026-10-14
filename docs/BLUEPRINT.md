@@ -282,7 +282,7 @@ Markdown report export from the findings view. DOCX/PDF later.
 ## 11. Platform security (even for a single user)
 
 - Ports bound to `127.0.0.1` by default; remote access through an SSH tunnel.
-- A single-user login with a session token on every API route and the event stream.
+- A single-user login with a session token on every API route and the event stream. Passwords are Argon2id; the session token is an HttpOnly, SameSite=Strict cookie, and only its keyed hash (HMAC with the API secret key) is stored. Interactive API docs are off unless enabled for development.
 - CORS restricted to the frontend origin.
 - No default secrets; generate them on first run or refuse to start.
 - No Docker socket mounted into any container.
