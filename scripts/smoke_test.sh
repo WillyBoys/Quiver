@@ -34,6 +34,18 @@ login() {
 [ "$(login "$PASSWORD")" = "200" ] || fail "login failed"
 [ "$(status -b "$JAR" "$API/auth/me")" = "200" ] || fail "/auth/me rejected a valid session"
 
+# Engagement + scope round trip (exercises the latest migration inside the real stack).
+post() { curl -s -b "$JAR" -H 'Content-Type: application/json' -d "$2" "$API$1"; }
+ENG_ID="$(post /engagements '{"name":"smoke test"}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')" \
+  || fail "could not create engagement"
+SCOPE="$(post "/engagements/$ENG_ID/scope" '{"value":"*.Example.COM","reason":"smoke test"}')"
+echo "$SCOPE" | grep -q '"value":"\*.example.com"' || fail "scope entry not normalized: $SCOPE"
+BAD="$(curl -s -o /dev/null -w '%{http_code}' -b "$JAR" -H 'Content-Type: application/json' \
+  -d '{"value":"*.com","reason":"smoke test"}' "$API/engagements/$ENG_ID/scope")"
+[ "$BAD" = "422" ] || fail "public-suffix wildcard accepted ($BAD)"
+curl -s -b "$JAR" "$API/engagements/$ENG_ID/scope/changes" | grep -q '"action":"add"' \
+  || fail "scope change not audited"
+
 cp "$JAR" "$OLD"
 [ "$(status -b "$JAR" -X POST "$API/auth/logout")" = "204" ] || fail "logout failed"
 [ "$(status -b "$OLD" "$API/auth/me")" = "401" ] || fail "session still valid after logout"

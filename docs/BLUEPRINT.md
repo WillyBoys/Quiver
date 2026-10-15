@@ -114,6 +114,14 @@ Checks, in order:
 **The settings page is the only source of scope.** Agents and scanners can discover assets and *suggest* them, but cannot act on them. The operator approves a suggestion by adding it to scope, a deliberate choice that is recorded. Everything else is denied by default.
 
 - **Entry types:** IP, CIDR (IPv4 and IPv6), exact hostname, wildcard (`*.client.com`), and URL. Each is either an include or an exclude, and excludes always win.
+- **Entries are validated and normalized when entered** (`quiver.core.scope`), never silently corrected. The kind is detected from the value; hostnames are lowercased and converted to punycode (UTS #46 + IDNA 2008), so Unicode lookalikes stay distinct from the real domain. An include entry is rejected if it:
+  - is or overlaps loopback, link-local (including cloud metadata at `169.254.169.254`), multicast, broadcast, unspecified, or IPv4-mapped IPv6 addresses;
+  - is wider than IPv4 /8 or IPv6 /32;
+  - is a single-label name, or a hostname or wildcard on a public suffix (`co.uk`, `*.com`, `*.github.io`);
+  - is a CIDR with host bits set (`10.0.0.5/24`; the operator must enter the network address);
+  - is a URL with credentials, a query or fragment, or `.`/`..` path segments.
+
+  Excludes only need to be well-formed, because a broad exclude can only narrow scope.
 - **An apex does not imply its subdomains.** `client.com` covers only `client.com`. Subdomains require `*.client.com` or their own entries.
 - **Wildcards cover names, not infrastructure.** A hostname matched only by a wildcard is in scope for active work only if it resolves to an in-scope IP or CIDR, or to infrastructure that is not a known third-party provider (CDN, cloud hosting, SaaS). Otherwise the gate denies it and creates a suggestion. An exact hostname entry is an explicit operator choice and is not subject to this check.
 - **Resolution pinning:** when a hostname enters scope, or is first matched by a wildcard, its resolved addresses are recorded. A job targeting a hostname is pinned to the addresses resolved at gate time; where the tool allows, it is given the IP plus a Host header or SNI. If a hostname later resolves somewhere new, the gate returns NEEDS_APPROVAL, or DENY if the new address falls outside scope.
@@ -142,8 +150,9 @@ Engagements can override these. Every decision is written to the event log.
 - `ScopeEntry`: IP / CIDR / hostname / wildcard / URL, with an `include` or `exclude` flag and pinned resolutions for hostnames (§4.1).
 - `ScopeSuggestion`: an asset found outside scope. Holds how it was found (source job, evidence), resolved addresses, hosting/ASN details, and status: `pending`, `added`, `dismissed`, or `excluded`. `excluded` also creates an exclude entry, so the asset is not suggested again.
 - `ScopeChange`: append-only audit of every scope edit: who, when, why, and the linked suggestion if any.
-- `TestingWindow`: allowed days and hours, timezone.
-- `Authorization`: who authorized testing, the date, and an optional uploaded document.
+- `TestingWindow`: allowed ISO weekdays (1 = Monday), start and end time, IANA timezone. An end before the start crosses midnight; equal start and end means the whole day. **No windows means no testing**: the gate defers everything until a window exists.
+- **Activation:** an engagement moves from `draft` to `active` only when it has an authorization record whose period covers today, at least one include scope entry, and at least one testing window. Statuses: `draft → active ⇄ paused`, any → `archived`, which is final and read-only.
+- `Authorization`: who authorized testing (name, title, organization, contact), the date, and an optional validity period. Uploading the signed document is planned; until then, reference it in the notes.
 
 ### 5.2 Execution layer
 - `Run`: one execution of an engagement (scheduled, triggered, or on demand). Holds budget usage and a summary of what changed.
