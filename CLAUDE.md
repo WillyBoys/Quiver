@@ -20,6 +20,13 @@ docker compose exec api quiver-admin set-password    # create/change the operato
 QUIVER_DATABASE_URL=postgresql+asyncpg://... uv run alembic revision --autogenerate -m "..."
 ```
 
+CI (`.github/workflows/ci.yml`) runs on every PR and push to `main`: lint, tests (Postgres service), a full-history gitleaks scan, and a stack smoke test (`scripts/smoke_test.sh` against `docker compose up`). All four must pass before merging. To run the smoke test locally without touching your real login, use an isolated project:
+
+```bash
+COMPOSE_PROJECT_NAME=quiver-smoke QUIVER_API_PORT=8020 QUIVER_UI_PORT=3020 \
+  sh -c 'docker compose up -d --build && scripts/smoke_test.sh; docker compose down -v'
+```
+
 Tests that touch the database start a throwaway Postgres container automatically (testcontainers), or use `QUIVER_TEST_DATABASE_URL` if set. Docker must be running.
 
 Service dependencies are extras in `pyproject.toml` (`api`, later `worker` and `bridge`); each image installs only its own. The `dev` group includes every extra, so local tests have everything.
@@ -58,4 +65,5 @@ One Python package, `src/quiver/`, built into separate container images per serv
 - Parsers are pure functions; each new tool lands with a parser and at least one recorded fixture.
 - Policy gate and reconciliation changes need unit tests covering the edge cases listed in Blueprint §12.
 - Tests pass `Settings(...)` explicitly; never mutate `QUIVER_*` environment variables in tests.
+- GitHub Actions are pinned to full commit SHAs with the tag in a comment; workflows get `permissions: contents: read` unless a job needs more, and checkouts use `persist-credentials: false`.
 - Work on a branch per step (`mN-short-name`) and merge to `main` through a pull request.

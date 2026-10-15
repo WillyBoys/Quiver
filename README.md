@@ -2,6 +2,7 @@
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 ![Status: Early development](https://img.shields.io/badge/status-early%20development-orange)
+[![CI](https://github.com/WillyBoys/Quiver/actions/workflows/ci.yml/badge.svg)](https://github.com/WillyBoys/Quiver/actions/workflows/ci.yml)
 
 **AI-powered continuous penetration testing.** Quiver runs recurring, AI-driven engagements against an authorized scope and tracks how the attack surface changes over time: new assets, new findings, fixed issues, and regressions. You stay in control of scope, risk, and anything dangerous.
 
