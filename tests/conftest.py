@@ -67,9 +67,12 @@ def clean_db(migrated_db):
     yield
 
     async def _truncate():
+        from quiver.core.models import Base
+
+        tables = ", ".join(t.name for t in Base.metadata.sorted_tables)
         engine = create_async_engine(migrated_db)
         async with engine.begin() as conn:
-            await conn.execute(text("TRUNCATE auth_sessions, users, organizations CASCADE"))
+            await conn.execute(text(f"TRUNCATE {tables} CASCADE"))
         await engine.dispose()
 
     asyncio.run(_truncate())

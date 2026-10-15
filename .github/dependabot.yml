@@ -18,7 +18,21 @@ updates:
       actions:
         patterns: ["*"]
 
+  # Python minor versions (3.12 -> 3.13) change the runtime under tested code: upgrade them
+  # deliberately, together with .python-version, pyproject.toml, and CI. Patch updates only here.
   - package-ecosystem: docker
     directory: /docker
     schedule:
       interval: weekly
+    ignore:
+      - dependency-name: python
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+
+  # Postgres major upgrades need a dump/restore of the data volume; never automatic.
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: weekly
+    ignore:
+      - dependency-name: postgres
+        update-types: ["version-update:semver-major"]
