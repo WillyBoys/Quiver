@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
 # Dashboard. Placeholder static page until build step 18 replaces it with the React app.
-FROM nginxinc/nginx-unprivileged:1.29-alpine
+FROM nginxinc/nginx-unprivileged:1.31-alpine
 COPY frontend/placeholder/ /usr/share/nginx/html/
 EXPOSE 8080
