@@ -23,7 +23,7 @@ dependencies = [
 [project.optional-dependencies]
 api = [
     "argon2-cffi>=25.1.0",
-    "fastapi>=0.143.1",
+    "fastapi>=0.143.2",
     "uvicorn[standard]>=0.54.0",
 ]
 
