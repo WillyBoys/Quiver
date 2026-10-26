@@ -9,11 +9,11 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
-    "alembic>=1.20.0",
+    "alembic>=1.20.1",
     "asyncpg>=0.32.0",
     "idna>=3.20",
-    "publicsuffixlist>=1.1.0.20261010",
-    "pydantic-settings>=2.16.0",
+    "publicsuffixlist>=1.1.2.20261021",
+    "pydantic-settings>=2.16.1",
     "sqlalchemy[asyncio]>=2.1.4",
 ]
 
@@ -23,7 +23,7 @@ dependencies = [
 [project.optional-dependencies]
 api = [
     "argon2-cffi>=25.1.0",
-    "fastapi>=0.143.1",
+    "fastapi>=0.161.1",
     "uvicorn[standard]>=0.54.0",
 ]
 
@@ -34,7 +34,7 @@ quiver-admin = "quiver.cli:main"
 dev = [
     # Local development and tests get every service's dependencies.
     "quiver[api]",
-    "httpx2>=2.13.1",
+    "httpx2>=2.16.0",
     "pytest",
     "ruff",
     "pytest-asyncio>=1.4.0",
