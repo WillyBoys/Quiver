@@ -123,6 +123,15 @@ Checks, in order:
 
   Excludes only need to be well-formed, because a broad exclude can only narrow scope.
 - **An apex does not imply its subdomains.** `client.com` covers only `client.com`. Subdomains require `*.client.com` or their own entries.
+- **Matching** (`quiver.core.scope_match.Scope.check`) returns `in_scope`, `out_of_scope`, `excluded`, or `uncertain`, plus the entry that decided it. Every ambiguity resolves toward less testing:
+  - Exclusions always win, and any overlap counts: a CIDR sweep or crawl that would touch an excluded address or path is excluded as a whole.
+  - Includes match strictly; exclusions match loosely. An excluded hostname also excludes its subdomains. Excluded URL paths match case-insensitively, ignore `;params` and repeated slashes, and apply to every scheme and port on that host.
+  - A wildcard covers names at **any depth** below its base, never the base itself. An exact hostname covers only itself.
+  - A URL entry covers **only web requests** with the same scheme, host, and port, under its path prefix at a segment boundary. It does not put the host in scope for host-level actions such as port or TLS scans. A host in scope covers every URL on it, on any port.
+  - A CIDR target must be covered entirely by include entries (adjacent entries combine).
+  - Dot segments and encoded unreserved characters are resolved before matching (`/portal/../admin` is `/admin`). Targets that cannot be read with confidence are `uncertain` and go to the operator: IP addresses in non-standard forms (`2130706433`, `0x7f.1`), credentials in URLs, encoded separators or double encoding, backslashes, non-HTTP schemes, and IPv6 zone IDs. IPv4-mapped IPv6 addresses are matched as IPv4.
+  - Host-level actions on a host whose web root (`/`) is excluded are `uncertain`.
+  - Matching is name-based. An IP entry never puts a hostname in scope by itself; resolution is checked by the gate.
 - **Wildcards cover names, not infrastructure.** A hostname matched only by a wildcard is in scope for active work only if it resolves to an in-scope IP or CIDR, or to infrastructure that is not a known third-party provider (CDN, cloud hosting, SaaS). Otherwise the gate denies it and creates a suggestion. An exact hostname entry is an explicit operator choice and is not subject to this check.
 - **Resolution pinning:** when a hostname enters scope, or is first matched by a wildcard, its resolved addresses are recorded. A job targeting a hostname is pinned to the addresses resolved at gate time; where the tool allows, it is given the IP plus a Host header or SNI. If a hostname later resolves somewhere new, the gate returns NEEDS_APPROVAL, or DENY if the new address falls outside scope.
 - **Passive lookups on suggestions are allowed.** DNS resolution, certificate transparency, WHOIS, and ASN/hosting lookups go to third-party services, not the asset, so they may run against suggested assets. That gives the operator evidence to decide with. Nothing that sends traffic to the asset itself runs until the asset is in scope.

@@ -39,6 +39,7 @@ dev = [
     "ruff",
     "pytest-asyncio>=1.4.0",
     "testcontainers[postgres]>=4.15.0",
+    "hypothesis>=6.170.13",
 ]
 
 [build-system]
