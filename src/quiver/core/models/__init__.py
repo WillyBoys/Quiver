@@ -9,8 +9,11 @@ from quiver.core.models.engagement import (
     ScopeAction,
     ScopeChange,
     ScopeEntry,
+    ScopeSuggestion,
+    SuggestionStatus,
     TestingWindow,
 )
+from quiver.core.models.event import Event
 
 __all__ = [
     "AuthSession",
@@ -18,12 +21,15 @@ __all__ = [
     "Base",
     "Engagement",
     "EngagementStatus",
+    "Event",
     "IdMixin",
     "Organization",
     "OwnedMixin",
     "ScopeAction",
     "ScopeChange",
     "ScopeEntry",
+    "ScopeSuggestion",
+    "SuggestionStatus",
     "TestingWindow",
     "TimestampMixin",
     "User",

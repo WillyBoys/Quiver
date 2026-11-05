@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 import quiver
-from quiver.api import auth, engagements
+from quiver.api import auth, engagements, kill_switch, suggestions
 from quiver.core.config import Settings, get_settings
 from quiver.core.db import make_engine, make_sessionmaker
 
@@ -50,4 +50,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(auth.public_router)
     app.include_router(auth.router)
     app.include_router(engagements.router)
+    app.include_router(suggestions.router)
+    app.include_router(kill_switch.router)
     return app

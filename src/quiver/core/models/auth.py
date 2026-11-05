@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String
+from sqlalchemy import DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from quiver.core.models.base import Base, IdMixin, TimestampMixin
@@ -13,6 +13,9 @@ class Organization(IdMixin, TimestampMixin, Base):
     __tablename__ = "organizations"
 
     name: Mapped[str] = mapped_column(String(200), unique=True)
+    # Global kill switch: while set, the policy gate denies every action in the organization.
+    kill_switch_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    kill_switch_reason: Mapped[str] = mapped_column(Text, default="", server_default="")
 
 
 class User(IdMixin, TimestampMixin, Base):

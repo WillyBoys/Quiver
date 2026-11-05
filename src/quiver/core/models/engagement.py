@@ -19,6 +19,7 @@ from sqlalchemy import (
     func,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from quiver.core.models.base import Base, IdMixin, OwnedMixin, TimestampMixin
@@ -35,6 +36,13 @@ class EngagementStatus(StrEnum):
 class ScopeAction(StrEnum):
     ADD = "add"
     REMOVE = "remove"
+
+
+class SuggestionStatus(StrEnum):
+    PENDING = "pending"
+    ADDED = "added"  # the operator added it (or a covering entry) to scope
+    DISMISSED = "dismissed"  # not relevant; may still be added later
+    EXCLUDED = "excluded"  # an exclude entry was created, so it is never suggested again
 
 
 def _enum(enum_cls: type[StrEnum], name: str) -> Enum:
@@ -59,6 +67,11 @@ class Engagement(IdMixin, TimestampMixin, OwnedMixin, Base):
     status: Mapped[EngagementStatus] = mapped_column(
         _enum(EngagementStatus, "engagement_status"), default=EngagementStatus.DRAFT
     )
+    # Per-tier autonomy overrides ({"intrusive": "auto"}); defaults live in quiver.core.policy.
+    autonomy: Mapped[dict[str, str]] = mapped_column(JSONB, default=dict, server_default="{}")
+    # Engagement kill switch: while set, the policy gate denies every action in it.
+    kill_switch_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    kill_switch_reason: Mapped[str] = mapped_column(Text, default="", server_default="")
 
 
 class ScopeEntry(IdMixin, Base):
@@ -107,7 +120,50 @@ class ScopeChange(IdMixin, Base):
     value: Mapped[str] = mapped_column(String(2048))
     mode: Mapped[ScopeMode] = mapped_column(_enum(ScopeMode, "scope_change_mode"))
     reason: Mapped[str] = mapped_column(Text)
+    # The scope suggestion this change resolved, if any.
+    suggestion_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("scope_suggestions.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ScopeSuggestion(IdMixin, Base):
+    """An asset found outside scope. Agents and scanners create suggestions; only the operator
+    turns one into scope, through a scope entry on the settings page.
+
+    One row per (engagement, kind, value); repeat sightings bump last_seen_at and seen_count
+    and never reopen a decided suggestion.
+    """
+
+    __tablename__ = "scope_suggestions"
+    __table_args__ = (
+        UniqueConstraint(
+            "engagement_id", "kind", "value", name="uq_scope_suggestions_engagement_id"
+        ),
+    )
+
+    engagement_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("engagements.id"), index=True)
+    kind: Mapped[ScopeKind] = mapped_column(_enum(ScopeKind, "scope_suggestion_kind"))
+    value: Mapped[str] = mapped_column(String(2048))  # normalized as an include entry would be
+    status: Mapped[SuggestionStatus] = mapped_column(
+        _enum(SuggestionStatus, "suggestion_status"), default=SuggestionStatus.PENDING
+    )
+    source: Mapped[str] = mapped_column(String(50))  # "policy_gate"; jobs and parsers later
+    # How it was first found (tool, argv, requester, reason). Target-controlled data.
+    evidence: Mapped[dict] = mapped_column(JSONB, default=dict)
+    # Filled by passive lookups (step 7b): addresses, hosting provider, ASN.
+    resolved_addresses: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    hosting: Mapped[dict] = mapped_column(JSONB, default=dict)
+    first_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    seen_count: Mapped[int] = mapped_column(default=1)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    decided_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
+    decision_note: Mapped[str] = mapped_column(Text, default="")
+    # The scope entry created when it was added or excluded.
+    scope_entry_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("scope_entries.id"))
 
 
 class TestingWindow(IdMixin, Base):
