@@ -1,51 +1,10 @@
-import asyncio
 from datetime import UTC, date, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
 
 from quiver.api.app import create_app
-from quiver.cli import _set_password
-
-PASSWORD = "a-long-test-password"
-
-AUTH = {
-    "authorized_by": "Jane Client",
-    "authorizer_title": "CISO",
-    "authorizer_organization": "Example Corp",
-    "authorized_on": "2026-10-01",
-}
-WINDOW = {
-    "timezone": "America/Chicago",
-    "days": [1, 2, 3, 4, 5],
-    "start_time": "09:00",
-    "end_time": "17:00",
-}
-
-
-@pytest.fixture
-def client(clean_db, settings):
-    asyncio.run(_set_password("operator", PASSWORD, settings))
-    with TestClient(create_app(settings)) as c:
-        assert (
-            c.post("/auth/login", json={"username": "operator", "password": PASSWORD}).status_code
-            == 200
-        )
-        yield c
-
-
-@pytest.fixture
-def eng(client):
-    resp = client.post("/engagements", json={"name": "Example Corp external"})
-    assert resp.status_code == 201
-    return resp.json()
-
-
-def add_scope(client, eng, value, mode="include", reason="per SOW section 2"):
-    return client.post(
-        f"/engagements/{eng['id']}/scope", json={"value": value, "mode": mode, "reason": reason}
-    )
-
+from tests.api_helpers import AUTH, PASSWORD, WINDOW, add_scope
 
 # --- engagements -----------------------------------------------------------------------------
 

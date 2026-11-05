@@ -1,4 +1,5 @@
-"""Engagement API: engagements, scope (with audit log), testing windows, authorization.
+"""Engagement API: engagements, scope (with audit log), testing windows, authorization,
+autonomy, and the engagement kill switch.
 
 All routes require an operator session and only see the operator's organization; another
 organization's engagement is indistinguishable from a missing one (404).
@@ -19,11 +20,13 @@ from quiver.core.models import (
     Authorization,
     Engagement,
     EngagementStatus,
+    Event,
     ScopeAction,
     ScopeChange,
     ScopeEntry,
     TestingWindow,
 )
+from quiver.core.policy import Autonomy, RiskTier, effective_autonomy, validate_autonomy
 from quiver.core.scope import ScopeKind, ScopeMode, ScopeValueError, normalize_scope_value
 
 router = APIRouter(
@@ -46,7 +49,7 @@ Reason = Annotated[str, Field(min_length=3, max_length=2000)]
 # --- schemas --------------------------------------------------------------------------------
 
 
-class _Out(BaseModel):
+class OrmOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -76,16 +79,33 @@ class EngagementUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
     description: str | None = Field(default=None, max_length=10_000)
     status: EngagementStatus | None = None
+    # Per-tier overrides of the default autonomy; replaces the previous overrides.
+    autonomy: dict[RiskTier, Autonomy] | None = None
+
+    @field_validator("autonomy")
+    @classmethod
+    def _valid_autonomy(cls, v):
+        if v is not None:
+            validate_autonomy(v)
+        return v
 
 
-class EngagementOut(_Out):
+class EngagementOut(OrmOut):
     id: uuid.UUID
     name: str
     description: str
     tracks: list[str]
     status: EngagementStatus
+    autonomy: dict[RiskTier, Autonomy]  # effective: defaults plus overrides
+    kill_switch_at: datetime | None
+    kill_switch_reason: str
     created_at: datetime
     updated_at: datetime
+
+    @field_validator("autonomy", mode="before")
+    @classmethod
+    def _effective(cls, v):
+        return effective_autonomy(v)
 
 
 class ScopeEntryCreate(BaseModel):
@@ -99,7 +119,7 @@ class ScopeEntryRemove(BaseModel):
     reason: Reason
 
 
-class ScopeEntryOut(_Out):
+class ScopeEntryOut(OrmOut):
     id: uuid.UUID
     kind: ScopeKind
     value: str
@@ -108,7 +128,7 @@ class ScopeEntryOut(_Out):
     created_at: datetime
 
 
-class ScopeChangeOut(_Out):
+class ScopeChangeOut(OrmOut):
     id: uuid.UUID
     scope_entry_id: uuid.UUID
     user_id: uuid.UUID
@@ -117,6 +137,7 @@ class ScopeChangeOut(_Out):
     value: str
     mode: ScopeMode
     reason: str
+    suggestion_id: uuid.UUID | None
     created_at: datetime
 
 
@@ -152,7 +173,7 @@ class WindowCreate(BaseModel):
         return v.replace(second=0, microsecond=0)
 
 
-class WindowOut(_Out):
+class WindowOut(OrmOut):
     id: uuid.UUID
     timezone: str
     days: list[int]
@@ -177,14 +198,33 @@ class AuthorizationIn(BaseModel):
         return self
 
 
-class AuthorizationOut(AuthorizationIn, _Out):
+class AuthorizationOut(AuthorizationIn, OrmOut):
     updated_at: datetime
+
+
+class KillSwitchIn(BaseModel):
+    engaged: bool
+    reason: Reason
+
+
+class KillSwitchOut(BaseModel):
+    engaged: bool
+    engaged_at: datetime | None
+    reason: str
+
+    @classmethod
+    def of(cls, row) -> "KillSwitchOut":
+        return cls(
+            engaged=row.kill_switch_at is not None,
+            engaged_at=row.kill_switch_at,
+            reason=row.kill_switch_reason,
+        )
 
 
 # --- helpers --------------------------------------------------------------------------------
 
 
-async def _get_engagement(db, user, engagement_id: uuid.UUID) -> Engagement:
+async def get_engagement_or_404(db, user, engagement_id: uuid.UUID) -> Engagement:
     eng = await db.scalar(
         select(Engagement).where(Engagement.id == engagement_id, Engagement.org_id == user.org_id)
     )
@@ -193,7 +233,7 @@ async def _get_engagement(db, user, engagement_id: uuid.UUID) -> Engagement:
     return eng
 
 
-def _require_editable(eng: Engagement) -> None:
+def require_editable(eng: Engagement) -> None:
     if eng.status is EngagementStatus.ARCHIVED:
         raise HTTPException(status.HTTP_409_CONFLICT, "Archived engagements cannot be changed")
 
@@ -258,15 +298,15 @@ async def create_engagement(body: EngagementCreate, db: DbDep, user: OperatorDep
 
 @router.get("/{engagement_id}", response_model=EngagementOut)
 async def get_engagement(engagement_id: uuid.UUID, db: DbDep, user: OperatorDep):
-    return await _get_engagement(db, user, engagement_id)
+    return await get_engagement_or_404(db, user, engagement_id)
 
 
 @router.patch("/{engagement_id}", response_model=EngagementOut)
 async def update_engagement(
     engagement_id: uuid.UUID, body: EngagementUpdate, db: DbDep, user: OperatorDep
 ):
-    eng = await _get_engagement(db, user, engagement_id)
-    _require_editable(eng)
+    eng = await get_engagement_or_404(db, user, engagement_id)
+    require_editable(eng)
 
     if body.status is not None and body.status is not eng.status:
         if body.status not in TRANSITIONS[eng.status]:
@@ -288,6 +328,8 @@ async def update_engagement(
         eng.name = name
     if body.description is not None:
         eng.description = body.description
+    if body.autonomy is not None:
+        eng.autonomy = validate_autonomy(body.autonomy)
 
     try:
         await db.commit()
@@ -304,7 +346,7 @@ async def update_engagement(
 
 @router.get("/{engagement_id}/scope", response_model=list[ScopeEntryOut])
 async def list_scope(engagement_id: uuid.UUID, db: DbDep, user: OperatorDep):
-    eng = await _get_engagement(db, user, engagement_id)
+    eng = await get_engagement_or_404(db, user, engagement_id)
     rows = await db.scalars(
         select(ScopeEntry)
         .where(ScopeEntry.engagement_id == eng.id, ScopeEntry.removed_at.is_(None))
@@ -319,10 +361,28 @@ async def list_scope(engagement_id: uuid.UUID, db: DbDep, user: OperatorDep):
 async def add_scope_entry(
     engagement_id: uuid.UUID, body: ScopeEntryCreate, db: DbDep, user: OperatorDep
 ):
-    eng = await _get_engagement(db, user, engagement_id)
-    _require_editable(eng)
+    eng = await get_engagement_or_404(db, user, engagement_id)
+    require_editable(eng)
+    entry = await create_scope_entry(db, eng, user, body.value, body.mode, body.note, body.reason)
+    await db.commit()
+    await db.refresh(entry)
+    return entry
+
+
+async def create_scope_entry(
+    db,
+    eng: Engagement,
+    user,
+    value: str,
+    mode: ScopeMode,
+    note: str,
+    reason: str,
+    suggestion_id: uuid.UUID | None = None,
+) -> ScopeEntry:
+    """Normalize and add a scope entry with its audit record. The only way scope is added.
+    Flushes; the caller commits."""
     try:
-        normalized = normalize_scope_value(body.value, body.mode)
+        normalized = normalize_scope_value(value, mode)
     except ScopeValueError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
 
@@ -330,8 +390,8 @@ async def add_scope_entry(
         engagement_id=eng.id,
         kind=normalized.kind,
         value=normalized.value,
-        mode=body.mode,
-        note=body.note,
+        mode=mode,
+        note=note,
         created_by=user.id,
     )
     db.add(entry)
@@ -339,11 +399,10 @@ async def add_scope_entry(
         await db.flush()
     except IntegrityError as exc:
         raise HTTPException(
-            status.HTTP_409_CONFLICT, f"{normalized.value} is already in scope as {body.mode}"
+            status.HTTP_409_CONFLICT, f"{normalized.value} is already in scope as {mode}"
         ) from exc
-    db.add(_change(entry, user, ScopeAction.ADD, body.reason))
-    await db.commit()
-    await db.refresh(entry)
+    db.add(_change(entry, user, ScopeAction.ADD, reason, suggestion_id))
+    await db.flush()
     return entry
 
 
@@ -355,8 +414,8 @@ async def remove_scope_entry(
     db: DbDep,
     user: OperatorDep,
 ):
-    eng = await _get_engagement(db, user, engagement_id)
-    _require_editable(eng)
+    eng = await get_engagement_or_404(db, user, engagement_id)
+    require_editable(eng)
     entry = await db.scalar(
         select(ScopeEntry).where(
             ScopeEntry.id == entry_id,
@@ -374,7 +433,7 @@ async def remove_scope_entry(
 
 @router.get("/{engagement_id}/scope/changes", response_model=list[ScopeChangeOut])
 async def list_scope_changes(engagement_id: uuid.UUID, db: DbDep, user: OperatorDep):
-    eng = await _get_engagement(db, user, engagement_id)
+    eng = await get_engagement_or_404(db, user, engagement_id)
     rows = await db.scalars(
         select(ScopeChange)
         .where(ScopeChange.engagement_id == eng.id)
@@ -383,7 +442,13 @@ async def list_scope_changes(engagement_id: uuid.UUID, db: DbDep, user: Operator
     return list(rows)
 
 
-def _change(entry: ScopeEntry, user, action: ScopeAction, reason: str) -> ScopeChange:
+def _change(
+    entry: ScopeEntry,
+    user,
+    action: ScopeAction,
+    reason: str,
+    suggestion_id: uuid.UUID | None = None,
+) -> ScopeChange:
     return ScopeChange(
         engagement_id=entry.engagement_id,
         scope_entry_id=entry.id,
@@ -393,6 +458,7 @@ def _change(entry: ScopeEntry, user, action: ScopeAction, reason: str) -> ScopeC
         value=entry.value,
         mode=entry.mode,
         reason=reason.strip(),
+        suggestion_id=suggestion_id,
     )
 
 
@@ -401,7 +467,7 @@ def _change(entry: ScopeEntry, user, action: ScopeAction, reason: str) -> ScopeC
 
 @router.get("/{engagement_id}/windows", response_model=list[WindowOut])
 async def list_windows(engagement_id: uuid.UUID, db: DbDep, user: OperatorDep):
-    eng = await _get_engagement(db, user, engagement_id)
+    eng = await get_engagement_or_404(db, user, engagement_id)
     rows = await db.scalars(
         select(TestingWindow)
         .where(TestingWindow.engagement_id == eng.id)
@@ -414,8 +480,8 @@ async def list_windows(engagement_id: uuid.UUID, db: DbDep, user: OperatorDep):
     "/{engagement_id}/windows", response_model=WindowOut, status_code=status.HTTP_201_CREATED
 )
 async def add_window(engagement_id: uuid.UUID, body: WindowCreate, db: DbDep, user: OperatorDep):
-    eng = await _get_engagement(db, user, engagement_id)
-    _require_editable(eng)
+    eng = await get_engagement_or_404(db, user, engagement_id)
+    require_editable(eng)
     window = TestingWindow(engagement_id=eng.id, **body.model_dump())
     db.add(window)
     await db.commit()
@@ -427,8 +493,8 @@ async def add_window(engagement_id: uuid.UUID, body: WindowCreate, db: DbDep, us
 async def remove_window(
     engagement_id: uuid.UUID, window_id: uuid.UUID, db: DbDep, user: OperatorDep
 ):
-    eng = await _get_engagement(db, user, engagement_id)
-    _require_editable(eng)
+    eng = await get_engagement_or_404(db, user, engagement_id)
+    require_editable(eng)
     window = await db.scalar(
         select(TestingWindow).where(
             TestingWindow.id == window_id, TestingWindow.engagement_id == eng.id
@@ -445,7 +511,7 @@ async def remove_window(
 
 @router.get("/{engagement_id}/authorization", response_model=AuthorizationOut)
 async def get_authorization(engagement_id: uuid.UUID, db: DbDep, user: OperatorDep):
-    eng = await _get_engagement(db, user, engagement_id)
+    eng = await get_engagement_or_404(db, user, engagement_id)
     auth = await db.scalar(select(Authorization).where(Authorization.engagement_id == eng.id))
     if auth is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No authorization recorded")
@@ -456,8 +522,8 @@ async def get_authorization(engagement_id: uuid.UUID, db: DbDep, user: OperatorD
 async def put_authorization(
     engagement_id: uuid.UUID, body: AuthorizationIn, db: DbDep, user: OperatorDep
 ):
-    eng = await _get_engagement(db, user, engagement_id)
-    _require_editable(eng)
+    eng = await get_engagement_or_404(db, user, engagement_id)
+    require_editable(eng)
     auth = await db.scalar(select(Authorization).where(Authorization.engagement_id == eng.id))
     if auth is None:
         auth = Authorization(engagement_id=eng.id, **body.model_dump())
@@ -468,3 +534,45 @@ async def put_authorization(
     await db.commit()
     await db.refresh(auth)
     return auth
+
+
+# --- kill switch ----------------------------------------------------------------------------
+
+
+@router.get("/{engagement_id}/kill-switch", response_model=KillSwitchOut)
+async def get_kill_switch(engagement_id: uuid.UUID, db: DbDep, user: OperatorDep):
+    return KillSwitchOut.of(await get_engagement_or_404(db, user, engagement_id))
+
+
+@router.put("/{engagement_id}/kill-switch", response_model=KillSwitchOut)
+async def set_kill_switch(
+    engagement_id: uuid.UUID, body: KillSwitchIn, db: DbDep, user: OperatorDep
+):
+    """Engage or release this engagement's kill switch. While engaged, the policy gate denies
+    every action in the engagement."""
+    eng = await get_engagement_or_404(db, user, engagement_id)
+    require_editable(eng)
+    apply_kill_switch(db, eng, user, body, engagement_id=eng.id)
+    await db.commit()
+    await db.refresh(eng)
+    return KillSwitchOut.of(eng)
+
+
+def apply_kill_switch(db, row, user, body: KillSwitchIn, engagement_id=None) -> None:
+    """Set or clear a kill switch on an engagement or organization, and log the change."""
+    reason = body.reason.strip()
+    if body.engaged:
+        row.kill_switch_at = row.kill_switch_at or datetime.now(UTC)
+        row.kill_switch_reason = reason
+    else:
+        row.kill_switch_at = None
+        row.kill_switch_reason = ""
+    db.add(
+        Event(
+            org_id=user.org_id,
+            engagement_id=engagement_id,
+            user_id=user.id,
+            kind="kill_switch.engaged" if body.engaged else "kill_switch.released",
+            payload={"scope": "engagement" if engagement_id else "global", "reason": reason},
+        )
+    )

@@ -46,6 +46,16 @@ BAD="$(curl -s -o /dev/null -w '%{http_code}' -b "$JAR" -H 'Content-Type: applic
 curl -s -b "$JAR" "$API/engagements/$ENG_ID/scope/changes" | grep -q '"action":"add"' \
   || fail "scope change not audited"
 
+# Policy gate tables (latest migration): kill switches and scope suggestions.
+put() { curl -s -b "$JAR" -X PUT -H 'Content-Type: application/json' -d "$2" "$API$1"; }
+put "/engagements/$ENG_ID/kill-switch" '{"engaged":true,"reason":"smoke test"}' \
+  | grep -q '"engaged":true' || fail "engagement kill switch did not engage"
+put "/engagements/$ENG_ID/kill-switch" '{"engaged":false,"reason":"smoke test"}' \
+  | grep -q '"engaged":false' || fail "engagement kill switch did not release"
+curl -s -b "$JAR" "$API/kill-switch" | grep -q '"engaged":false' || fail "global kill switch unreadable"
+[ "$(curl -s -b "$JAR" "$API/engagements/$ENG_ID/suggestions")" = "[]" ] \
+  || fail "suggestions list unexpected"
+
 cp "$JAR" "$OLD"
 [ "$(status -b "$JAR" -X POST "$API/auth/logout")" = "204" ] || fail "logout failed"
 [ "$(status -b "$OLD" "$API/auth/me")" = "401" ] || fail "session still valid after logout"

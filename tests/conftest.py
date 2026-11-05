@@ -13,6 +13,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from quiver.core.config import Settings
+from tests.api_helpers import PASSWORD
 
 
 @pytest.fixture(scope="session")
@@ -96,3 +97,27 @@ def run_db(migrated_db):
         return asyncio.run(_inner())
 
     return _run
+
+
+@pytest.fixture
+def client(clean_db, settings):
+    """A logged-in API client for the operator."""
+    from fastapi.testclient import TestClient
+
+    from quiver.api.app import create_app
+    from quiver.cli import _set_password
+
+    asyncio.run(_set_password("operator", PASSWORD, settings))
+    with TestClient(create_app(settings)) as c:
+        assert (
+            c.post("/auth/login", json={"username": "operator", "password": PASSWORD}).status_code
+            == 200
+        )
+        yield c
+
+
+@pytest.fixture
+def eng(client):
+    resp = client.post("/engagements", json={"name": "Example Corp external"})
+    assert resp.status_code == 201
+    return resp.json()

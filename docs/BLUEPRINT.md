@@ -87,7 +87,9 @@ Every action request goes through one function before execution:
 evaluate(action_request, engagement) -> ALLOW | DENY(reason) | NEEDS_APPROVAL(reason) | DEFER(until, reason)
 ```
 
-An `ActionRequest` carries: tool name, structured parameters, **declared targets**, requester (agent run ID or schedule), and the **final argv** that would run.
+An `ActionRequest` carries: tool name, structured parameters, requester (agent run ID or schedule), and the **final argv** that would run. Which parameters are targets, and the tool's risk tier, come from the tool's registry entry (`ToolSpec`), never from the requester.
+
+`evaluate()` (`quiver.core.policy.gate`) is a pure function of the request and a `GateContext` snapshot loaded from the database (`quiver.core.policy.store`). It runs every check and records each one; the final verdict is the most severe: **DENY > NEEDS_APPROVAL > DEFER > ALLOW**. Approval outranks DEFER so the operator can approve while the action waits for its window; the approved action is gated again before it runs, and approval satisfies only NEEDS_APPROVAL checks, never DENY or DEFER.
 
 Decision rule:
 - **DENY** what is definitely wrong: anything outside the settings-page scope, an engaged kill switch, an unknown tool. The operator cannot approve a DENY. The only way past it is to change the scope or settings, which is a separate, logged action.
@@ -95,17 +97,22 @@ Decision rule:
 - **ALLOW** only what is definitely safe.
 - **DEFER** for actions that are allowed but not right now (testing window, rate limits). The job is queued, not dropped.
 
-Checks, in order:
-1. **Kill switch:** global or per-engagement stop is engaged → DENY.
-2. **Tool known and enabled:** unregistered tools → DENY. (v1 treated unknown tools as passive.)
-3. **Scope** (§4.1):
+Checks:
+1. **Kill switch:** the global (organization-wide) or engagement kill switch is engaged → DENY.
+2. **Engagement and authorization:** engagement in `draft` or `archived`, or no authorization record whose period covers today → DENY. A `paused` engagement → DEFER (no end time), for every tier.
+3. **Tool known and enabled:** unregistered or disabled tools → DENY. (v1 treated unknown tools as passive.) A tool's tier may depend on its parameters (e.g. nuclei exploit templates), but only upward; if that classification fails, the tier is treated as `arbitrary` and the action needs approval.
+4. **Scope** (§4.1):
    - Typed tools **declare which parameters are targets**, and those are checked directly.
-   - Every IP, CIDR, hostname, and URL that can be extracted from the final argv is also checked, as defense in depth. For `run_command` this is the only check.
-   - Any target not in scope → DENY, and a `ScopeSuggestion` is created.
-   - Uncertain extraction (unparseable argv, ambiguous tokens) → NEEDS_APPROVAL.
-4. **Testing window:** outside the engagement's window → DEFER.
-5. **Rate, concurrency, and usage budgets:** per-target and per-engagement limits, plus the engagement's model-usage budget → DEFER.
-6. **Risk tier vs engagement autonomy** → ALLOW or NEEDS_APPROVAL.
+   - Every target that can be extracted from the final argv is also checked, as defense in depth (`quiver.core.policy.argv`). For `run_command` this is the only check. URLs, IPs, and CIDRs are definite targets. Dotted names whose last label is a real top-level domain are *possible* hosts, since they may be file names (`out.sh`); out of scope, they need approval rather than denial and create no suggestion. Tokens that might be addresses in a non-standard form (`1.5`, `0x7f.1`), zone IDs, and non-ASCII names → NEEDS_APPROVAL. Flags, bare integers, and absolute or `./` paths are skipped, so typed tools pass numbers as integers.
+   - Excluded target → DENY. Out-of-scope target → DENY, and a `ScopeSuggestion` is created (for a URL, its host) unless the target could never be an include entry (loopback, public suffix).
+   - Exception: a **passive** tool may act on an out-of-scope target that has a **pending** suggestion (§4.1, passive lookups). Excluded targets stay denied.
+   - Uncertain targets, or no identifiable target for a non-passive tool → NEEDS_APPROVAL. Scope that cannot be loaded (a corrupted entry) → DENY.
+   - For `run_command`, a URL with an excluded path below it → NEEDS_APPROVAL, since a free-form command may crawl.
+5. **Testing window:** outside the engagement's windows → DEFER until the next opening; no windows → DEFER with no end time. **Passive tools are exempt**: they contact third parties, never the asset.
+6. **Rate, concurrency, and usage budgets:** per-target and per-engagement limits, plus the engagement's model-usage budget → DEFER. *(Step 7b, with DNS resolution, third-party hosting, and pinning.)*
+7. **Risk tier vs engagement autonomy** → ALLOW, NEEDS_APPROVAL, or DENY when the tier is `off`.
+
+Every decision is written to the event log as a `policy.decision` event: tool, argv, parameters, requester, verdict, every check with its reason, and every target with the scope entry that decided it.
 
 **Re-evaluation at execution:** an approved or deferred action goes through the gate again immediately before it runs. Scope, window, or kill switch may have changed while it waited. Approvals expire after a configurable period, and an expired approval must be requested again.
 
@@ -134,32 +141,32 @@ Checks, in order:
   - Matching is name-based. An IP entry never puts a hostname in scope by itself; resolution is checked by the gate.
 - **Wildcards cover names, not infrastructure.** A hostname matched only by a wildcard is in scope for active work only if it resolves to an in-scope IP or CIDR, or to infrastructure that is not a known third-party provider (CDN, cloud hosting, SaaS). Otherwise the gate denies it and creates a suggestion. An exact hostname entry is an explicit operator choice and is not subject to this check.
 - **Resolution pinning:** when a hostname enters scope, or is first matched by a wildcard, its resolved addresses are recorded. A job targeting a hostname is pinned to the addresses resolved at gate time; where the tool allows, it is given the IP plus a Host header or SNI. If a hostname later resolves somewhere new, the gate returns NEEDS_APPROVAL, or DENY if the new address falls outside scope.
-- **Passive lookups on suggestions are allowed.** DNS resolution, certificate transparency, WHOIS, and ASN/hosting lookups go to third-party services, not the asset, so they may run against suggested assets. That gives the operator evidence to decide with. Nothing that sends traffic to the asset itself runs until the asset is in scope.
+- **Passive lookups on suggestions are allowed.** DNS resolution, certificate transparency, WHOIS, and ASN/hosting lookups go to third-party services, not the asset, so they may run against assets with a *pending* suggestion (not dismissed ones, and never excluded ones), at any time of day. That gives the operator evidence to decide with. Nothing that sends traffic to the asset itself runs until the asset is in scope.
 - **Redirects and crawling:** typed tools are configured so they never follow a redirect or link to a host outside scope. Out-of-scope redirect and link targets become suggestions.
 - **Scope changes:**
   - Additions take effect for jobs gated after the change.
   - Removals take effect immediately and cancel queued jobs that no longer pass the gate.
   - Every change is a `ScopeChange` record (who, when, why, and the suggestion it came from, if any), linked to the engagement's authorization record.
 
-**Default External autonomy:**
+**Default External autonomy** (risk tiers in `quiver.core.policy`):
 
-| Action class | Default |
-|---|---|
-| Passive recon (DNS, certificate transparency, OSINT) | Auto |
-| In-scope discovery scans (port scan, HTTP probe, fingerprinting) | Auto, within window |
-| Vulnerability validation / attack payloads (nuclei exploit templates, sqlmap-style, credential attempts) | Approval |
-| `run_command` (free-form escape hatch) | Always approval |
+| Tier | Action class | Default |
+|---|---|---|
+| `passive` | Passive recon (DNS, certificate transparency, OSINT) | Auto, any time |
+| `discovery` | In-scope discovery scans (port scan, HTTP probe, fingerprinting) | Auto, within window |
+| `intrusive` | Vulnerability validation / attack payloads (nuclei exploit templates, sqlmap-style, credential attempts) | Approval |
+| `arbitrary` | `run_command` (free-form escape hatch) | Always approval |
 
-Engagements can override these. Every decision is written to the event log.
+Engagements can override each tier with `auto`, `approval`, or `off` (DENY), except that `arbitrary` can never be `auto`. Every decision is written to the event log.
 
 ## 5. Data model
 
 ### 5.1 Engagement layer
-- `Engagement`: name, track(s), status, autonomy profile, schedule, usage budget, notification settings.
+- `Engagement`: name, track(s), status, autonomy overrides per tier, kill switch (time engaged and reason), schedule, usage budget, notification settings. The global kill switch lives on the organization. Engaging or releasing either is logged as an event with the operator who did it.
 - `ScopeEntry`: IP / CIDR / hostname / wildcard / URL, with an `include` or `exclude` flag and pinned resolutions for hostnames (§4.1).
-- `ScopeSuggestion`: an asset found outside scope. Holds how it was found (source job, evidence), resolved addresses, hosting/ASN details, and status: `pending`, `added`, `dismissed`, or `excluded`. `excluded` also creates an exclude entry, so the asset is not suggested again.
+- `ScopeSuggestion`: an asset found outside scope, one per engagement and normalized value. Holds how it was found (source, evidence from the first sighting), first and last seen, sighting count, resolved addresses, hosting/ASN details, and status: `pending`, `added`, `dismissed`, or `excluded`. Repeat sightings never reopen a decided suggestion. *Add* creates an include entry (the operator may enter a different value, such as a covering wildcard), *exclude* creates an exclude entry so the asset is not suggested again; both go through the normal scope path with a reason, and the `ScopeChange` links the suggestion. A dismissed suggestion can still be added or excluded later. Only pending suggestions allow passive lookups (§4).
 - `ScopeChange`: append-only audit of every scope edit: who, when, why, and the linked suggestion if any.
-- `TestingWindow`: allowed ISO weekdays (1 = Monday), start and end time, IANA timezone. An end before the start crosses midnight; equal start and end means the whole day. **No windows means no testing**: the gate defers everything until a window exists.
+- `TestingWindow`: allowed ISO weekdays (1 = Monday), start and end time, IANA timezone. An end before the start crosses midnight; equal start and end means the whole day. **No windows means no active testing**: the gate defers everything except passive lookups until a window exists.
 - **Activation:** an engagement moves from `draft` to `active` only when it has an authorization record whose period covers today, at least one include scope entry, and at least one testing window. Statuses: `draft → active ⇄ paused`, any → `archived`, which is final and read-only.
 - `Authorization`: who authorized testing (name, title, organization, contact), the date, and an optional validity period. Uploading the signed document is planned; until then, reference it in the notes.
 
@@ -168,7 +175,7 @@ Engagements can override these. Every decision is written to the event log.
 - `AgentRun`: one agent session within a run. Has phase, role, parent, status, budget, and the bridge session ID for resume.
 - `Job`: one tool execution. Status, **worker label** (`local` for now), argv, exit code, timings, and a pointer to raw output.
 - `ApprovalRequest`: the pending action, the agent's reasoning, the policy reason, an expiry, and the decision with operator note.
-- `Event`: append-only log of everything (policy decisions, job status changes, agent messages, graph changes, scope changes). Drives the dashboard and the audit trail. Job output itself stays on disk (§6); events only reference it.
+- `Event`: append-only log of everything (policy decisions, kill switch changes, job status changes, agent messages, graph changes, scope changes). Each has an organization, an optional engagement (none for global events), an optional acting user, a `kind` such as `policy.decision`, and a JSON payload. Drives the dashboard and the audit trail. Job output itself stays on disk (§6); events only reference it.
 
 ### 5.3 Knowledge graph
 Typed entities with relationships. Every entity has a **deterministic identity key** and `first_seen_run`, `last_seen_run`, `status`.
@@ -308,7 +315,7 @@ Markdown report export from the findings view. DOCX/PDF later.
 
 ## 12. Testing strategy
 
-- **Unit:** policy gate (scope extraction, lookalike domains, IPv6, exclusions, apex-vs-wildcard, third-party resolution, pinning changes, windows, re-evaluation of approved actions), parsers (with recorded fixtures), identity keys, reconciliation logic (including `stale` vs `fixed`).
+- **Unit:** policy gate (verdict precedence, kill switches, scope extraction, lookalike domains, IPv6, exclusions, apex-vs-wildcard, third-party resolution, pinning changes, windows, re-evaluation of approved actions), parsers (with recorded fixtures), identity keys, reconciliation logic (including `stale` vs `fixed`).
 - **Replay:** run the orchestrator and agents against recorded tool outputs, with no network access. Use this for agent regressions without scanning anything.
 - **Lab:** end-to-end runs against the `lab` compose profile.
 - Each new tool lands with a parser and at least one fixture.
