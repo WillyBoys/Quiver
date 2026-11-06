@@ -55,6 +55,8 @@ put "/engagements/$ENG_ID/kill-switch" '{"engaged":false,"reason":"smoke test"}'
 curl -s -b "$JAR" "$API/kill-switch" | grep -q '"engaged":false' || fail "global kill switch unreadable"
 [ "$(curl -s -b "$JAR" "$API/engagements/$ENG_ID/suggestions")" = "[]" ] \
   || fail "suggestions list unexpected"
+[ "$(curl -s -b "$JAR" "$API/engagements/$ENG_ID/resolutions")" = "[]" ] \
+  || fail "resolutions list unexpected"
 
 cp "$JAR" "$OLD"
 [ "$(status -b "$JAR" -X POST "$API/auth/logout")" = "204" ] || fail "logout failed"

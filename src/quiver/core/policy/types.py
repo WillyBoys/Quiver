@@ -80,3 +80,7 @@ class GateDecision:
     targets: tuple[TargetCheck, ...] = ()
     # Out-of-scope targets to record as scope suggestions, already normalized.
     suggest: tuple[NormalizedScope, ...] = ()
+    # (hostname, addresses) the action may contact: the runner pins jobs to these.
+    resolutions: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    # Hostnames seen for the first time, whose addresses the store should pin.
+    new_pins: tuple[tuple[str, tuple[str, ...]], ...] = ()
