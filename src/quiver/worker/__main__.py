@@ -1,27 +1,39 @@
-"""Worker entry point.
+"""Worker entry point: runs the job scheduler until SIGTERM (Blueprint §6).
 
-Placeholder until the job runner lands (Blueprint §6, build step 8): it starts, logs, and
-waits for a stop signal so the Compose stack has its final shape.
+The worker gates jobs and hands allowed ones to the executor; it never starts a process.
 """
 
+import asyncio
 import logging
 import signal
-import threading
 
 import quiver
+from quiver.core.config import get_settings
+from quiver.core.db import make_engine, make_sessionmaker
+from quiver.worker.scheduler import Scheduler
 
 log = logging.getLogger("quiver.worker")
 
 
+async def _main() -> None:
+    settings = get_settings()
+    engine = make_engine(settings)
+    stop = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, stop.set)
+
+    log.info("worker %s started (specs: %s)", quiver.__version__, settings.job_spec_dir)
+    try:
+        await Scheduler(make_sessionmaker(engine), settings).run(stop)
+    finally:
+        await engine.dispose()
+    log.info("worker stopped")
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
-    stop = threading.Event()
-    for sig in (signal.SIGTERM, signal.SIGINT):
-        signal.signal(sig, lambda *_: stop.set())
-
-    log.info("worker %s started (placeholder: no jobs are executed yet)", quiver.__version__)
-    stop.wait()
-    log.info("worker stopping")
+    asyncio.run(_main())
 
 
 if __name__ == "__main__":

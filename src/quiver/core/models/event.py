@@ -4,7 +4,7 @@ status, agent messages, and graph changes. Drives the dashboard and the audit tr
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, func
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Identity, Index, String, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -15,6 +15,9 @@ class Event(IdMixin, Base):
     __tablename__ = "events"
     __table_args__ = (Index("ix_events_engagement_id_created_at", "engagement_id", "created_at"),)
 
+    # Strictly increasing in insert order: the log's true order (several events written in one
+    # transaction share created_at) and the cursor for the live event stream.
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), unique=True)
     org_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id"), index=True)
     # None for organization-wide events such as the global kill switch.
     engagement_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("engagements.id"))

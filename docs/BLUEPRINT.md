@@ -75,9 +75,11 @@ Worth carrying forward from v1 as *content*: tool definitions in `backend/app/db
                 └────────────────────────────────────────┘
 ```
 
-**Containers:** `api`, `worker`, `db` (Postgres), `bridge`, `frontend`. An optional `lab` compose profile adds vulnerable targets (e.g. Juice Shop) for end-to-end testing.
+**Containers:** `api`, `worker`, `executor`, `db` (Postgres), `bridge`, `frontend`. An optional `lab` compose profile adds vulnerable targets (e.g. Juice Shop) for end-to-end testing.
 
-**Key rule:** only the worker's tool runner can start a process, and only after the policy gate allows it. The bridge, API, and agents cannot execute anything directly.
+The **executor** is the only container that starts tool processes. It holds the tools and nothing else: no secrets, no database access, and no network route to the database. The worker hands it allowed jobs through files (§6), so a tool, even an approved free-form `run_command` or a compromised binary, cannot read Quiver's credentials or reach its database.
+
+**Key rule:** only the executor starts processes, and only for jobs whose spec the worker wrote after the policy gate allowed them. The executor cannot create specs (it mounts them read-only). The bridge, API, worker, and agents cannot execute anything directly.
 
 ## 4. Policy gate
 
@@ -110,14 +112,18 @@ Checks:
    - For `run_command`, a URL with an excluded path below it → NEEDS_APPROVAL, since a free-form command may crawl.
    - **Resolution** (non-passive tiers): every in-scope hostname, including the host of a URL target, is resolved before evaluation, and each answer must lead somewhere testable. A failed or partial answer → NEEDS_APPROVAL. Any address that is loopback, link-local (including cloud metadata), multicast, reserved, or unspecified → DENY. An excluded address → DENY. A private or otherwise non-public address that no include entry covers → DENY. A name matched only by a wildcard whose uncovered addresses or CNAME chain belong to a known third-party provider → DENY, and the exact hostname is suggested. Then pinning: the first acceptable answer is pinned; later answers within the pin pass, and new addresses → NEEDS_APPROVAL. More than 20 names in one action are not resolved, and the action needs approval.
 5. **Testing window:** outside the engagement's windows → DEFER until the next opening; no windows → DEFER with no end time. **Passive tools are exempt**: they contact third parties, never the asset.
-6. **Rate, concurrency, and usage budgets:** per-target and per-engagement limits, plus the engagement's model-usage budget → DEFER. Rate and concurrency limits are built with the job queue (step 8), since they count real executions, not decisions; the usage budget with agent budgets (step 16).
+6. **Rate, concurrency, and usage budgets** → DEFER for 15 seconds, then gated again. Per engagement: jobs running at once (default 3), jobs started per minute (default 30); per target host or network: jobs running at once (default 1). Engagements can override each limit (1–1000). They count real jobs (dispatched or running), from a snapshot the worker passes in. The model-usage budget joins this check with agent budgets (step 16).
 7. **Risk tier vs engagement autonomy** → ALLOW, NEEDS_APPROVAL, or DENY when the tier is `off`.
 
 Every decision is written to the event log as a `policy.decision` event: tool, argv, parameters, requester, verdict, every check with its reason, every target with the scope entry that decided it, and every DNS answer used.
 
 `evaluate()` never touches the network. The store computes `hostnames_to_resolve()`, resolves them through an injectable `Resolver` (`quiver.core.policy.resolve`; dnspython in the worker, a static table in tests), and passes the answers and the stored pins into the context. The API never resolves names.
 
-**Re-evaluation at execution:** an approved or deferred action goes through the gate again immediately before it runs. Scope, window, or kill switch may have changed while it waited. Approvals expire after a configurable period, and an expired approval must be requested again.
+**Re-evaluation at execution:** an approved or deferred action goes through the gate again immediately before it runs. Scope, window, or kill switch may have changed while it waited. Approvals expire after a configurable period (`approval_ttl_hours`, default 24) if the job has not started, and an expired approval must be requested again.
+
+**An approval covers exactly the reasons the operator saw.** When the gate re-evaluates an approved job, it passes only if every reason it now asks approval for was among the approved reasons (`apply_approval`). A new reason, such as another target or a hostname that now resolves somewhere new, creates a new approval request. Approval never overrides DENY or DEFER.
+
+**Running jobs:** an engaged kill switch (global or engagement) or an archived engagement cancels every job that has not finished; running ones are stopped through the executor. After any scope change, running jobs gated before it are gated again, and cancelled if they are now denied.
 
 ### 4.1 Scope semantics
 
@@ -179,9 +185,9 @@ Engagements can override each tier with `auto`, `approval`, or `off` (DENY), exc
 ### 5.2 Execution layer
 - `Run`: one execution of an engagement (scheduled, triggered, or on demand). Holds budget usage and a summary of what changed.
 - `AgentRun`: one agent session within a run. Has phase, role, parent, status, budget, and the bridge session ID for resume.
-- `Job`: one tool execution. Status, **worker label** (`local` for now), argv, exit code, timings, and a pointer to raw output.
-- `ApprovalRequest`: the pending action, the agent's reasoning, the policy reason, an expiry, and the decision with operator note.
-- `Event`: append-only log of everything (policy decisions, kill switch changes, job status changes, agent messages, graph changes, scope changes). Each has an organization, an optional engagement (none for global events), an optional acting user, a `kind` such as `policy.decision`, and a JSON payload. Drives the dashboard and the audit trail. Job output itself stays on disk (§6); events only reference it.
+- `Job`: one tool execution. Tool, structured parameters, the argv built from them (fixed at submission, so what is approved is what runs), requester, status, the latest gate or executor reason, the targets and pinned addresses from the last gate decision, **worker label** (`local` for now), timings, exit code, and output size. Raw output stays on disk (§6). Statuses: `submitted` → `queued` | `deferred` | `awaiting_approval` | `denied`; `queued` → `dispatched` → `running` → `succeeded` | `failed` | `timed_out` | `lost`; anything unfinished → `cancelled`.
+- `ApprovalRequest`: the job (the exact argv and targets), the reasons the gate asked approval for, status (`pending`, `approved`, `denied`, `expired`), the decision with operator note, and an expiry once approved. The agent's reasoning is added in step 15. One pending request per job at a time.
+- `Event`: append-only log of everything (policy decisions, kill switch changes, job status changes, agent messages, graph changes, scope changes). Each has an organization, an optional engagement (none for global events), an optional acting user, a `kind` such as `policy.decision`, a JSON payload, and a strictly increasing `seq` (the log's order, and the cursor for the live stream). Drives the dashboard and the audit trail. Job output itself stays on disk (§6); events only reference it.
 
 ### 5.3 Knowledge graph
 Typed entities with relationships. Every entity has a **deterministic identity key** and `first_seen_run`, `last_seen_run`, `status`.
@@ -216,9 +222,11 @@ candidate ──validated / operator──▶ confirmed ──same check ran, ne
 
 ## 6. Execution
 
-- **Queue:** Postgres-backed (`SELECT … FOR UPDATE SKIP LOCKED`); no extra broker needed. Jobs carry a worker label so remote workers can be added later.
-- **Runner:** executes argv without a shell, in the Kali-based worker image. Carries over v1's idle and hard timeouts and its output cap. Typed tools are invoked with off-scope redirect following disabled and with pinned addresses where supported (§4.1).
-- **Raw output** is stored on disk (`data/jobs/<job_id>/`) and referenced from the `Job`; it does not go into the database. Live output streams to the dashboard from those files.
+- **Queue:** Postgres-backed (`SELECT … FOR UPDATE SKIP LOCKED`); no extra broker needed. Jobs carry a worker label so remote workers can be added later. Jobs are created by `enqueue()` (playbook and agents) or by the operator (`POST /engagements/{id}/jobs`). Either way the request is only recorded: the API never gates or runs anything.
+- **Scheduler** (worker, one loop per second): collects executor results; applies cancellations; gates due jobs and writes the spec for allowed ones; marks jobs the executor never started (60 s) or never finished (hard timeout + 60 s) as `lost`.
+- **Handoff:** two volumes, each writable by one side only. The worker writes `job_specs/<job_id>.json` (argv, timeouts, output cap) and `<job_id>.cancel`; the executor mounts them read-only. The executor writes `job_output/<job_id>/` (`started`, `output.log`, `result.json`); the worker mounts it read-only and treats it as untrusted, because tools run where it is written. Files are written to a temporary name and renamed.
+- **Executor:** runs the argv without a shell, in a new session (so the whole process group can be killed), with stdin from `/dev/null`, the job's output directory as working directory and `HOME`, and an environment that inherits nothing (`PATH`, `LANG` only). Output is read in 64 KB chunks, not lines, and capped (10 MB). Carries over v1's idle (10 min) and hard (45 min) timeouts. Timeouts, the cap, cancellation, and the main process exiting all kill the whole process group. Jobs interrupted by an executor restart are reported `lost`. The image is slim Debian until the first tools arrive (step 10), when it becomes the Kali-based tools image. Typed tools are invoked with off-scope redirect following disabled and with pinned addresses where supported (§4.1).
+- **Raw output** is stored on disk (`job_output/<job_id>/output.log`) and referenced from the `Job`; it does not go into the database. Live output streams to the dashboard from those files.
 - **Live updates:** the worker writes events to Postgres and signals with `LISTEN/NOTIFY`; the API relays them to the dashboard over SSE.
 - **Parsers:** each typed tool has a parser that turns output into graph changes (e.g. nmap XML → `Host`/`Service`). Parsers are pure functions and are tested with recorded fixtures.
 - **Restart safety:** jobs, agent runs, and approvals live in the database. After a restart the worker picks up unfinished work, and agent sessions resume through the bridge.

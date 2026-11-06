@@ -10,22 +10,22 @@ cannot decide returns NEEDS_APPROVAL, never ALLOW.
 DNS is the one input that needs I/O. The store resolves `hostnames_to_resolve(request, ctx)`
 first and passes the answers in `ctx.resolutions`, so this module never touches the network.
 
-Rate and concurrency limits arrive with the job queue (step 8), and the model-usage budget
-with agent budgets (step 16).
+Check 6 (limits) needs a snapshot of the engagement's running jobs (`Load`), which the worker
+supplies. The model-usage budget joins check 6 with agent budgets (step 16).
 """
 
 import ipaddress
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field, replace
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from urllib.parse import urlsplit
 
 from quiver.core.models.engagement import EngagementStatus
 from quiver.core.policy.argv import extract_targets
 from quiver.core.policy.providers import ProviderIndex
 from quiver.core.policy.resolve import Resolution
-from quiver.core.policy.tools import ToolRegistry, ToolSpec
+from quiver.core.policy.tools import DEFAULT_LIMITS, ToolRegistry, ToolSpec
 from quiver.core.policy.types import (
     SEVERITY,
     ActionRequest,
@@ -50,6 +50,17 @@ from quiver.core.scope_match import Scope, ScopeResult
 
 # More hostnames than this in one action are not resolved; the operator decides instead.
 MAX_RESOLVE = 20
+# How long a job deferred by a limit waits before it is gated again.
+LIMIT_RETRY = timedelta(seconds=15)
+
+
+@dataclass(frozen=True)
+class Load:
+    """The engagement's job activity when the gate runs (check 6)."""
+
+    running: int = 0  # dispatched or running jobs
+    started_last_minute: int = 0
+    running_targets: Mapping[str, int] = field(default_factory=dict)  # target key -> jobs
 
 
 @dataclass(frozen=True)
@@ -78,6 +89,8 @@ class GateContext:
     resolutions: Mapping[str, Resolution] = field(default_factory=dict)
     pins: Mapping[str, frozenset[str]] = field(default_factory=dict)
     providers: ProviderIndex | None = None  # None: third-party hosting cannot be checked
+    limits: Mapping[str, int] = field(default_factory=lambda: dict(DEFAULT_LIMITS))
+    load: Load | None = None  # None: not gating a job (no limits apply)
     org_id: uuid.UUID | None = None  # for recording; not used by evaluate()
 
 
@@ -106,11 +119,57 @@ def evaluate(request: ActionRequest, ctx: GateContext, *, approved: bool = False
         if tier is not RiskTier.PASSIVE and ctx.scope is not None:
             _resolution(targets, ctx, add, suggest, pinned, new_pins)
         _window(tier, ctx, add)
-        # Check 6, rate/concurrency/usage budgets: step 8 (jobs) and step 16 (agent usage).
+        _limits(target_keys(targets), ctx, add)  # usage budget joins in step 16
         _autonomy(tier, ctx, add)
 
     decision = _decide(checks, approved, tier, targets, tuple(suggest))
     return replace(decision, resolutions=tuple(pinned.items()), new_pins=tuple(new_pins.items()))
+
+
+def apply_approval(decision: GateDecision, approved_reasons: Iterable[str]) -> GateDecision:
+    """The decision once an operator approval is taken into account. An approval covers
+    exactly the reasons the operator saw: if the gate now asks for any other reason, the
+    decision still needs approval. DENY and DEFER are never covered."""
+    approved = set(approved_reasons)
+    pending = [c for c in decision.checks if c.verdict is Verdict.NEEDS_APPROVAL]
+    if not pending or not {c.reason for c in pending} <= approved:
+        return decision
+    checks = [
+        replace(c, verdict=Verdict.ALLOW, reason=f"approved: {c.reason}")
+        if c.verdict is Verdict.NEEDS_APPROVAL
+        else c
+        for c in decision.checks
+    ]
+    redone = _decide(checks, False, decision.tier, list(decision.targets), decision.suggest)
+    if redone.verdict is Verdict.ALLOW:
+        redone = replace(redone, reason="approved by the operator")
+    return replace(redone, resolutions=decision.resolutions, new_pins=decision.new_pins)
+
+
+def approval_reasons(decision: GateDecision) -> list[str]:
+    """What the operator is asked to approve: every NEEDS_APPROVAL reason, in check order."""
+    return [c.reason for c in decision.checks if c.verdict is Verdict.NEEDS_APPROVAL]
+
+
+def target_keys(targets: Iterable[TargetCheck]) -> list[str]:
+    """Stable keys for the hosts and networks an action touches (per-target limits): the
+    normalized hostname for names and URLs, the address or network otherwise."""
+    keys: dict[str, None] = {}
+    for tc in targets:
+        if tc.decision.result is not ScopeResult.IN_SCOPE:
+            continue
+        key = _hostname_of(tc.target)
+        if key is None:
+            value = tc.target.strip()
+            if "://" in value:
+                value = urlsplit(value).hostname or value
+            try:
+                net = ipaddress.ip_network(value, strict=False)
+                key = str(net.network_address) if net.num_addresses == 1 else str(net)
+            except ValueError:
+                continue
+        keys[key] = None
+    return list(keys)
 
 
 def hostnames_to_resolve(request: ActionRequest, ctx: GateContext) -> set[str]:
@@ -440,6 +499,45 @@ def _window(tier: RiskTier, ctx: GateContext, add: AddCheck) -> None:
             f"outside testing windows until {state.next_open.isoformat()}",
             until=state.next_open,
         )
+
+
+def _limits(keys: list[str], ctx: GateContext, add: AddCheck) -> None:
+    load = ctx.load
+    if load is None:
+        return
+    limits, until = ctx.limits, ctx.now + LIMIT_RETRY
+    deferred = False
+    if load.running >= limits["max_concurrent_jobs"]:
+        add(
+            "limits",
+            Verdict.DEFER,
+            f"{load.running} jobs already running (limit {limits['max_concurrent_jobs']})",
+            until=until,
+        )
+        deferred = True
+    if load.started_last_minute >= limits["max_jobs_per_minute"]:
+        add(
+            "limits",
+            Verdict.DEFER,
+            f"{load.started_last_minute} jobs started in the last minute "
+            f"(limit {limits['max_jobs_per_minute']})",
+            until=until,
+        )
+        deferred = True
+    busy = [
+        k for k in keys if load.running_targets.get(k, 0) >= limits["max_concurrent_per_target"]
+    ]
+    if busy:
+        add(
+            "limits",
+            Verdict.DEFER,
+            f"already running against {', '.join(busy)} "
+            f"(limit {limits['max_concurrent_per_target']} per target)",
+            until=until,
+        )
+        deferred = True
+    if not deferred:
+        add("limits", Verdict.ALLOW, "within job limits")
 
 
 def _autonomy(tier: RiskTier, ctx: GateContext, add: AddCheck) -> None:

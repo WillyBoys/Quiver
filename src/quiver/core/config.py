@@ -54,6 +54,18 @@ class Settings(BaseSettings):
     # whole API without requiring a login. Enable for local development only.
     api_docs: bool = False
 
+    # Jobs (Blueprint §6). The worker writes specs and reads output; the executor the reverse.
+    job_spec_dir: Path = Path("/data/job_specs")
+    job_output_dir: Path = Path("/data/job_output")
+    job_idle_timeout: int = Field(default=600, ge=1, le=3600)  # seconds without output
+    job_hard_timeout: int = Field(default=2700, ge=1, le=4 * 3600)  # seconds in total
+    job_output_cap: int = Field(default=10 * 1024 * 1024, ge=1024, le=50 * 1024 * 1024)
+    # How long an approval stays valid for the job to start; after that it is asked again.
+    approval_ttl_hours: int = Field(default=24, ge=1, le=24 * 30)
+    scheduler_interval: float = Field(default=1.0, gt=0, le=60)
+    # A dispatched job the executor has not started by then is marked lost.
+    dispatch_timeout: int = Field(default=60, ge=5, le=3600)
+
     def db_url(self) -> URL | str:
         if self.database_url is not None:
             return self.database_url.get_secret_value()
