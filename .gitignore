@@ -7,8 +7,9 @@
 *.p12
 *.pfx
 
-# Runtime data (databases, raw tool output, logs)
-data/
+# Runtime data (databases, raw tool output, logs). Anchored to the repo root so package data
+# such as src/quiver/core/policy/data/ is still committed.
+/data/
 *.log
 
 # Python
