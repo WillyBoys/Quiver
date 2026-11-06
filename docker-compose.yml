@@ -93,6 +93,7 @@ services:
       retries: 5
       start_period: 10s
 
+  # Gates jobs and hands allowed ones to the executor. Never starts a tool process.
   worker:
     <<: *hardened
     build:
@@ -103,13 +104,35 @@ services:
       QUIVER_DB_NAME: quiver
       QUIVER_DB_USER: quiver
       QUIVER_DB_PASSWORD_FILE: /run/secrets/postgres_password
+      QUIVER_JOB_SPEC_DIR: /data/job_specs
+      QUIVER_JOB_OUTPUT_DIR: /data/job_output
     secrets:
       - postgres_password
+    volumes:
+      - job_specs:/data/job_specs # the worker writes job specs and cancel files
+      - job_output:/data/job_output:ro # written where tools run: read-only, untrusted
     networks:
-      - backend
+      - backend # database, and DNS for the policy gate
     depends_on:
       migrate:
         condition: service_completed_successfully
+
+  # The only service that starts processes (Blueprint §3). No secrets, no database, and no
+  # route to the backend network: a tool, even an approved run_command, cannot read Quiver's
+  # credentials or reach its database. Specs are read-only here, so it cannot create jobs.
+  # cap_add stays empty until raw-socket scans need NET_RAW (nmap, step 11).
+  executor:
+    <<: *hardened
+    build:
+      context: .
+      dockerfile: docker/executor.Dockerfile
+    volumes:
+      - job_specs:/data/job_specs:ro
+      - job_output:/data/job_output
+    networks:
+      - egress
+    # On stop, running jobs are cancelled (whole process groups killed) before exit.
+    stop_grace_period: 20s
 
   frontend:
     <<: *hardened
@@ -134,7 +157,11 @@ secrets:
 
 volumes:
   pgdata:
+  job_specs:
+  job_output:
 
 networks:
   backend:
   frontend:
+  # Internet access for tools, and nothing else of Quiver's.
+  egress:

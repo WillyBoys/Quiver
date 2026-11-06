@@ -58,6 +58,49 @@ curl -s -b "$JAR" "$API/kill-switch" | grep -q '"engaged":false' || fail "global
 [ "$(curl -s -b "$JAR" "$API/engagements/$ENG_ID/resolutions")" = "[]" ] \
   || fail "resolutions list unexpected"
 
+# Jobs end to end: API → worker (gate, approval) → executor → result.
+field() { python3 -c "import json,sys; d=json.load(sys.stdin); print(d$1)"; }
+put "/engagements/$ENG_ID/authorization" \
+  '{"authorized_by":"Smoke","authorizer_organization":"CI","authorized_on":"2026-01-01"}' >/dev/null
+post "/engagements/$ENG_ID/scope" '{"value":"203.0.113.0/24","reason":"smoke test"}' >/dev/null
+post "/engagements/$ENG_ID/windows" \
+  '{"timezone":"UTC","days":[1,2,3,4,5,6,7],"start_time":"00:00","end_time":"00:00"}' >/dev/null
+curl -s -b "$JAR" -X PATCH -H 'Content-Type: application/json' -d '{"status":"active"}' \
+  "$API/engagements/$ENG_ID" | grep -q '"status":"active"' || fail "engagement did not activate"
+
+job_status() { curl -s -b "$JAR" "$API/engagements/$ENG_ID/jobs/$1" | field '["status"]'; }
+wait_for() { # wait_for <job id> <status>
+  for _ in $(seq 1 60); do
+    s="$(job_status "$1")"
+    [ "$s" = "$2" ] && return 0
+    sleep 1
+  done
+  fail "job $1 is '$s', expected '$2': $(curl -s -b "$JAR" "$API/engagements/$ENG_ID/jobs/$1")"
+}
+
+JOB="$(post "/engagements/$ENG_ID/jobs" '{"tool":"run_command","params":{"argv":["echo","smoke"]}}' \
+  | field '["id"]')" || fail "job not accepted"
+wait_for "$JOB" awaiting_approval
+APPROVAL="$(curl -s -b "$JAR" "$API/engagements/$ENG_ID/approvals?status=pending" | field '[0]["id"]')"
+post "/engagements/$ENG_ID/approvals/$APPROVAL/approve" '{"note":"smoke test"}' \
+  | grep -q '"status":"approved"' || fail "approval failed"
+wait_for "$JOB" succeeded
+[ "$(docker compose exec -T executor cat "/data/job_output/$JOB/output.log")" = "smoke" ] \
+  || fail "job output missing"
+
+DENIED="$(post "/engagements/$ENG_ID/jobs" \
+  '{"tool":"run_command","params":{"argv":["curl","http://198.51.100.7/"]}}' | field '["id"]')"
+wait_for "$DENIED" denied
+
+# The executor is isolated: no secrets, no database, and job specs are read-only.
+docker compose exec -T executor sh -c 'ls /run/secrets' >/dev/null 2>&1 \
+  && fail "executor can see secrets"
+docker compose exec -T executor sh -c 'touch /data/job_specs/forged.json' >/dev/null 2>&1 \
+  && fail "executor can write job specs"
+docker compose exec -T executor python -c \
+  'import socket; socket.create_connection(("db", 5432), timeout=3)' >/dev/null 2>&1 \
+  && fail "executor can reach the database"
+
 cp "$JAR" "$OLD"
 [ "$(status -b "$JAR" -X POST "$API/auth/logout")" = "204" ] || fail "logout failed"
 [ "$(status -b "$OLD" "$API/auth/me")" = "401" ] || fail "session still valid after logout"
