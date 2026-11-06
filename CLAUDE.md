@@ -40,7 +40,8 @@ One Python package, `src/quiver/`, built into separate container images per serv
 |---|---|
 | `src/quiver/core/` | Shared models, schemas, identity keys, **policy gate** (pure functions) |
 | `src/quiver/api/` | FastAPI app: routes, auth, SSE event stream |
-| `src/quiver/worker/` | Orchestrator, scheduler, tool runner, MCP tool server |
+| `src/quiver/worker/` | Orchestrator, job queue + scheduler (gates and dispatches jobs), MCP tool server |
+| `src/quiver/executor/` | Runs job processes (stdlib only); its own container with no secrets |
 | `src/quiver/worker/tracks/<track>/` | Per-track entity types, tools, parsers, playbook, phases, roles |
 | `src/quiver/bridge/` | Agent runtime (Claude Agent SDK); its own container |
 | `tests/` | Unit tests, replay fixtures, lab end-to-end |
@@ -49,8 +50,8 @@ One Python package, `src/quiver/`, built into separate container images per serv
 
 ## Invariants — never break these
 
-- **Only the worker's runner starts processes**, and only after the policy gate returns ALLOW. The API, bridge, and agents never execute anything directly.
-- **Commands run as argv without a shell.** Never use `shell=True` or `bash -c` in the runner.
+- **Only the executor starts processes**, and only for jobs whose spec the worker wrote after the policy gate returned ALLOW. The executor mounts specs read-only and has no secrets and no database access. The API, worker, bridge, and agents never execute anything directly.
+- **Commands run as argv without a shell.** Never use `shell=True` or `bash -c` in the executor. Tools get a scrubbed environment and their own process group.
 - **The settings page is the only source of scope.** Agents and scanners may create scope *suggestions*; they never add scope.
 - **Deny if definitely wrong, ask if uncertain, allow only if definitely safe.** When a check cannot decide, the gate returns NEEDS_APPROVAL, never ALLOW.
 - **Tool output is untrusted.** It is target-controlled. Label it as data when it is passed to an agent; never let it influence policy decisions.

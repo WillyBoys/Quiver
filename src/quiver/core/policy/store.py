@@ -29,12 +29,13 @@ from quiver.core.models import (
 from quiver.core.policy.gate import (
     AuthorizationPeriod,
     GateContext,
+    Load,
     evaluate,
     hostnames_to_resolve,
 )
 from quiver.core.policy.providers import ProviderIndex, bundled_providers
 from quiver.core.policy.resolve import Resolution, Resolver, resolve_all
-from quiver.core.policy.tools import ToolRegistry, effective_autonomy
+from quiver.core.policy.tools import ToolRegistry, effective_autonomy, effective_limits
 from quiver.core.policy.types import ActionRequest, GateDecision
 from quiver.core.policy.windows import WindowSpec
 from quiver.core.scope import ScopeKind
@@ -82,6 +83,7 @@ async def load_context(
         scope=scope,
         scope_error=scope_error,
         autonomy=effective_autonomy(eng.autonomy),
+        limits=effective_limits(eng.limits),
         windows=tuple(WindowSpec.from_row(w) for w in windows),
         global_kill=_kill_reason(org),
         engagement_kill=_kill_reason(eng),
@@ -226,10 +228,13 @@ async def gate(
     providers: ProviderIndex | None = None,
     approved: bool = False,
     now: datetime | None = None,
+    load: Load | None = None,
 ) -> GateDecision:
     """Load the engagement's context, resolve the in-scope names the request touches,
-    evaluate it, and record the decision. `providers` defaults to the bundled snapshot."""
+    evaluate it, and record the decision. `providers` defaults to the bundled snapshot;
+    `load` (the engagement's job activity) enables the job limits."""
     ctx = await load_context(db, request.engagement_id, registry, now)
+    ctx = replace(ctx, load=load)
     hosts = hostnames_to_resolve(request, ctx)
     resolutions = await resolve_all(resolver, hosts)
     ctx = replace(

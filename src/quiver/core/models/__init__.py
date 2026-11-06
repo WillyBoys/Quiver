@@ -15,8 +15,18 @@ from quiver.core.models.engagement import (
     TestingWindow,
 )
 from quiver.core.models.event import Event
+from quiver.core.models.execution import (
+    FINAL_JOB_STATUSES,
+    ApprovalRequest,
+    ApprovalStatus,
+    Job,
+    JobStatus,
+)
 
 __all__ = [
+    "FINAL_JOB_STATUSES",
+    "ApprovalRequest",
+    "ApprovalStatus",
     "AuthSession",
     "Authorization",
     "Base",
@@ -25,6 +35,8 @@ __all__ = [
     "Event",
     "HostResolution",
     "IdMixin",
+    "Job",
+    "JobStatus",
     "Organization",
     "OwnedMixin",
     "ScopeAction",

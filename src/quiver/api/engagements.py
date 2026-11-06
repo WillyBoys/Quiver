@@ -26,7 +26,14 @@ from quiver.core.models import (
     ScopeEntry,
     TestingWindow,
 )
-from quiver.core.policy import Autonomy, RiskTier, effective_autonomy, validate_autonomy
+from quiver.core.policy import (
+    Autonomy,
+    RiskTier,
+    effective_autonomy,
+    effective_limits,
+    validate_autonomy,
+    validate_limits,
+)
 from quiver.core.scope import ScopeKind, ScopeMode, ScopeValueError, normalize_scope_value
 
 router = APIRouter(
@@ -81,6 +88,8 @@ class EngagementUpdate(BaseModel):
     status: EngagementStatus | None = None
     # Per-tier overrides of the default autonomy; replaces the previous overrides.
     autonomy: dict[RiskTier, Autonomy] | None = None
+    # Job limit overrides (gate check 6); replaces the previous overrides.
+    limits: dict[str, int] | None = None
 
     @field_validator("autonomy")
     @classmethod
@@ -88,6 +97,11 @@ class EngagementUpdate(BaseModel):
         if v is not None:
             validate_autonomy(v)
         return v
+
+    @field_validator("limits")
+    @classmethod
+    def _valid_limits(cls, v):
+        return None if v is None else validate_limits(v)
 
 
 class EngagementOut(OrmOut):
@@ -97,6 +111,7 @@ class EngagementOut(OrmOut):
     tracks: list[str]
     status: EngagementStatus
     autonomy: dict[RiskTier, Autonomy]  # effective: defaults plus overrides
+    limits: dict[str, int]  # effective: defaults plus overrides
     kill_switch_at: datetime | None
     kill_switch_reason: str
     created_at: datetime
@@ -106,6 +121,11 @@ class EngagementOut(OrmOut):
     @classmethod
     def _effective(cls, v):
         return effective_autonomy(v)
+
+    @field_validator("limits", mode="before")
+    @classmethod
+    def _effective_limits(cls, v):
+        return effective_limits(v)
 
 
 class ScopeEntryCreate(BaseModel):
@@ -330,6 +350,8 @@ async def update_engagement(
         eng.description = body.description
     if body.autonomy is not None:
         eng.autonomy = validate_autonomy(body.autonomy)
+    if body.limits is not None:
+        eng.limits = body.limits
 
     try:
         await db.commit()
@@ -402,6 +424,7 @@ async def create_scope_entry(
             status.HTTP_409_CONFLICT, f"{normalized.value} is already in scope as {mode}"
         ) from exc
     db.add(_change(entry, user, ScopeAction.ADD, reason, suggestion_id))
+    eng.scope_changed_at = datetime.now(UTC)
     await db.flush()
     return entry
 
@@ -427,6 +450,8 @@ async def remove_scope_entry(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Scope entry not found")
     entry.removed_at = datetime.now(UTC)
     entry.removed_by = user.id
+    # Running jobs gated before this are checked again and cancelled if now out of scope.
+    eng.scope_changed_at = entry.removed_at
     db.add(_change(entry, user, ScopeAction.REMOVE, body.reason))
     await db.commit()
 
