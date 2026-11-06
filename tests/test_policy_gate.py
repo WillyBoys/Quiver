@@ -1,5 +1,6 @@
 """Policy gate: evaluate() is pure, so every rule is tested against a hand-built context."""
 
+import ipaddress
 import uuid
 from dataclasses import replace
 from datetime import UTC, date, datetime, time
@@ -22,6 +23,8 @@ from quiver.core.policy import (
     effective_autonomy,
     evaluate,
 )
+from quiver.core.policy.providers import ProviderIndex
+from quiver.core.policy.resolve import Resolution
 from quiver.core.scope import ScopeKind, ScopeMode
 from quiver.core.scope_match import Scope, ScopeRule
 
@@ -75,6 +78,13 @@ BASE = GateContext(
     scope=SCOPE,
     autonomy=effective_autonomy({}),
     windows=(WEEKDAYS,),
+    # Every in-scope name these tests use resolves into the in-scope /24. DNS rules are
+    # tested in test_policy_resolution.py.
+    resolutions={
+        h: Resolution(h, (ipaddress.ip_address("203.0.113.10"),))
+        for h in ("example.com", "www.example.com", "shop.example.com", "app.partner.com")
+    },
+    providers=ProviderIndex({}, {}),
 )
 
 
@@ -108,9 +118,12 @@ def test_in_scope_discovery_inside_window_is_allowed():
         "authorization",
         "tool",
         "scope",
+        "resolution",
         "window",
         "autonomy",
     }
+    assert d.resolutions == (("www.example.com", ("203.0.113.10",)),)
+    assert d.new_pins == d.resolutions  # first sighting: pin it
 
 
 # --- kill switch ----------------------------------------------------------------------------

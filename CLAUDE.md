@@ -11,6 +11,7 @@ uv run ruff check . && uv run ruff format --check .   # lint + format check
 uvx pre-commit install               # once per clone: gitleaks, ruff, file checks on commit
 
 python3 scripts/init_secrets.py      # once: generate ./secrets (gitignored)
+python3 scripts/update_providers.py  # refresh third-party provider ranges (commit + review the diff)
 docker compose up -d --build         # full stack; API on 127.0.0.1:8000, UI on 127.0.0.1:3000
 docker compose logs -f api           # follow a service's logs
 docker compose down                  # stop (add -v to also delete the database volume)

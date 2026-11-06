@@ -166,6 +166,37 @@ class ScopeSuggestion(IdMixin, Base):
     scope_entry_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("scope_entries.id"))
 
 
+class HostResolution(IdMixin, Base):
+    """Pinned DNS resolution of an in-scope hostname (Blueprint §4.1).
+
+    Created the first time the gate lets an action reach the name. Later answers with
+    addresses outside `pinned_addresses` need approval; the operator accepts them through the
+    API, which adds them to the pin. The gate re-checks every address on every evaluation, so
+    accepting cannot make a forbidden, excluded, or private address testable.
+    """
+
+    __tablename__ = "host_resolutions"
+    __table_args__ = (
+        UniqueConstraint("engagement_id", "hostname", name="uq_host_resolutions_engagement_id"),
+    )
+
+    engagement_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("engagements.id"), index=True)
+    hostname: Mapped[str] = mapped_column(String(253))
+    pinned_addresses: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    last_addresses: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    last_cnames: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    last_error: Mapped[str] = mapped_column(Text, default="")
+    provider: Mapped[str] = mapped_column(String(50), default="")  # third party, if known
+    first_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    last_resolved_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    accepted_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
+
+
 class TestingWindow(IdMixin, Base):
     """When testing may run. No windows means no testing (the gate defers everything).
 
