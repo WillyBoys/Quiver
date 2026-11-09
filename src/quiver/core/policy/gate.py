@@ -46,7 +46,7 @@ from quiver.core.scope import (
     normalize_hostname,
     normalize_scope_value,
 )
-from quiver.core.scope_match import Scope, ScopeResult
+from quiver.core.scope_match import Scope, ScopeDecision, ScopeResult
 
 # More hostnames than this in one action are not resolved; the operator decides instead.
 MAX_RESOLVE = 20
@@ -272,6 +272,9 @@ def _collect_targets(
     part of the request cannot be read."""
     targets: list[TargetCheck] = []
     problems: list[str] = []
+    # Normalized domain -> decision, for declared domain-subtree parameters (passive only).
+    # The same name in the argv stands for the same subtree.
+    subtrees: dict[str, ScopeDecision] = {}
 
     # Declared target parameters.
     for name, param in spec.target_params.items():
@@ -282,18 +285,28 @@ def _collect_targets(
         if not isinstance(values, list | tuple) or not all(isinstance(v, str) for v in values):
             problems.append(f"target parameter {name!r} is not a string")
             continue
+        subtree_param = param.domain_subtree and tier is RiskTier.PASSIVE
         for v in values:
-            targets.append(
-                TargetCheck(v, f"param:{name}", scope.check(v, url_subtree=param.url_subtree))
-            )
+            decision = scope.check(v, url_subtree=param.url_subtree, domain_subtree=subtree_param)
+            targets.append(TargetCheck(v, f"param:{name}", decision))
+            key = _domain_key(v) if subtree_param else None
+            if key is not None:
+                subtrees[key] = decision
 
     # Everything in the argv that could be a target (defense in depth; the only check for
     # run_command). argv URLs are checked as the declared parameters are: as a subtree if any
     # declared parameter is one.
     subtree = any(p.url_subtree for p in spec.target_params.values())
+
+    def check(t: str) -> ScopeDecision:
+        key = _domain_key(t)
+        if key is not None and key in subtrees:
+            return subtrees[key]
+        return scope.check(t, url_subtree=subtree)
+
     extraction = extract_targets(request.argv)
     for t in extraction.definite:
-        targets.append(TargetCheck(t, "argv", scope.check(t, url_subtree=subtree)))
+        targets.append(TargetCheck(t, "argv", check(t)))
         if tier is RiskTier.ARBITRARY and "://" in t and not subtree:
             # A free-form command may crawl. An exclusion below the URL needs a human look.
             below = scope.check(t, url_subtree=True)
@@ -302,10 +315,28 @@ def _collect_targets(
                     f"{t}: a recursive request would reach an excluded path ({below.reason})"
                 )
     for t in extraction.possible_hosts:
-        targets.append(TargetCheck(t, "argv:possible", scope.check(t)))
+        targets.append(TargetCheck(t, "argv:possible", check(t)))
     for token, reason in extraction.uncertain:
         problems.append(f"cannot read argv token {token!r}: {reason}")
+
+    # Standard input is a target list: every name in it is a target, not maybe a file name.
+    for line in request.stdin:
+        if line.lstrip().startswith("-"):
+            problems.append(f"input line {line!r} starts with '-' and may be read as an option")
+    if request.stdin:
+        extraction = extract_targets(("-", *request.stdin))
+        for t in (*extraction.definite, *extraction.possible_hosts):
+            targets.append(TargetCheck(t, "stdin", check(t)))
+        for token, reason in extraction.uncertain:
+            problems.append(f"cannot read input token {token!r}: {reason}")
     return targets, problems
+
+
+def _domain_key(value: str) -> str | None:
+    try:
+        return normalize_hostname(value.strip())
+    except (ScopeValueError, ValueError):
+        return None
 
 
 def _target(

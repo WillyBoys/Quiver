@@ -16,8 +16,11 @@ repos:
       - id: check-merge-conflict
       - id: check-yaml
       - id: check-toml
+      # Recorded tool output is kept byte for byte (banners, truncated last lines).
       - id: end-of-file-fixer
+        exclude: ^tests/fixtures/tools/
       - id: trailing-whitespace
+        exclude: ^tests/fixtures/tools/
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.17.0

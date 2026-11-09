@@ -240,14 +240,21 @@ class Scope:
 
     # --- public API ---------------------------------------------------------------------
 
-    def check(self, target: str, *, url_subtree: bool = False) -> ScopeDecision:
+    def check(
+        self, target: str, *, url_subtree: bool = False, domain_subtree: bool = False
+    ) -> ScopeDecision:
         """Decide whether `target` is in scope.
 
         target: an IP, a CIDR (every address in it), a hostname, or an http(s) URL.
         url_subtree: for URL targets, whether the action reaches everything below the URL
             (crawlers, content discovery) rather than that single request.
+        domain_subtree: the target is a domain standing for the names below it, as in a
+            passive lookup that asks third parties which subdomains exist. Only the policy
+            gate's passive tier may use this (Blueprint §4.1).
         """
         try:
+            if domain_subtree:
+                return self._check_domain_subtree(target)
             return self._check(target, url_subtree)
         except _Uncertain as exc:
             return ScopeDecision(ScopeResult.UNCERTAIN, str(exc))
@@ -278,6 +285,33 @@ class Scope:
         if ip is not None:
             return self._check_ip(ip)
         return self._check_host(_hostname(value))
+
+    def _check_domain_subtree(self, target: str) -> ScopeDecision:
+        """Names below a domain. In scope when the domain itself is (exactly or through a
+        wildcard), or when `*.<domain>` is an include: that wildcard covers every name below
+        the domain even though it never covers the domain itself. Excluded when the domain is,
+        or when `*.<domain>` is an exclude (every name below it is excluded). Names found
+        below it are scope-checked one by one when they are recorded."""
+        value = target.strip()
+        if not value or any(c.isspace() or not c.isprintable() for c in value):
+            raise _Uncertain("target contains spaces or control characters")
+        if "://" in value or "/" in value or "*" in value or _ip(value) is not None:
+            raise _Uncertain(f"{value!r} is not a domain name; only a domain has names below it")
+        host = _hostname(value)
+        rule = self._wildcards[ScopeMode.EXCLUDE].get(host)
+        if rule is not None:
+            return ScopeDecision(
+                ScopeResult.EXCLUDED, f"names under {host} are excluded by *.{host}", rule
+            )
+        plain = self._check_host(host)
+        if plain.result is not ScopeResult.OUT_OF_SCOPE:
+            return plain
+        rule = self._wildcards[ScopeMode.INCLUDE].get(host)
+        if rule is not None:
+            return ScopeDecision(
+                ScopeResult.IN_SCOPE, f"names under {host} are covered by *.{host}", rule
+            )
+        return plain
 
     # --- IPs and networks -------------------------------------------------------------------
 

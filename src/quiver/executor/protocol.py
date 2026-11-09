@@ -31,6 +31,9 @@ MAX_IDLE_TIMEOUT = 3600
 MAX_HARD_TIMEOUT = 4 * 3600
 DEFAULT_OUTPUT_CAP = 10 * 1024 * 1024  # bytes (v1: 10 MB)
 MAX_OUTPUT_CAP = 50 * 1024 * 1024
+# Optional standard input (target lists), as UTF-8 text. The worker builds it from the tool's
+# typed parameters and the gate checks it; the executor only feeds it to the process.
+MAX_STDIN = 256 * 1024
 
 # Final statuses reported in result.json.
 SUCCEEDED = "succeeded"

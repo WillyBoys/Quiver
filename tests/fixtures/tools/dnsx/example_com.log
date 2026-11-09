@@ -1,0 +1,12 @@
+      _             __  __
+   __| | _ __   ___ \ \/ /
+  / _' || '_ \ / __| \  / 
+ | (_| || | | |\__ \ /  \ 
+  \__,_||_| |_||___//_/\_\
+
+		projectdiscovery.io
+
+{"host":"www.example.com","ttl":103,"resolver":["1.0.0.1:53","208.67.222.222:53","8.8.8.8:53"],"a":["203.0.113.10","203.0.113.11"],"aaaa":["2001:db8::10","2001:db8::11"],"status_code":"NOERROR","timestamp":"2026-11-09T14:40:52.143677459Z","query-time":"9.514s"}
+{"host":"example.com","ttl":79,"resolver":["1.0.0.1:53","9.9.9.9:53","208.67.222.222:53"],"a":["203.0.113.10","203.0.113.11"],"aaaa":["2001:db8::10","2001:db8::11"],"status_code":"NOERROR","timestamp":"2026-11-09T14:40:54.400209129Z","query-time":"889ms"}
+{"host":"cdn.example.com","ttl":300,"resolver":["8.8.8.8:53"],"a":["198.51.100.7"],"cname":["example.cdn.provider.net","edge.provider.net"],"status_code":"NOERROR","timestamp":"2026-11-09T14:40:55.0Z","query-time":"40ms"}
+[WRN] 3 domains failed to resolve (consider increasing -retry or reducing -threads)

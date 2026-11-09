@@ -120,6 +120,8 @@ services:
   # The only service that starts processes (Blueprint §3). No secrets, no database, and no
   # route to the backend network: a tool, even an approved run_command, cannot read Quiver's
   # credentials or reach its database. Specs are read-only here, so it cannot create jobs.
+  # It is also the tools image (pinned binaries); passive tools use keyless sources only,
+  # because nothing here may hold a secret (Blueprint §9).
   # cap_add stays empty until raw-socket scans need NET_RAW (nmap, step 11).
   executor:
     <<: *hardened

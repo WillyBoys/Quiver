@@ -8,6 +8,10 @@ Every tick, in order:
              executor by writing their spec;
 4. watchdog  jobs the executor never started or never finished are marked lost.
 
+Separately, the parse loop turns the output of succeeded jobs into graph records (one job per
+transaction). It runs beside the tick, so a large result never holds up gating, and a parser
+failure only marks that job's parse as failed.
+
 Every job is gated immediately before it is handed over, so scope, windows, the kill switch,
 and limits are always current. An approval covers exactly the reasons the operator saw.
 """
@@ -16,6 +20,7 @@ import asyncio
 import contextlib
 import logging
 import uuid
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import or_, select
@@ -32,6 +37,7 @@ from quiver.core.models import (
     Job,
     JobStatus,
     Organization,
+    ParseStatus,
 )
 from quiver.core.policy import (
     ActionRequest,
@@ -45,7 +51,9 @@ from quiver.core.policy.providers import ProviderIndex
 from quiver.core.policy.resolve import DnsResolver, Resolver
 from quiver.core.policy.store import gate
 from quiver.worker import handoff, queue
-from quiver.worker.registry import default_registry
+from quiver.worker.parsing import record_parsed
+from quiver.worker.registry import default_parsers, default_registry
+from quiver.worker.tracks.external.parsers import Parser
 
 log = logging.getLogger("quiver.worker")
 
@@ -53,6 +61,8 @@ log = logging.getLogger("quiver.worker")
 DISPATCH_RETRY = timedelta(seconds=15)
 # Extra time past the hard timeout before a silent running job is considered lost.
 RESULT_GRACE = timedelta(seconds=60)
+# Jobs parsed per pass of the parse loop before it checks for shutdown.
+PARSE_BATCH = 10
 
 
 class Scheduler:
@@ -64,6 +74,7 @@ class Scheduler:
         registry: ToolRegistry | None = None,
         resolver: Resolver | None = None,
         providers: ProviderIndex | None = None,
+        parsers: Mapping[str, Parser] | None = None,
         clock=lambda: datetime.now(UTC),
     ):
         self.sessionmaker = sessionmaker
@@ -71,15 +82,19 @@ class Scheduler:
         self.registry = registry or default_registry()
         self.resolver = resolver or DnsResolver()
         self.providers = providers
+        self.parsers = default_parsers() if parsers is None else parsers
         self.clock = clock
         self._orgs: dict[uuid.UUID, uuid.UUID] = {}
 
     async def run(self, stop: asyncio.Event) -> None:
+        await asyncio.gather(self._loop(stop, self.tick), self._loop(stop, self.parse))
+
+    async def _loop(self, stop: asyncio.Event, step) -> None:
         while not stop.is_set():
             try:
-                await self.tick()
+                await step()
             except Exception:
-                log.exception("scheduler tick failed")
+                log.exception("scheduler %s failed", step.__name__)
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(stop.wait(), self.settings.scheduler_interval)
 
@@ -105,6 +120,8 @@ class Scheduler:
                     job.output_bytes = r["output_bytes"]
                     job.truncated = r["truncated"]
                     await self._status(db, job, JobStatus(r["status"]), r["reason"])
+                    if job.status is JobStatus.SUCCEEDED and job.tool in self.parsers:
+                        job.parse_status = ParseStatus.PENDING
                     handoff.cleanup(self.settings.job_spec_dir, str(job.id))
                 elif state.started_at is not None and job.status is JobStatus.DISPATCHED:
                     job.started_at = state.started_at
@@ -216,6 +233,7 @@ class Scheduler:
                     idle_timeout=self.settings.job_idle_timeout,
                     hard_timeout=self.settings.job_hard_timeout,
                     output_cap=self.settings.job_output_cap,
+                    stdin=list(job.stdin or []),
                 )
             except OSError as exc:
                 log.error("job %s: cannot write spec: %s", job.id, exc)
@@ -295,6 +313,80 @@ class Scheduler:
             row.decided_at = now
             row.note = "job cancelled before a decision"
 
+    # --- parse (its own loop) ---------------------------------------------------------------
+
+    async def parse(self) -> int:
+        """Parse up to PARSE_BATCH succeeded jobs, one transaction each. Returns how many."""
+        done = 0
+        for _ in range(PARSE_BATCH):
+            async with self.sessionmaker() as db:
+                job = await db.scalar(
+                    select(Job)
+                    .where(Job.parse_status == ParseStatus.PENDING)
+                    .order_by(Job.finished_at, Job.id)
+                    .limit(1)
+                    .with_for_update(skip_locked=True)
+                )
+                if job is None:
+                    break
+                await self._parse(db, job)
+                await db.commit()
+                done += 1
+        return done
+
+    async def _parse(self, db: AsyncSession, job: Job) -> None:
+        now = self.clock()
+        parser = self.parsers.get(job.tool)
+        if parser is None:
+            job.parse_status = ParseStatus.NOT_APPLICABLE
+            return
+        output = handoff.read_output(
+            self.settings.job_output_dir, str(job.id), self.settings.job_output_cap
+        )
+        if output is None:
+            await self._parse_failed(db, job, now, "output is missing or not a regular file")
+            return
+        try:
+            async with db.begin_nested():  # a failure undoes only this job's graph writes
+                parsed = parser(output.data, dict(job.params))
+                recorded = await record_parsed(
+                    db,
+                    parsed,
+                    engagement_id=job.engagement_id,
+                    source=f"parser:{job.tool}",
+                    job_id=job.id,
+                    run_id=job.run_id,
+                    now=now,
+                )
+        except Exception as exc:  # a parser bug or a record() rejection: never crash the loop
+            log.exception("job %s: parsing %s output failed", job.id, job.tool)
+            await self._parse_failed(db, job, now, f"{type(exc).__name__}: {exc}")
+            return
+        job.parse_status = ParseStatus.PARSED
+        job.parsed_at = now
+        job.parse_error = ""
+        await self._event(
+            db,
+            job,
+            "job.parsed",
+            f"{recorded.entities_created} new, {recorded.entities_updated} updated",
+            entities_created=recorded.entities_created,
+            entities_updated=recorded.entities_updated,
+            relationships=recorded.relationships,
+            findings=recorded.findings,
+            suggestions=recorded.suggestions,
+            skipped=parsed.skipped,
+            capped=parsed.capped,
+            truncated=output.truncated or job.truncated,
+            notes=dict(parsed.notes),
+        )
+
+    async def _parse_failed(self, db: AsyncSession, job: Job, now: datetime, error: str) -> None:
+        job.parse_status = ParseStatus.FAILED
+        job.parsed_at = now
+        job.parse_error = error[:1000]
+        await self._event(db, job, "job.parse_failed", job.parse_error)
+
     # --- 4. watchdog ----------------------------------------------------------------------
 
     async def watchdog(self) -> None:
@@ -335,7 +427,7 @@ class Scheduler:
         job.reason = reason
         await self._event(db, job, f"job.{status}", reason)
 
-    async def _event(self, db: AsyncSession, job: Job, kind: str, reason: str) -> None:
+    async def _event(self, db: AsyncSession, job: Job, kind: str, reason: str, **extra) -> None:
         org_id = self._orgs.get(job.engagement_id)
         if org_id is None:
             org_id = await db.scalar(
@@ -347,12 +439,17 @@ class Scheduler:
                 org_id=org_id,
                 engagement_id=job.engagement_id,
                 kind=kind,
-                payload={"job_id": str(job.id), "tool": job.tool, "reason": reason},
+                payload={"job_id": str(job.id), "tool": job.tool, "reason": reason, **extra},
             )
         )
 
 
 def _request(job: Job) -> ActionRequest:
     return ActionRequest(
-        job.engagement_id, job.tool, dict(job.params), tuple(job.argv), job.requester
+        job.engagement_id,
+        job.tool,
+        dict(job.params),
+        tuple(job.argv),
+        job.requester,
+        stdin=tuple(job.stdin or ()),
     )

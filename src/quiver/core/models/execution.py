@@ -43,6 +43,15 @@ FINAL_JOB_STATUSES = frozenset(
 )
 
 
+class ParseStatus(StrEnum):
+    """Whether a finished job's output has been turned into graph records."""
+
+    NOT_APPLICABLE = "not_applicable"  # no parser for the tool, or the job did not succeed
+    PENDING = "pending"  # succeeded; the parse stage has not run yet
+    PARSED = "parsed"
+    FAILED = "failed"  # the parser or recording failed; see parse_error
+
+
 class ApprovalStatus(StrEnum):
     PENDING = "pending"
     APPROVED = "approved"
@@ -63,6 +72,8 @@ class Job(IdMixin, Base):
     tool: Mapped[str] = mapped_column(String(100))
     params: Mapped[dict] = mapped_column(JSONB, default=dict)
     argv: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    # Lines fed to the tool on standard input (target lists), fixed at submission like argv.
+    stdin: Mapped[list[str]] = mapped_column(JSONB, default=list, server_default=text("'[]'"))
     requester: Mapped[str] = mapped_column(String(200))
     status: Mapped[JobStatus] = mapped_column(
         _enum(JobStatus, "job_status"), default=JobStatus.SUBMITTED
@@ -85,6 +96,13 @@ class Job(IdMixin, Base):
     output_bytes: Mapped[int] = mapped_column(BigInteger, default=0)
     truncated: Mapped[bool] = mapped_column(Boolean, default=False)
     cancel_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    parse_status: Mapped[ParseStatus] = mapped_column(
+        _enum(ParseStatus, "parse_status"),
+        default=ParseStatus.NOT_APPLICABLE,
+        server_default=ParseStatus.NOT_APPLICABLE.value,
+    )
+    parsed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    parse_error: Mapped[str] = mapped_column(Text, default="", server_default="")
 
 
 class ApprovalRequest(IdMixin, Base):

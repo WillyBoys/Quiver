@@ -46,6 +46,7 @@ class ActionRequest:
     params: the tool's structured parameters (target parameters are declared by the tool).
     argv: the final command line the runner would execute.
     requester: agent run ID or schedule, for the audit trail.
+    stdin: lines the runner would feed the tool on standard input (target lists).
     """
 
     engagement_id: uuid.UUID
@@ -53,6 +54,7 @@ class ActionRequest:
     params: Mapping[str, Any]
     argv: tuple[str, ...]
     requester: str
+    stdin: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -66,7 +68,7 @@ class Check:
 @dataclass(frozen=True)
 class TargetCheck:
     target: str
-    source: str  # "param:<name>" or "argv"
+    source: str  # "param:<name>", "argv", "argv:possible", "stdin" or "stdin:possible"
     decision: ScopeDecision
 
 

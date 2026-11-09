@@ -36,12 +36,14 @@ class ApprovalOut(OrmOut):
     # The action itself, first: what would run and against what.
     tool: str = ""
     argv: list[str] = Field(default_factory=list)
+    stdin: list[str] = Field(default_factory=list)  # input lines fed to the tool
     targets: list[str] = Field(default_factory=list)
 
     @classmethod
     def of(cls, row: ApprovalRequest, job: Job) -> "ApprovalOut":
         out = cls.model_validate(row)
         out.tool, out.argv, out.targets = job.tool, list(job.argv), list(job.targets)
+        out.stdin = list(job.stdin or [])
         return out
 
 

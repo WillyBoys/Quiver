@@ -114,6 +114,7 @@ async def record_decision(
                 "tool": request.tool,
                 "requester": request.requester,
                 "argv": list(request.argv),
+                "stdin": list(request.stdin),
                 "params": dict(request.params),
                 "approved": approved,
                 "verdict": decision.verdict,
@@ -179,6 +180,7 @@ async def record_decision(
                 "tool": request.tool,
                 "requester": request.requester,
                 "argv": list(request.argv),
+                "stdin": list(request.stdin),
                 "reason": decision.reason,
             }
         )

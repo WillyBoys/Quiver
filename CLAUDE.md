@@ -65,7 +65,9 @@ One Python package, `src/quiver/`, built into separate container images per serv
 
 ## Conventions
 
-- Parsers are pure functions; each new tool lands with a parser and at least one recorded fixture.
+- Parsers are pure functions; each new tool lands with a parser and at least one recorded fixture in `tests/fixtures/tools/<tool>/` (kept byte for byte: the whitespace hooks skip that directory). Parsers never raise on bad output; they skip it and validate every item against the graph types.
+- Typed tools put only targets and integers in argv (no resolver IPs or provider URLs: the gate checks them as targets). Target lists go on standard input via `ToolSpec.build_stdin`.
+- Tool binaries in `docker/executor.Dockerfile` are pinned by version and per-arch SHA-256 from the release's checksums file; bump them in a reviewed PR. No tool gets an API key (the executor holds no secrets).
 - Policy gate and reconciliation changes need unit tests covering the edge cases listed in Blueprint §12.
 - Tests pass `Settings(...)` explicitly; never mutate `QUIVER_*` environment variables in tests.
 - GitHub Actions are pinned to full commit SHAs with the tag in a comment; workflows get `permissions: contents: read` unless a job needs more, and checkouts use `persist-credentials: false`.
