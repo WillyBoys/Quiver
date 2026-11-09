@@ -17,6 +17,14 @@ from quiver.core.policy.types import TIER_ORDER, Autonomy, RiskTier
 class TargetParam:
     # The action reaches everything below a URL (crawlers, content discovery), not one request.
     url_subtree: bool = False
+    # The value is a domain standing for the names below it (passive subdomain enumeration,
+    # certificate transparency). Only allowed on passive tools; see Scope.check.
+    domain_subtree: bool = False
+
+
+# Standard input fed to a tool (target lists), in bytes once joined. The executor enforces the
+# same cap (quiver.executor.protocol.MAX_STDIN).
+MAX_STDIN_BYTES = 256 * 1024
 
 
 @dataclass(frozen=True)
@@ -31,6 +39,32 @@ class ToolSpec:
     # Builds the final argv from structured parameters. The worker calls it; the gate then
     # checks the result like any argv. Raises ValueError for parameters it cannot use.
     build_argv: Callable[[Mapping[str, Any]], list[str]] | None = None
+    # Builds the lines fed to the tool on standard input (e.g. a host list). The gate checks
+    # them like argv. Tools without it get no input.
+    build_stdin: Callable[[Mapping[str, Any]], list[str]] | None = None
+
+    def __post_init__(self):
+        for name, param in self.target_params.items():
+            if param.domain_subtree and param.url_subtree:
+                raise ValueError(f"{self.name}.{name}: a target is a URL or a domain, not both")
+            if param.domain_subtree and self.tier is not RiskTier.PASSIVE:
+                raise ValueError(
+                    f"{self.name}.{name}: domain subtree targets are only for passive tools"
+                )
+
+    def stdin_for(self, params: Mapping[str, Any]) -> list[str]:
+        """The tool's standard input as lines (empty when it takes none). Raises ValueError
+        for lines that would not survive the trip intact or exceed the size cap."""
+        if self.build_stdin is None:
+            return []
+        lines = self.build_stdin(params)
+        if not isinstance(lines, list) or not all(
+            isinstance(line, str) and not any(c in line for c in "\n\r\0") for line in lines
+        ):
+            raise ValueError(f"tool {self.name!r} did not build usable input lines")
+        if sum(len(line.encode()) + 1 for line in lines) > MAX_STDIN_BYTES:
+            raise ValueError(f"input for {self.name!r} exceeds {MAX_STDIN_BYTES} bytes")
+        return list(lines)
 
     def argv_for(self, params: Mapping[str, Any]) -> list[str]:
         if self.build_argv is None:

@@ -5,10 +5,11 @@ job spec says, as an argv list and never through a shell, and it cannot create s
 worker can, after the policy gate allowed the job.
 
 Each process gets a fresh session (so the whole process group can be killed), stdin from
-/dev/null, its job's output directory as working directory and HOME, and an environment that
-inherits nothing. Output is read in chunks (not lines, so one huge line cannot stall or break
-the reader) and capped. Idle timeout, hard timeout, the output cap, and cancellation all kill
-the whole process group, and so does the parent exiting, so no child outlives its job.
+/dev/null (or the spec's input lines, for tools that read a target list), its job's output
+directory as working directory and HOME, and an environment that inherits nothing. Output is
+read in chunks (not lines, so one huge line cannot stall or break the reader) and capped. Idle
+timeout, hard timeout, the output cap, and cancellation all kill the whole process group, and
+so does the parent exiting, so no child outlives its job.
 """
 
 import contextlib
@@ -45,6 +46,7 @@ class Spec:
     idle_timeout: float
     hard_timeout: float
     output_cap: int
+    stdin: bytes | None = None  # fed to the process, then closed; None: /dev/null
 
 
 def _bounded(value, default: float, maximum: float) -> float:
@@ -76,12 +78,20 @@ def load_spec(path: Path) -> Spec:
     timeouts = data.get("timeouts") or {}
     if not isinstance(timeouts, dict):
         raise SpecError("timeouts must be an object")
+    stdin = data.get("stdin")
+    if stdin is not None:
+        if not isinstance(stdin, str) or "\0" in stdin:
+            raise SpecError("stdin must be text")
+        stdin = stdin.encode()
+        if len(stdin) > p.MAX_STDIN:
+            raise SpecError(f"stdin exceeds {p.MAX_STDIN} bytes")
     return Spec(
         job_id=job_id,
         argv=tuple(argv),
         idle_timeout=_bounded(timeouts.get("idle"), p.DEFAULT_IDLE_TIMEOUT, p.MAX_IDLE_TIMEOUT),
         hard_timeout=_bounded(timeouts.get("hard"), p.DEFAULT_HARD_TIMEOUT, p.MAX_HARD_TIMEOUT),
         output_cap=int(_bounded(data.get("output_cap"), p.DEFAULT_OUTPUT_CAP, p.MAX_OUTPUT_CAP)),
+        stdin=stdin,
     )
 
 
@@ -130,7 +140,7 @@ def run_job(
         try:
             proc = subprocess.Popen(  # noqa: S603 (argv list from a gate-allowed spec; no shell)
                 list(spec.argv),
-                stdin=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL if spec.stdin is None else subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 cwd=out_dir,
@@ -143,6 +153,9 @@ def run_job(
             result.update(status=p.FAILED, reason=f"could not start {spec.argv[0]!r}: {exc}")
             return _finish(out_dir, result)
 
+        if spec.stdin is not None:
+            # A thread, so a tool that never reads its input cannot block supervision.
+            threading.Thread(target=_feed, args=(proc.stdin, spec.stdin), daemon=True).start()
         status, reason = _supervise(proc, spec, out, cancelled, result)
         _kill_group(proc)  # whatever is left of the group goes with the job
         if proc.stdout:
@@ -159,6 +172,16 @@ def run_job(
             status, reason = p.FAILED, f"exited {code}"
     result.update(status=status, reason=reason)
     return _finish(out_dir, result)
+
+
+def _feed(pipe, data: bytes) -> None:
+    try:
+        pipe.write(data)
+    except OSError:  # includes BrokenPipeError: the tool exited or closed its input
+        pass
+    finally:
+        with contextlib.suppress(OSError):
+            pipe.close()
 
 
 def _supervise(proc, spec: Spec, out, cancelled, result) -> tuple[str | None, str]:

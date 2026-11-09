@@ -14,7 +14,14 @@ from sqlalchemy import select
 
 from quiver.api.auth import DbDep, OperatorDep, require_operator
 from quiver.api.engagements import OrmOut, get_engagement_or_404, require_editable
-from quiver.core.models import ApprovalRequest, ApprovalStatus, Event, Job, JobStatus
+from quiver.core.models import (
+    ApprovalRequest,
+    ApprovalStatus,
+    Event,
+    Job,
+    JobStatus,
+    ParseStatus,
+)
 from quiver.worker.queue import ACTIVE, enqueue
 from quiver.worker.registry import default_registry
 
@@ -43,6 +50,7 @@ class JobOut(OrmOut):
     tool: str
     params: dict
     argv: list[str]
+    stdin: list[str]
     requester: str
     status: JobStatus
     reason: str
@@ -58,6 +66,9 @@ class JobOut(OrmOut):
     output_bytes: int
     truncated: bool
     cancel_requested_at: datetime | None
+    parse_status: ParseStatus
+    parsed_at: datetime | None
+    parse_error: str
 
 
 @router.post("", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
@@ -82,7 +93,12 @@ async def submit_job(engagement_id: uuid.UUID, body: JobCreate, db: DbDep, user:
             engagement_id=eng.id,
             user_id=user.id,
             kind="job.submitted",
-            payload={"job_id": str(job.id), "tool": job.tool, "argv": job.argv},
+            payload={
+                "job_id": str(job.id),
+                "tool": job.tool,
+                "argv": job.argv,
+                "stdin": job.stdin,
+            },
         )
     )
     await db.commit()

@@ -29,17 +29,20 @@ async def enqueue(
 ) -> Job:
     """Record a job request. It is gated by the scheduler, never here.
 
-    The argv is built now from the tool's structured parameters, so what the operator or agent
-    sees is exactly what the gate checks and the executor runs. Raises ValueError when a known
-    tool cannot use the parameters; an unknown tool is recorded and the gate denies it.
+    The argv (and any standard input) is built now from the tool's structured parameters, so
+    what the operator or agent sees is exactly what the gate checks and the executor runs.
+    Raises ValueError when a known tool cannot use the parameters; an unknown tool is recorded
+    and the gate denies it.
     """
     spec = registry.get(tool)
     argv = spec.argv_for(params) if spec is not None and spec.build_argv else []
+    stdin = spec.stdin_for(params) if spec is not None else []
     job = Job(
         engagement_id=engagement_id,
         tool=tool,
         params=params,
         argv=argv,
+        stdin=stdin,
         requester=requester,
         status=JobStatus.SUBMITTED,
         run_id=run_id,

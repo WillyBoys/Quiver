@@ -6,6 +6,7 @@ import os
 import sys
 import time
 import uuid
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -316,3 +317,50 @@ def test_shutdown_cancels_running_jobs(dirs):
     late = write_spec(specs)
     assert ex.poll_once() == []  # no new work once stopping
     assert not (output / late).exists()
+
+
+# --- standard input (target lists) ------------------------------------------------------------
+
+
+def test_stdin_is_fed_to_the_process(tmp_path):
+    s = spec(*py("import sys; print(sorted(sys.stdin.read().split()))"))
+    s = Spec(
+        s.job_id, s.argv, s.idle_timeout, s.hard_timeout, s.output_cap, b"b.example\na.example\n"
+    )
+    result, out = run(tmp_path, s)
+    assert result["status"] == p.SUCCEEDED
+    assert (out / p.OUTPUT).read_text() == "['a.example', 'b.example']\n"
+
+
+def test_without_stdin_the_process_reads_eof(tmp_path):
+    _, out = run(tmp_path, spec(*py("import sys; print(repr(sys.stdin.read()))")))
+    assert (out / p.OUTPUT).read_text() == "''\n"
+
+
+def test_tool_that_ignores_large_stdin_does_not_hang(tmp_path):
+    s = spec(*py("print('done')"))
+    s = replace(s, idle_timeout=5.0, hard_timeout=5.0, stdin=b"x" * p.MAX_STDIN)
+    result, out = run(tmp_path, s)
+    assert result["status"] == p.SUCCEEDED
+    assert (out / p.OUTPUT).read_text() == "done\n"
+
+
+def test_spec_stdin_is_loaded_and_validated(tmp_path):
+    job = write_spec(tmp_path, stdin="a.example.com\n")
+    assert load_spec(p.spec_path(tmp_path, job)).stdin == b"a.example.com\n"
+    assert load_spec(p.spec_path(tmp_path, write_spec(tmp_path))).stdin is None
+    for bad in (["a"], 5, "a\0b", "x" * (p.MAX_STDIN + 1)):
+        job = write_spec(tmp_path, stdin=bad)
+        with pytest.raises(SpecError):
+            load_spec(p.spec_path(tmp_path, job))
+
+
+def test_executor_feeds_spec_stdin(dirs):
+    specs, output = dirs
+    job = write_spec(
+        specs, argv=list(py("import sys; print(sys.stdin.read().upper())")), stdin="hi\n"
+    )
+    ex = executor(dirs)
+    ex.poll_once()
+    ex.wait(10)
+    assert (output / job / p.OUTPUT).read_text() == "HI\n\n"
