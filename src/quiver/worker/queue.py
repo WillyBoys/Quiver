@@ -25,6 +25,7 @@ async def enqueue(
     params: dict[str, Any],
     requester: str,
     registry: ToolRegistry,
+    run_id: uuid.UUID | None = None,
 ) -> Job:
     """Record a job request. It is gated by the scheduler, never here.
 
@@ -41,6 +42,7 @@ async def enqueue(
         argv=argv,
         requester=requester,
         status=JobStatus.SUBMITTED,
+        run_id=run_id,
     )
     db.add(job)
     await db.flush()

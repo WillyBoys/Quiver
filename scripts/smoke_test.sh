@@ -58,6 +58,11 @@ curl -s -b "$JAR" "$API/kill-switch" | grep -q '"engaged":false' || fail "global
 [ "$(curl -s -b "$JAR" "$API/engagements/$ENG_ID/resolutions")" = "[]" ] \
   || fail "resolutions list unexpected"
 
+# Knowledge graph (read-only API) starts empty.
+curl -s -b "$JAR" "$API/engagements/$ENG_ID/entities" | grep -q '"total":0' || fail "entities unexpected"
+[ "$(curl -s -b "$JAR" "$API/engagements/$ENG_ID/findings")" = "[]" ] || fail "findings unexpected"
+[ "$(curl -s -b "$JAR" "$API/engagements/$ENG_ID/runs")" = "[]" ] || fail "runs unexpected"
+
 # Jobs end to end: API → worker (gate, approval) → executor → result.
 field() { python3 -c "import json,sys; d=json.load(sys.stdin); print(d$1)"; }
 put "/engagements/$ENG_ID/authorization" \
