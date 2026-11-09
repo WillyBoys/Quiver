@@ -1,0 +1,11 @@
+{"host": "MAIL.example.com.", "a": ["203.0.113.20"], "status_code": "NOERROR"}
+{"host": "other.example.net", "a": ["203.0.113.21"], "status_code": "NOERROR"}
+{"host": "v6.example.com", "aaaa": ["2001:DB8:0:0::1", "::ffff:203.0.113.22"], "status_code": "NOERROR"}
+{"host": "bad.example.com", "a": ["999.1.1.1", "203.0.113.23", 5, "203.0.113.23"], "status_code": "NOERROR"}
+{"host": "loop.example.com", "a": ["127.0.0.1"], "status_code": "NOERROR"}
+{"host": "cname-only.example.com", "cname": ["target.example.net"], "status_code": "NOERROR"}
+{"host": "nx.example.com", "status_code": "NXDOMAIN"}
+{"host": "huge.example.com", "cname": ["c0.example.net", "c1.example.net", "c2.example.net", "c3.example.net", "c4.example.net", "c5.example.net", "c6.example.net", "c7.example.net", "c8.example.net", "c9.example.net", "c10.example.net", "c11.example.net", "c12.example.net", "c13.example.net", "c14.example.net", "c15.example.net", "c16.example.net", "c17.example.net", "c18.example.net", "c19.example.net", "c20.example.net", "c21.example.net", "c22.example.net", "c23.example.net", "c24.example.net", "c25.example.net", "c26.example.net", "c27.example.net", "c28.example.net", "c29.example.net", "c30.example.net", "c31.example.net", "c32.example.net", "c33.example.net", "c34.example.net", "c35.example.net", "c36.example.net", "c37.example.net", "c38.example.net", "c39.example.net", "c40.example.net", "c41.example.net", "c42.example.net", "c43.example.net", "c44.example.net", "c45.example.net", "c46.example.net", "c47.example.net", "c48.example.net", "c49.example.net"], "status_code": "NOERROR"}
+{"host": null, "a": ["203.0.113.24"]}
+garbage {
+{"host":"cut.example.com","a":["203.0.11

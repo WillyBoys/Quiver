@@ -1,0 +1,8 @@
+[INF] Loading provider config from /tmp/.config/subfinder/provider-config.yaml
+[INF] Enumerating subdomains for example.com
+[WRN] Encountered an error with source shodanct: Get "https://ctl.shodan.io/api/v1/domain/example.com/hostnames": dial tcp: lookup ctl.shodan.io on 8.8.4.4:53: read udp 172.17.0.2:49841->8.8.4.4:53: i/o timeout
+[WRN] Encountered an error with source hackertarget: Get "https://api.hackertarget.com/hostsearch/?q=example.com": dial tcp: lookup api.hackertarget.com on 8.8.4.4:53: read udp 172.17.0.2:46354->8.8.4.4:53: i/o timeout
+[WRN] Encountered an error with source anubis: Get "https://anubisdb.com/anubis/subdomains/example.com": dial tcp: lookup anubisdb.com on 8.8.4.4:53: read udp 172.17.0.2:49754->8.8.4.4:53: i/o timeout
+[WRN] Encountered an error with source crtsh: dial tcp: lookup crt.sh on 8.8.4.4:53: read udp 172.17.0.2:56496->8.8.4.4:53: i/o timeout
+[WRN] Encountered an error with source crtsh: Get "https://crt.sh/?q=%25.example.com&output=json": dial tcp: lookup crt.sh on 8.8.4.4:53: read udp 172.17.0.2:44808->8.8.4.4:53: i/o timeout
+[INF] Found 0 subdomains for example.com in 1 minute 48 milliseconds

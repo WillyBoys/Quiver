@@ -1,0 +1,33 @@
+
+               __    _____           __         
+   _______  __/ /_  / __(_)___  ____/ /__  _____
+  / ___/ / / / __ \/ /_/ / __ \/ __  / _ \/ ___/
+ (__  ) /_/ / /_/ / __/ / / / / /_/ /  __/ /    
+/____/\__,_/_.___/_/ /_/_/ /_/\__,_/\___/_/
+
+		projectdiscovery.io
+
+[INF] Loading provider config from /tmp/.config/subfinder/provider-config.yaml
+[INF] Enumerating subdomains for example.com
+{"host":"miac.example.com","input":"example.com","sources":["crtname","anubis"]}
+{"host":"mail1.example.com","input":"example.com","sources":["crtname","anubis"]}
+{"host":"sub-1.example.com","input":"example.com","sources":["anubis","crtname"]}
+{"host":"mail.example.com","input":"example.com","sources":["scanmalware","anubis","crtname"]}
+{"host":"xn--90arkcabltj6b.example.com","input":"example.com","sources":["anubis"]}
+{"host":"dev.example.com","input":"example.com","sources":["anubis","crtname","crtsh"]}
+{"host":"products.example.com","input":"example.com","sources":["anubis","crtname","crtsh"]}
+{"host":"support.example.com","input":"example.com","sources":["crtname","crtsh","anubis"]}
+{"host":"emudhra-lab.example.com","input":"example.com","sources":["scanmalware","crtname","crtsh"]}
+{"host":"www.example.com","input":"example.com","sources":["scanmalware","shodanct","anubis","hackertarget","crtname","crtsh"]}
+{"host":"m.example.com","input":"example.com","sources":["anubis","crtname","crtsh"]}
+{"host":"waidos.example.com","input":"example.com","sources":["anubis"]}
+{"host":"9ecc.example.com","input":"example.com","sources":["crtname"]}
+{"host":"a025080816182.example.com","input":"example.com","sources":["anubis"]}
+{"host":"bodrisov3.example.com","input":"example.com","sources":["anubis"]}
+{"host":"dgtalvideo1.example.com","input":"example.com","sources":["anubis"]}
+{"host":"debian-4gb-hel1-1.example.com","input":"example.com","sources":["crtname"]}
+{"host":"147-255-227-39.w.example.com","input":"example.com","sources":["anubis"]}
+{"host":"candradeandrealy1161.example.com","input":"example.com","sources":["anubis"]}
+{"host":"chesterp78.example.com","input":"example.com","sources":["anubis"]}
+{"host":"fintalex027.example.com","input":"example.com","sources":["anubis"]}
+[INF] Found 25534 subdomains for example.com in 51 seconds 591 milliseconds

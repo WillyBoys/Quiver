@@ -11,6 +11,8 @@
 # such as src/quiver/core/policy/data/ is still committed.
 /data/
 *.log
+# Recorded tool output used as test fixtures (kept byte for byte).
+!/tests/fixtures/tools/**/*.log
 
 # Python
 __pycache__/

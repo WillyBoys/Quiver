@@ -1,0 +1,22 @@
+[INF] Enumerating subdomains for example.com
+[WRN] Encountered an error with source crtname: Get "https://crt.name/v1/search?apex=example.com": context deadline exceeded
+{"host": "WWW.Example.COM", "input": "example.com", "sources": ["anubis"]}
+{"host": "api.example.com.", "input": "example.com", "sources": ["crtsh"]}
+{"host": "a.b.c.example.com", "input": "example.com", "sources": ["anubis"]}
+{"host": "example.com", "input": "example.com", "sources": ["crtsh"]}
+{"host": "*.example.com", "input": "example.com", "sources": ["crtsh"]}
+{"host": "b\u00fccher.example.com", "input": "example.com", "sources": ["anubis"]}
+{"host": "badexample.com", "input": "example.com", "sources": ["anubis"]}
+{"host": "example.com.attacker.net", "input": "example.com", "sources": ["anubis"]}
+{"host": "ex\u0430mple.com", "input": "example.com", "sources": ["anubis"]}
+{"host": "203.0.113.9", "input": "example.com", "sources": ["anubis"]}
+{"host": "-bad-.example.com", "input": "example.com", "sources": ["anubis"]}
+{"host": "", "input": "example.com", "sources": []}
+{"host": ["x.example.com"], "input": "example.com"}
+{"host": "weird.example.com", "input": "example.com", "sources": "anubis"}
+{"host": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.example.com", "input": "example.com", "sources": ["anubis"]}
+not json at all
+[1,2,3]
+{"host": "dup.example.com", "input": "example.com", "sources": ["anubis"]}
+{"host": "DUP.example.com", "input": "example.com", "sources": ["crtsh", "anubis"]}
+{"host":"truncated.exam
