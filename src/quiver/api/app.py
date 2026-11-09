@@ -10,6 +10,7 @@ from quiver.api import (
     approvals,
     auth,
     engagements,
+    graph,
     jobs,
     kill_switch,
     resolutions,
@@ -62,5 +63,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(resolutions.router)
     app.include_router(jobs.router)
     app.include_router(approvals.router)
+    app.include_router(graph.router)
     app.include_router(kill_switch.router)
     return app

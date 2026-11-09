@@ -35,6 +35,7 @@ from quiver.core.policy.gate import (
 )
 from quiver.core.policy.providers import ProviderIndex, bundled_providers
 from quiver.core.policy.resolve import Resolution, Resolver, resolve_all
+from quiver.core.policy.suggestions import upsert_suggestion
 from quiver.core.policy.tools import ToolRegistry, effective_autonomy, effective_limits
 from quiver.core.policy.types import ActionRequest, GateDecision
 from quiver.core.policy.windows import WindowSpec
@@ -191,29 +192,13 @@ async def record_decision(
                     {"provider": provider, "cnames": list(lookup.cnames), "error": lookup.error}
                 ),
             }
-        stmt = insert(ScopeSuggestion).values(
-            id=uuid.uuid4(),
-            engagement_id=request.engagement_id,
-            kind=suggestion.kind,
-            value=suggestion.value,
-            status=SuggestionStatus.PENDING,
+        await upsert_suggestion(
+            db,
+            request.engagement_id,
+            suggestion,
             source=SUGGESTION_SOURCE,
             evidence=evidence,
-            seen_count=1,
-            decision_note="",
-            **{"resolved_addresses": [], "hosting": {}, **found},
-        )
-        # A repeat sighting only refreshes the counters and lookups; a decided suggestion
-        # stays decided.
-        await db.execute(
-            stmt.on_conflict_do_update(
-                index_elements=["engagement_id", "kind", "value"],
-                set_={
-                    "last_seen_at": func.now(),
-                    "seen_count": ScopeSuggestion.seen_count + 1,
-                    **found,
-                },
-            )
+            lookup=found,
         )
     await db.flush()
     return event

@@ -183,27 +183,31 @@ Engagements can override each tier with `auto`, `approval`, or `off` (DENY), exc
 - `Authorization`: who authorized testing (name, title, organization, contact), the date, and an optional validity period. Uploading the signed document is planned; until then, reference it in the notes.
 
 ### 5.2 Execution layer
-- `Run`: one execution of an engagement (scheduled, triggered, or on demand). Holds budget usage and a summary of what changed.
+- `Run`: one execution of an engagement (scheduled, triggered, or on demand): status, start and end, and a summary of what changed (budget usage is added in step 16). Jobs may belong to a run; entities, relationships, and findings record the runs they were first and last seen in.
 - `AgentRun`: one agent session within a run. Has phase, role, parent, status, budget, and the bridge session ID for resume.
 - `Job`: one tool execution. Tool, structured parameters, the argv built from them (fixed at submission, so what is approved is what runs), requester, status, the latest gate or executor reason, the targets and pinned addresses from the last gate decision, **worker label** (`local` for now), timings, exit code, and output size. Raw output stays on disk (§6). Statuses: `submitted` → `queued` | `deferred` | `awaiting_approval` | `denied`; `queued` → `dispatched` → `running` → `succeeded` | `failed` | `timed_out` | `lost`; anything unfinished → `cancelled`.
 - `ApprovalRequest`: the job (the exact argv and targets), the reasons the gate asked approval for, status (`pending`, `approved`, `denied`, `expired`), the decision with operator note, and an expiry once approved. The agent's reasoning is added in step 15. One pending request per job at a time.
 - `Event`: append-only log of everything (policy decisions, kill switch changes, job status changes, agent messages, graph changes, scope changes). Each has an organization, an optional engagement (none for global events), an optional acting user, a `kind` such as `policy.decision`, a JSON payload, and a strictly increasing `seq` (the log's order, and the cursor for the live stream). Drives the dashboard and the audit trail. Job output itself stays on disk (§6); events only reference it.
 
 ### 5.3 Knowledge graph
-Typed entities with relationships. Every entity has a **deterministic identity key** and `first_seen_run`, `last_seen_run`, `status`.
+Typed entities with relationships. Every entity has a **deterministic identity key**, first and last seen (time and run), a scope status, and a `status`.
 
-| Entity | Identity key |
+| Entity | Identity key (`quiver.core.graph.keys`) |
 |---|---|
-| `Host` | IP address (hostnames attach as `Domain` → `resolves_to` → `Host`) |
-| `Domain` | normalized FQDN |
-| `Service` | host + port + protocol |
-| `Certificate` | SHA-256 fingerprint |
-| `WebEndpoint` | scheme + host + port + normalized path |
-| `Finding` | issue type (template ID or class) + affected entity + location |
+| `host` | `host:<ip>`: IPv4-mapped IPv6 becomes IPv4, IPv6 compressed lowercase (hostnames attach as `domain` → `resolves_to` → `host`) |
+| `domain` | `domain:<fqdn>`: lowercase, no trailing dot, punycode (UTS 46 + IDNA 2008), so lookalikes stay distinct |
+| `service` | `service:<ip>:<port>/<tcp\|udp>` |
+| `certificate` | `certificate:<sha256>`: 64 lowercase hex digits |
+| `web_endpoint` | `web_endpoint:<scheme>://<host>:<port><path>`: default port explicit; credentials, query, and fragment dropped; unreserved escapes decoded, other escapes uppercased, dot segments removed |
+| finding | `finding:<issue type>\|<entity key>\|<location>` |
 
-Tracks can register additional entity types and relationships (§9).
+Two sightings are the same entity exactly when their keys match. Keys are computed only by these functions, never by an agent; invalid input is rejected, not guessed. Relationships (External): `domain resolves_to host`, `host exposes service`, `service presents certificate`, `certificate names domain`, `service serves web_endpoint`, `web_endpoint on_domain domain`.
 
-`Evidence` links a finding to the job(s) and output excerpts that support it.
+**Storage:** one `entities` table and one `relationships` table. Each entity type is registered in code (`quiver.core.graph.types`): its identity attributes, how attributes are cleaned (strings ≤ 2 KB, ≤ 16 KB per sighting), its key, and what to scope-check. Tracks register their own types and relationships without migrations (§9). Attributes beyond the identity are reported data: target-controlled, kept as data, and never used for decisions. A new sighting updates what it reports and never drops attributes.
+
+**Recording** (`quiver.core.graph.record.record()`) is how parsers and agents write: entities, links, and findings in one call, validated completely before anything is written (one bad item rejects the call). Every sighting writes an `Observation` (source, job, run, time, what was seen), which reconciliation reads (§8). Each entity's **scope status** (`in_scope`, `out_of_scope`, `excluded`, `uncertain`, `not_applicable`) is computed at each sighting from the current scope; out-of-scope discoveries are kept in the graph and create a `ScopeSuggestion` (excluded ones do not). Scope status is information only: the policy gate decides what may be touched. The API exposes the graph read-only.
+
+`Finding`: the issue type, affected entity, location, title, severity, status (§5.4), details, and the scope status of its entity. `Evidence` links a finding to the job(s) and output excerpts (capped at 8 KB, untrusted) that support it.
 
 ### 5.4 Finding lifecycle
 ```
@@ -214,7 +218,7 @@ candidate ──validated / operator──▶ confirmed ──same check ran, ne
     │                                  └──entity unreachable──▶ stale ──reachable again──▶ re-checked
     └──operator rejects──▶ false_positive
 ```
-- Agents and scanners create **candidates** only. A candidate stays a candidate until validated or reviewed by the operator.
+- Agents and scanners create **candidates** only. A candidate stays a candidate until validated or reviewed by the operator. A new sighting of a finding refreshes its title, severity, and details but never changes its status. (Until step 24, candidate is the only status created.)
 - **Confirmed** requires validation evidence (a successful reproduction) or operator review.
 - **Fixed** requires that the same check ran against the same entity, the entity was reachable, and the result was negative. A finding whose entity could not be reached becomes **stale**, not fixed.
 - **Regressed** is a fixed finding that is seen again. It is shown prominently.

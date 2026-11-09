@@ -74,6 +74,8 @@ class Job(IdMixin, Base):
     targets: Mapped[list[str]] = mapped_column(JSONB, default=list)
     resolutions: Mapped[dict] = mapped_column(JSONB, default=dict)
     worker_label: Mapped[str] = mapped_column(String(50), default="local")
+    # The run this job belongs to; None for on-demand jobs outside a run.
+    run_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("runs.id"), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     gated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     dispatched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
