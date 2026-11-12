@@ -4,8 +4,8 @@
 # dependencies, no database drivers, no secrets.
 #
 # Tools are release binaries pinned by version and SHA-256 per architecture, verified at build
-# time; a mismatch fails the build. Bump them in a reviewed PR (versions and checksums from
-# each release's checksums file).
+# time; a mismatch fails the build. Bump them with `python3 scripts/update_tools.py` (reads each
+# release's checksums file) in a reviewed PR. quiver-ct is our own stdlib script.
 
 # --- tools: download and verify (nothing from this stage but the binaries is kept) ----------
 FROM python:3.12-slim AS tools
@@ -57,6 +57,8 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=tools /out/ /usr/local/bin/
+# Certificate transparency client (crt.sh), stdlib only; runs as `python3 -I` from its shebang.
+COPY --chmod=0755 src/quiver/executor/tools/crtsh.py /usr/local/bin/quiver-ct
 
 WORKDIR /app
 COPY src/quiver/__init__.py quiver/__init__.py

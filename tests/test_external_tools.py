@@ -11,7 +11,7 @@ REG = default_registry()
 
 
 def test_registered_tools_are_passive_and_parsed():
-    for name in ("subdomain_enum", "dns_resolve"):
+    for name in ("subdomain_enum", "dns_resolve", "cert_transparency"):
         spec = REG.get(name)
         assert spec is not None and spec.tier is RiskTier.PASSIVE
         assert name in default_parsers()
@@ -28,26 +28,37 @@ def test_subdomain_enum_argv():
     assert spec.stdin_for({"domain": "example.com"}) == []
 
 
-@pytest.mark.parametrize(
-    "params",
-    [
-        {},
-        {"domain": 5},
-        {"domain": "*.example.com"},
-        {"domain": "203.0.113.5"},
-        {"domain": "https://example.com/"},
-        {"domain": "com"},  # a public suffix is not a domain anyone owns
-        {"domain": "example.com", "max_minutes": 0},
-        {"domain": "example.com", "max_minutes": 31},
-        {"domain": "example.com", "max_minutes": True},
-        {"domain": "example.com", "max_minutes": "5"},
-        {"domain": "example.com", "sources": "crtsh"},  # unknown parameter
-        {"domain": "-d evil.com"},
-    ],
-)
+SUBDOMAIN_BAD = [
+    {},
+    {"domain": 5},
+    {"domain": "*.example.com"},
+    {"domain": "203.0.113.5"},
+    {"domain": "https://example.com/"},
+    {"domain": "com"},  # a public suffix is not a domain anyone owns
+    {"domain": "example.com", "max_minutes": 0},
+    {"domain": "example.com", "max_minutes": 31},
+    {"domain": "example.com", "max_minutes": True},
+    {"domain": "example.com", "max_minutes": "5"},
+    {"domain": "example.com", "sources": "crtsh"},  # unknown parameter
+    {"domain": "-d evil.com"},
+]
+
+
+@pytest.mark.parametrize("params", SUBDOMAIN_BAD)
 def test_subdomain_enum_rejects_bad_params(params):
     with pytest.raises(ValueError):
         REG.get("subdomain_enum").argv_for(params)
+
+
+def test_cert_transparency_argv():
+    spec = REG.get("cert_transparency")
+    assert spec.target_params["domain"].domain_subtree
+    argv = spec.argv_for({"domain": "Bücher.Example.COM."})
+    assert argv == ["quiver-ct", "xn--bcher-kva.example.com", "--max-minutes", "10"]
+    assert not any("crt.sh" in a for a in argv)  # the client builds the URL itself
+    for bad in SUBDOMAIN_BAD:
+        with pytest.raises(ValueError):
+            spec.argv_for(bad)
 
 
 def test_dns_resolve_argv_and_stdin():
@@ -82,6 +93,7 @@ def test_dns_resolve_rejects_bad_params(params):
     [
         ("subdomain_enum", {"domain": "example.com", "max_minutes": 30}),
         ("dns_resolve", {"hosts": ["www.example.com"]}),
+        ("cert_transparency", {"domain": "example.com", "max_minutes": 30}),
     ],
 )
 def test_argv_holds_no_targets_but_the_declared_ones(tool, params):
