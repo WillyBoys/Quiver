@@ -20,12 +20,13 @@ from quiver.executor import protocol as p
 from quiver.executor.runner import Executor
 from quiver.worker import queue
 from quiver.worker.scheduler import Scheduler
-from quiver.worker.tracks.external.parsers import Parsed, dnsx, subfinder
+from quiver.worker.tracks.external.parsers import Parsed, ct, dnsx, subfinder
 from tests.api_helpers import activate
 from tests.test_scheduler import DNS, PATH_ENV, PY, get_job
 
 TOOLS = Path(__file__).parent / "fixtures" / "tools"
 FIXTURE = TOOLS / "subfinder" / "example_com.log"
+CT_FIXTURE = TOOLS / "quiver-ct" / "example_com.log"
 FAKE_DNSX = TOOLS / "fake_dnsx.py"  # an absolute path: never read as a target by the gate
 
 
@@ -85,6 +86,12 @@ REGISTRY = ToolRegistry(
             build_stdin=lambda params: list(params["hosts"]),
         ),
         ToolSpec(
+            "fake_ct",
+            RiskTier.PASSIVE,
+            {"domain": TargetParam(domain_subtree=True)},
+            build_argv=lambda params: ["cat", str(CT_FIXTURE)],
+        ),
+        ToolSpec(
             "no_parser",
             RiskTier.PASSIVE,
             {"domain": TargetParam(domain_subtree=True)},
@@ -107,6 +114,7 @@ REGISTRY = ToolRegistry(
 PARSERS = {
     "fake_enum": subfinder.parse,
     "fake_resolve": dnsx.parse,
+    "fake_ct": ct.parse,
     "broken": _boom,
     "half": _half_valid,
 }
@@ -202,6 +210,25 @@ def test_subdomain_enum_output_lands_in_the_graph(active, settings, executor, ru
     assert parsed["entities_created"] == 21 and parsed["skipped"] == 0
     assert parsed["notes"] == {"names": 21, "source_errors": []}
     assert scheduler_call(settings, "parse") == 0  # parsed once
+
+
+def test_cert_transparency_output_lands_in_the_graph(active, settings, executor, run_db):
+    job_id = submit(run_db, active, "fake_ct", domain="example.com")
+    run_to_success(settings, executor, run_db, job_id)
+    assert scheduler_call(settings, "parse") == 1
+    domains = entities(run_db, "domain")
+    assert set(domains) == {
+        "domain:example.com",
+        "domain:www.example.com",
+        "domain:emudhra-lab.example.com",
+    }
+    assert domains["domain:example.com"].attributes["ct_wildcard"] is True
+    # The wildcard base itself is not in scope (only names below it are); the graph keeps it
+    # with its scope status, and the operator can add it on the settings page.
+    assert domains["domain:example.com"].scope_status == "out_of_scope"
+    assert domains["domain:www.example.com"].scope_status == "in_scope"
+    [parsed] = events(run_db, job_id, "job.parsed")
+    assert parsed["notes"] == {"names": 3, "certs": 16, "truncated": False, "errors": []}
 
 
 def test_stdin_reaches_the_tool_and_links_are_recorded(active, settings, executor, run_db):

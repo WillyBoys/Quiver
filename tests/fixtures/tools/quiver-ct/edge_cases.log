@@ -1,0 +1,14 @@
+{"id":1,"issuer":"CN=Wild CA","names":["*.example.com","example.com"],"not_after":"2025-04-01T00:00:00","not_before":"2025-01-01T00:00:00","type":"cert"}
+{"id":2,"issuer":"CN=Case CA","names":["WWW.Example.COM.","www.example.com"],"not_after":"2026-06-01T00:00:00","not_before":"2024-06-01T00:00:00","type":"cert"}
+{"id":3,"names":["*.*.example.com","*.","*"],"type":"cert"}
+{"id":4,"names":["user@example.com","Test Intermediate - example.com",""],"type":"cert"}
+{"id":5,"names":["example.com.evil.net","badexample.com","example.org"],"type":"cert"}
+{"id":6,"issuer":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx","names":["B\u00fccher.example.com"],"not_after":12,"not_before":"not a date","type":"cert"}
+{"id":7,"issuer":["CN=list"],"names":["a.b.c.example.com",7,null],"type":"cert"}
+{"id":8,"issuer":"CN=One","names":["dup.example.com"],"type":"cert"}
+{"id":9,"issuer":"CN=Two","names":["dup.example.com"],"type":"cert"}
+{"type":"cert","names":"www.example.com"}
+{"type":"other","names":["x.example.com"]}
+[WRN] some log line
+{"type":"summary","domain":"example.com","certs":11,"truncated":true,"errors":["HTTP 503"]}
+{"type":"cert","names":["cut.example.com"],"id":1

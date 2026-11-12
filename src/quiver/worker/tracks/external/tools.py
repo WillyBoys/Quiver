@@ -123,4 +123,23 @@ DNS_RESOLVE = ToolSpec(
 )
 
 
-TOOLS = (SUBDOMAIN_ENUM, DNS_RESOLVE)
+# --- cert_transparency: quiver-ct (crt.sh) ----------------------------------------------------
+
+
+def _ct_argv(params: Mapping[str, Any]) -> list[str]:
+    _only(params, {"domain", "max_minutes"})
+    domain = _hostname(params.get("domain"), "domain")
+    minutes = _int(params, "max_minutes", 10, 1, 30)
+    # quiver-ct builds the crt.sh URL itself: the argv holds only the domain.
+    return ["quiver-ct", domain, "--max-minutes", str(minutes)]
+
+
+CERT_TRANSPARENCY = ToolSpec(
+    "cert_transparency",
+    RiskTier.PASSIVE,
+    target_params={"domain": TargetParam(domain_subtree=True)},
+    build_argv=_ct_argv,
+)
+
+
+TOOLS = (SUBDOMAIN_ENUM, DNS_RESOLVE, CERT_TRANSPARENCY)

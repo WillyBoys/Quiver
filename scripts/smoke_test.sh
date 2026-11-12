@@ -97,6 +97,13 @@ DENIED="$(post "/engagements/$ENG_ID/jobs" \
   '{"tool":"run_command","params":{"argv":["curl","http://198.51.100.7/"]}}' | field '["id"]')"
 wait_for "$DENIED" denied
 
+# The tools run as the unprivileged user with a job's scrubbed environment (no PYTHONPATH).
+[ "$(docker compose exec -T executor id -u)" = "10001" ] || fail "executor not running as 10001"
+tool() { docker compose exec -T executor env -i PATH=/usr/local/bin:/usr/bin:/bin HOME=/tmp "$@"; }
+tool subfinder -version >/dev/null 2>&1 || fail "subfinder does not run"
+tool dnsx -version >/dev/null 2>&1 || fail "dnsx does not run"
+tool quiver-ct --help | grep -q 'quiver-ct' || fail "quiver-ct does not run"
+
 # The executor is isolated: no secrets, no database, and job specs are read-only.
 docker compose exec -T executor sh -c 'ls /run/secrets' >/dev/null 2>&1 \
   && fail "executor can see secrets"

@@ -1,9 +1,9 @@
 """External track parsers against recorded tool output (tests/fixtures/tools/).
 
-example_com.log files are recorded from the pinned tool versions against example.com (a
-documentation domain; dnsx addresses replaced with documentation ranges). edge_cases.log and
-all_sources_failed.log are hand-made in the same format: what hostile or broken output can
-look like.
+example_com.log files are recorded from the pinned tool versions (and quiver-ct against crt.sh)
+for example.com (a documentation domain; dnsx addresses replaced with documentation ranges).
+edge_cases.log and all_sources_failed.log are hand-made in the same format: what hostile or
+broken output can look like.
 """
 
 from pathlib import Path
@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from quiver.core.graph.types import default_graph
-from quiver.worker.tracks.external.parsers import common, dnsx, subfinder
+from quiver.worker.tracks.external.parsers import common, ct, dnsx, subfinder
 
 FIXTURES = Path(__file__).parent / "fixtures" / "tools"
 GRAPH = default_graph()
@@ -105,6 +105,7 @@ def test_subfinder_without_valid_params_is_a_bug():
 def test_parsers_never_raise_on_junk(output):
     subfinder.parse(output, {"domain": "example.com"})
     dnsx.parse(output, {"hosts": ["www.example.com"]})
+    ct.parse(output, {"domain": "example.com"})
 
 
 # --- dnsx ----------------------------------------------------------------------------------
@@ -171,3 +172,65 @@ def test_dnsx_without_hosts_is_a_bug():
 
 def test_lines_helper_skips_overlong_lines():
     assert [line.text for line in common.lines(b"a\n" + b"x" * (common.MAX_LINE + 1))] == ["a"]
+
+
+# --- cert_transparency (quiver-ct) ---------------------------------------------------------
+
+
+def test_ct_recorded_output():
+    parsed = ct.parse(fixture("quiver-ct", "example_com"), {"domain": "example.com"})
+    assert_all_valid(parsed)
+    assert names(parsed) == ["emudhra-lab.example.com", "example.com", "www.example.com"]
+    apex = next(e.attributes for e in parsed.entities if e.attributes["name"] == "example.com")
+    assert apex["ct_wildcard"] is True  # *.example.com certificates
+    assert apex["ct_certs"] == 12 and len(apex["ct_issuers"]) == ct.MAX_ISSUERS
+    assert apex["ct_first_not_before"] < apex["ct_last_not_after"]
+    # user@example.com and "AS207960 Test Intermediate - example.com" are not domains.
+    assert parsed.skipped == 2
+    assert parsed.notes == {"names": 3, "certs": 16, "truncated": False, "errors": []}
+
+
+def test_ct_edge_cases():
+    parsed = ct.parse(fixture("quiver-ct", "edge_cases"), {"domain": "example.com"})
+    assert_all_valid(parsed)
+    by_name = {e.attributes["name"]: e.attributes for e in parsed.entities}
+    assert sorted(by_name) == [
+        "a.b.c.example.com",
+        "dup.example.com",
+        "example.com",  # from *.example.com and example.com in one certificate: counted once
+        "www.example.com",  # case and trailing dot folded, counted once per certificate
+        "xn--bcher-kva.example.com",
+    ]
+    assert by_name["example.com"]["ct_wildcard"] is True and by_name["example.com"]["ct_certs"] == 1
+    assert by_name["www.example.com"]["ct_certs"] == 1
+    assert by_name["dup.example.com"]["ct_issuers"] == ["CN=One", "CN=Two"]
+    bucher = by_name["xn--bcher-kva.example.com"]
+    assert bucher["ct_issuers"] == []  # over-long issuer dropped
+    assert "ct_first_not_before" not in bucher and "ct_last_not_after" not in bucher
+    # 11 unusable names (nested/bare wildcards, e-mail, free text, empty, foreign, lookalike,
+    # non-strings), 2 unusable lines and the truncated last line.
+    assert parsed.skipped == 14
+    assert parsed.notes == {"names": 5, "certs": 9, "truncated": True, "errors": ["HTTP 503"]}
+
+
+def test_ct_missing_summary_is_noted():
+    parsed = ct.parse(b'{"type":"cert","names":["a.example.com"]}\n', {"domain": "example.com"})
+    assert names(parsed) == ["a.example.com"] and parsed.notes["summary_missing"] is True
+
+
+def test_ct_keeps_only_names_under_the_asked_domain():
+    out = b'{"type":"cert","names":["a.example.com","a.example.org","*.xexample.com"]}\n'
+    parsed = ct.parse(out, {"domain": "a.example.com"})
+    assert names(parsed) == ["a.example.com"] and parsed.skipped == 2
+
+
+def test_ct_caps_results(monkeypatch):
+    monkeypatch.setattr(ct, "MAX_ENTITIES", 3)
+    out = b'{"type":"cert","names":[%s]}' % b",".join(b'"h%d.example.com"' % i for i in range(10))
+    parsed = ct.parse(out, {"domain": "example.com"})
+    assert len(parsed.entities) == 3 and parsed.capped
+
+
+def test_ct_without_valid_params_is_a_bug():
+    with pytest.raises(ValueError):
+        ct.parse(b"", {"domain": "*.example.com"})
