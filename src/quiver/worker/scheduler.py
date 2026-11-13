@@ -45,6 +45,7 @@ from quiver.core.policy import (
     Verdict,
     apply_approval,
     approval_reasons,
+    bind_targets,
     target_keys,
 )
 from quiver.core.policy.providers import ProviderIndex
@@ -225,6 +226,34 @@ class Scheduler:
         job.defer_until = None
 
         if decision.verdict is Verdict.ALLOW:
+            binding: dict = {}
+            stdin = list(job.stdin or [])
+            spec = self.registry.get(job.tool)
+            if spec is not None and spec.bind_stdin is not None:
+                # The tool gets the addresses pinned in this decision, never a name to resolve.
+                try:
+                    bound = bind_targets(
+                        stdin, dict(job.resolutions), version=spec.bind_stdin(dict(job.params))
+                    )
+                except ValueError as exc:  # BindError: should not happen after an ALLOW
+                    log.error("job %s: cannot bind targets: %s", job.id, exc)
+                    job.defer_until = now + DISPATCH_RETRY
+                    await self._status(
+                        db, job, JobStatus.DEFERRED, f"could not bind targets: {exc}"
+                    )
+                    return
+                if not bound.lines:
+                    job.finished_at = now
+                    await self._status(
+                        db,
+                        job,
+                        JobStatus.FAILED,
+                        "no addresses of the requested IP version to contact",
+                        dropped=list(bound.dropped),
+                    )
+                    return
+                stdin = list(bound.lines)
+                binding = {"bound_stdin": stdin, "dropped": list(bound.dropped)}
             try:
                 handoff.write_spec(
                     self.settings.job_spec_dir,
@@ -233,7 +262,7 @@ class Scheduler:
                     idle_timeout=self.settings.job_idle_timeout,
                     hard_timeout=self.settings.job_hard_timeout,
                     output_cap=self.settings.job_output_cap,
-                    stdin=list(job.stdin or []),
+                    stdin=stdin,
                 )
             except OSError as exc:
                 log.error("job %s: cannot write spec: %s", job.id, exc)
@@ -241,7 +270,7 @@ class Scheduler:
                 await self._status(db, job, JobStatus.DEFERRED, f"could not hand over: {exc}")
                 return
             job.dispatched_at = now
-            await self._status(db, job, JobStatus.DISPATCHED, decision.reason)
+            await self._status(db, job, JobStatus.DISPATCHED, decision.reason, **binding)
         elif decision.verdict is Verdict.DEFER:
             job.defer_until = decision.defer_until
             await self._status(db, job, JobStatus.DEFERRED, decision.reason)
@@ -348,7 +377,9 @@ class Scheduler:
             return
         try:
             async with db.begin_nested():  # a failure undoes only this job's graph writes
-                parsed = parser(output.data, dict(job.params))
+                parsed = parser(
+                    output.data, dict(job.params), resolutions=dict(job.resolutions or {})
+                )
                 recorded = await record_parsed(
                     db,
                     parsed,
@@ -422,10 +453,12 @@ class Scheduler:
         )
         return list(rows)
 
-    async def _status(self, db: AsyncSession, job: Job, status: JobStatus, reason: str) -> None:
+    async def _status(
+        self, db: AsyncSession, job: Job, status: JobStatus, reason: str, **extra
+    ) -> None:
         job.status = status
         job.reason = reason
-        await self._event(db, job, f"job.{status}", reason)
+        await self._event(db, job, f"job.{status}", reason, **extra)
 
     async def _event(self, db: AsyncSession, job: Job, kind: str, reason: str, **extra) -> None:
         org_id = self._orgs.get(job.engagement_id)

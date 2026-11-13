@@ -5,7 +5,8 @@ so an unregistered tool is denied rather than guessed at. A tool's risk tier com
 its spec, never from the requester.
 """
 
-from collections.abc import Callable, Iterable, Mapping
+import ipaddress
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
@@ -42,6 +43,11 @@ class ToolSpec:
     # Builds the lines fed to the tool on standard input (e.g. a host list). The gate checks
     # them like argv. Tools without it get no input.
     build_stdin: Callable[[Mapping[str, Any]], list[str]] | None = None
+    # Tools that contact the asset and take targets on standard input set this: at dispatch
+    # the worker replaces each hostname line with the addresses the gate pinned for it in the
+    # same decision (see bind_targets), so the tool never resolves names itself. It returns
+    # the IP version the tool can use for these parameters (4 or 6), or None for both.
+    bind_stdin: Callable[[Mapping[str, Any]], int | None] | None = None
 
     def __post_init__(self):
         for name, param in self.target_params.items():
@@ -51,6 +57,8 @@ class ToolSpec:
                 raise ValueError(
                     f"{self.name}.{name}: domain subtree targets are only for passive tools"
                 )
+        if self.bind_stdin is not None and self.build_stdin is None:
+            raise ValueError(f"{self.name}: binding targets needs standard input")
 
     def stdin_for(self, params: Mapping[str, Any]) -> list[str]:
         """The tool's standard input as lines (empty when it takes none). Raises ValueError
@@ -83,6 +91,54 @@ class ToolSpec:
         if self.tier_for is None:
             return self.tier
         return max(self.tier, self.tier_for(params), key=TIER_ORDER.index)
+
+
+class BindError(ValueError):
+    """A hostname on a tool's input has no pinned addresses in the decision."""
+
+
+@dataclass(frozen=True)
+class Bound:
+    lines: tuple[str, ...]  # what the tool is given: addresses and networks only
+    dropped: tuple[str, ...] = ()  # pinned addresses of the other IP version
+
+
+def bind_targets(
+    lines: Sequence[str],
+    resolutions: Mapping[str, Sequence[str]],
+    *,
+    version: int | None = None,
+) -> Bound:
+    """Replace each hostname line with the addresses the gate pinned for it (Blueprint §4.1).
+
+    `resolutions` are the decision's: every address in them passed the resolution checks in
+    the evaluation that allowed the job, so the tool contacts exactly what was checked. IP and
+    CIDR lines are kept. With `version`, addresses of the other IP version are dropped (and
+    reported); an IP or network line of the other version is an error, since the parameters
+    should not have allowed it. A hostname without pinned addresses raises BindError.
+    """
+    out: dict[str, None] = {}
+    dropped: dict[str, None] = {}
+    for line in lines:
+        try:
+            net = ipaddress.ip_network(line, strict=True)
+        except ValueError:
+            net = None
+        if net is not None:
+            if version is not None and net.version != version:
+                raise BindError(f"{line} is not an IPv{version} target")
+            out[line] = None
+            continue
+        addresses = resolutions.get(line)
+        if not addresses:
+            raise BindError(f"no pinned addresses for {line}")
+        for address in addresses:
+            ip = ipaddress.ip_address(address)
+            if version is not None and ip.version != version:
+                dropped[str(ip)] = None
+            else:
+                out[str(ip)] = None
+    return Bound(tuple(out), tuple(dropped))
 
 
 def _run_command_argv(params: Mapping[str, Any]) -> list[str]:

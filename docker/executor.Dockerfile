@@ -52,8 +52,10 @@ ENV PYTHONUNBUFFERED=1 \
     QUIVER_JOB_OUTPUT_DIR=/data/job_output
 
 # ca-certificates: passive tools query third-party sources over HTTPS.
+# nmap: from the Debian release this base image tracks (security updates come with it, so no
+# exact version pin). Port scans are TCP connect scans: no raw sockets, no capabilities.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates \
+    && apt-get install -y --no-install-recommends ca-certificates nmap \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=tools /out/ /usr/local/bin/

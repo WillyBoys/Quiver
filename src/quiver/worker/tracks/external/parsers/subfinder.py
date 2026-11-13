@@ -15,7 +15,9 @@ from typing import Any
 from quiver.core.graph.record import Observed
 from quiver.worker.tracks.external.parsers.common import (
     MAX_ENTITIES,
+    NO_RESOLUTIONS,
     Parsed,
+    Resolutions,
     domain,
     lines,
     strings,
@@ -25,7 +27,9 @@ from quiver.worker.tracks.external.parsers.common import (
 _SOURCE_ERROR = re.compile(r"^\[WRN\] Encountered an error with source ([A-Za-z0-9_.-]{1,50}):")
 
 
-def parse(output: bytes, params: Mapping[str, Any]) -> Parsed:
+def parse(
+    output: bytes, params: Mapping[str, Any], *, resolutions: Resolutions = NO_RESOLUTIONS
+) -> Parsed:
     base = domain(params.get("domain"))
     if base is None:
         raise ValueError("subdomain_enum job has no valid domain parameter")

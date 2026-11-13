@@ -103,6 +103,7 @@ tool() { docker compose exec -T executor env -i PATH=/usr/local/bin:/usr/bin:/bi
 tool subfinder -version >/dev/null 2>&1 || fail "subfinder does not run"
 tool dnsx -version >/dev/null 2>&1 || fail "dnsx does not run"
 tool quiver-ct --help | grep -q 'quiver-ct' || fail "quiver-ct does not run"
+tool nmap --version | grep -q '^Nmap version' || fail "nmap does not run"
 
 # The executor is isolated: no secrets, no database, and job specs are read-only.
 docker compose exec -T executor sh -c 'ls /run/secrets' >/dev/null 2>&1 \
