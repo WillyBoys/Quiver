@@ -68,6 +68,7 @@ One Python package, `src/quiver/`, built into separate container images per serv
 
 - Parsers are pure functions; each new tool lands with a parser and at least one recorded fixture in `tests/fixtures/tools/<tool>/` (kept byte for byte: the whitespace hooks skip that directory). Parsers never raise on bad output; they skip it and validate every item against the graph types.
 - Typed tools put only targets and integers in argv (no resolver IPs or provider URLs: the gate checks them as targets). Target lists go on standard input via `ToolSpec.build_stdin`.
+- Tools that contact the asset take their targets on standard input with `ToolSpec.bind_stdin` set, and run with name resolution off: the worker binds hostnames to the gate's pinned addresses at dispatch. Never let a discovery tool resolve names itself.
 - Tool binaries in `docker/executor.Dockerfile` are pinned by version and per-arch SHA-256 from the release's checksums file; bump them with `scripts/update_tools.py` in a reviewed PR. Our own tool clients live in `src/quiver/executor/tools/` as stdlib-only standalone scripts (jobs run with a cleared environment, so they cannot import Quiver). No tool gets an API key (the executor holds no secrets).
 - Policy gate and reconciliation changes need unit tests covering the edge cases listed in Blueprint §12.
 - Tests pass `Settings(...)` explicitly; never mutate `QUIVER_*` environment variables in tests.

@@ -21,7 +21,9 @@ from typing import Any
 from quiver.core.graph.record import Observed
 from quiver.worker.tracks.external.parsers.common import (
     MAX_ENTITIES,
+    NO_RESOLUTIONS,
     Parsed,
+    Resolutions,
     domain,
     lines,
     under,
@@ -88,7 +90,9 @@ def _summary(data: Mapping[str, Any]) -> dict:
     }
 
 
-def parse(output: bytes, params: Mapping[str, Any]) -> Parsed:
+def parse(
+    output: bytes, params: Mapping[str, Any], *, resolutions: Resolutions = NO_RESOLUTIONS
+) -> Parsed:
     base = domain(params.get("domain"))
     if base is None:
         raise ValueError("cert_transparency job has no valid domain parameter")

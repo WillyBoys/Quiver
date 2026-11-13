@@ -8,12 +8,18 @@ all-or-nothing) reject the whole job. Only a bug in the parser itself raises.
 """
 
 import json
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Any
 
 from quiver.core.graph import keys
 from quiver.core.graph.record import FindingIn, Link, Observed
+
+# The addresses the gate pinned for each hostname in the job's last decision (Job.resolutions):
+# what a tool with bound targets was actually given. Passive tools ignore them.
+Resolutions = Mapping[str, Sequence[str]]
+NO_RESOLUTIONS: Resolutions = MappingProxyType({})
 
 # Lines longer than this are not tool results we can use.
 MAX_LINE = 64 * 1024

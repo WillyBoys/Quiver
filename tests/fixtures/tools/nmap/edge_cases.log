@@ -1,0 +1,71 @@
+Warning: 1 stray stderr line before the report
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE nmaprun>
+<nmaprun scanner="nmap" version="7.95">
+<host starttime="1" endtime="2"><status state="up" reason="user-set" reason_ttl="0"/>
+<address addr="198.51.100.9" addrtype="ipv4"/>
+<hostnames>
+</hostnames>
+<ports><port protocol="tcp" portid="80"><state state="open" reason="syn-ack" reason_ttl="0"/></port>
+</ports>
+</host>
+<host starttime="1" endtime="2"><status state="up" reason="user-set" reason_ttl="0"/>
+<address addr="203.0.113.20" addrtype="ipv4"/>
+<hostnames>
+</hostnames>
+<ports><port protocol="tcp" portid="22"><state state="filtered" reason="syn-ack" reason_ttl="0"/></port>
+<port protocol="tcp" portid="23"><state state="open|filtered" reason="syn-ack" reason_ttl="0"/></port>
+<port protocol="tcp" portid="25"><state state="closed" reason="syn-ack" reason_ttl="0"/></port>
+</ports>
+</host>
+<host starttime="1" endtime="2"><status state="up" reason="user-set" reason_ttl="0"/>
+<address addr="203.0.113.21" addrtype="ipv4"/>
+<hostnames>
+</hostnames>
+<ports><port protocol="tcp" portid="8443"><state state="open" reason="syn-ack" reason_ttl="0"/><service name="https-alt" product="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" version="1.0 &lt;script&gt;" extrainfo="x" tunnel="ssl"><cpe>cpe:/a:v0:p0</cpe><cpe>cpe:/a:v1:p1</cpe><cpe>cpe:/a:v2:p2</cpe><cpe>cpe:/a:v3:p3</cpe><cpe>cpe:/a:v4:p4</cpe><cpe>cpe:/a:v5:p5</cpe><cpe>cpe:/a:v6:p6</cpe><cpe>cpe:/a:v7:p7</cpe><cpe>cpe:/a:v8:p8</cpe><cpe>cpe:/a:v9:p9</cpe><cpe>cpe:/a:v10:p10</cpe><cpe>cpe:/a:v11:p11</cpe><cpe>cpe:/a:v12:p12</cpe><cpe>cpe:/a:v13:p13</cpe><cpe>cpe:/a:v14:p14</cpe></service></port>
+<port protocol="udp" portid="53"><state state="open" reason="syn-ack" reason_ttl="0"/></port>
+<port protocol="tcp" portid="0"><state state="open" reason="syn-ack" reason_ttl="0"/></port>
+<port protocol="tcp" portid="abc"><state state="open" reason="syn-ack"/></port>
+</ports>
+</host>
+<host starttime="1" endtime="2"><status state="up" reason="user-set" reason_ttl="0"/>
+<address addr="203.0.113.22" addrtype="ipv4"/>
+<hostnames>
+</hostnames>
+<ports><port protocol="tcp" portid="80"><state state="open" reason="syn-ack" reason_ttl="0"/><service name="http" product="&evil;"/></port>
+</ports>
+</host>
+<host><status state="up"/>
+WARNING: stderr written in the middle of a host
+<address addr="203.0.113.23" addrtype="ipv4"/><ports><port protocol="tcp" portid="80"><state state="open" reason="syn-ack" reason_ttl="0"/></port>
+</ports></host>
+<host starttime="1" endtime="2"><status state="up" reason="user-set" reason_ttl="0"/>
+<address addr="aa:bb:cc:dd:ee:ff" addrtype="mac"/>
+<hostnames>
+</hostnames>
+<ports><port protocol="tcp" portid="80"><state state="open" reason="syn-ack" reason_ttl="0"/></port>
+</ports>
+</host>
+<host starttime="1" endtime="2"><status state="up" reason="user-set" reason_ttl="0"/>
+<address addr="203.0.113.40" addrtype="ipv4"/>
+<hostnames>
+</hostnames>
+<ports><port protocol="tcp" portid="3306"><state state="open" reason="syn-ack" reason_ttl="0"/><service name="mysql"/></port>
+</ports>
+</host>
+<host starttime="1" endtime="2"><status state="down" reason="user-set" reason_ttl="0"/>
+<address addr="203.0.113.41" addrtype="ipv4"/>
+<hostnames>
+</hostnames>
+<ports></ports>
+</host>
+<host starttime="1" endtime="2"><status state="up" reason="user-set" reason_ttl="0"/>
+<address addr="2001:db8::10" addrtype="ipv6"/>
+<hostnames>
+</hostnames>
+<ports><port protocol="tcp" portid="80"><state state="open" reason="syn-ack" reason_ttl="0"/></port>
+</ports>
+</host>
+<host starttime="3"><status state="up"/>
+<address addr="203.0.113.42" addrtype="ipv4"/>
+<ports><port protocol="tcp" portid="80"><state state="op

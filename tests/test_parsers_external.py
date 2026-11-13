@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from quiver.core.graph.types import default_graph
-from quiver.worker.tracks.external.parsers import common, ct, dnsx, subfinder
+from quiver.worker.tracks.external.parsers import common, ct, dnsx, nmap, subfinder
 
 FIXTURES = Path(__file__).parent / "fixtures" / "tools"
 GRAPH = default_graph()
@@ -106,6 +106,7 @@ def test_parsers_never_raise_on_junk(output):
     subfinder.parse(output, {"domain": "example.com"})
     dnsx.parse(output, {"hosts": ["www.example.com"]})
     ct.parse(output, {"domain": "example.com"})
+    nmap.parse(output, {"targets": ["203.0.113.0/24"]})
 
 
 # --- dnsx ----------------------------------------------------------------------------------
@@ -234,3 +235,133 @@ def test_ct_caps_results(monkeypatch):
 def test_ct_without_valid_params_is_a_bug():
     with pytest.raises(ValueError):
         ct.parse(b"", {"domain": "*.example.com"})
+
+
+# --- port_scan (nmap XML) --------------------------------------------------------------------
+
+LAB = {"targets": ["www.example.com", "203.0.113.11"], "ports": [22, 80, 443, 6379, 8080]}
+LAB_PINS = {"www.example.com": ["203.0.113.10", "2001:db8::10"]}
+
+
+def by_type(parsed, entity_type):
+    return [e.attributes for e in parsed.entities if e.type == entity_type]
+
+
+def test_nmap_recorded_output():
+    parsed = nmap.parse(fixture("nmap", "lab"), LAB, resolutions=LAB_PINS)
+    assert_all_valid(parsed)
+    assert by_type(parsed, "host") == [
+        {"ip": "203.0.113.10", "nmap_state": "up"},
+        {"ip": "203.0.113.11", "nmap_state": "up"},
+    ]
+    services = {s["port"]: s for s in by_type(parsed, "service")}
+    assert set(services) == {80, 6379}  # open ports only
+    assert services[80] == {
+        "ip": "203.0.113.10",
+        "port": 80,
+        "protocol": "tcp",
+        "state": "open",
+        "reason": "syn-ack",
+        "name": "http",
+        "product": "nginx",
+        "version": "1.27.5",
+        "cpe": ["cpe:/a:igor_sysoev:nginx:1.27.5"],
+    }
+    assert services[6379]["product"] == "Redis key-value store"
+    assert by_type(parsed, "domain") == [{"name": "www.example.com"}]
+    links = sorted(
+        (link.type, link.source.attributes.get("name") or link.source.attributes["ip"])
+        for link in parsed.links
+    )
+    assert links == [
+        ("exposes", "203.0.113.10"),
+        ("exposes", "203.0.113.11"),
+        ("resolves_to", "www.example.com"),
+    ]
+    assert parsed.skipped == 0
+    assert parsed.notes == {
+        "hosts_up": 2,
+        "hosts_down": 0,
+        "open": 2,
+        "closed": 8,
+        "filtered": 0,
+        "finished": "success",
+    }
+
+
+def test_nmap_keeps_only_addresses_it_was_given():
+    # Without the pin for www.example.com, 203.0.113.10 is not something the job was given.
+    parsed = nmap.parse(fixture("nmap", "lab"), LAB)
+    assert [h["ip"] for h in by_type(parsed, "host")] == ["203.0.113.11"]
+    assert parsed.skipped == 1 and by_type(parsed, "domain") == []
+
+
+def test_nmap_truncated_report_keeps_complete_hosts():
+    parsed = nmap.parse(fixture("nmap", "truncated"), {"targets": ["203.0.113.10", "203.0.113.11"]})
+    assert_all_valid(parsed)
+    assert [h["ip"] for h in by_type(parsed, "host")] == ["203.0.113.10"]
+    assert parsed.notes["finished"] is None  # nmap did not finish writing
+
+
+def test_nmap_edge_cases():
+    params = {
+        "targets": [
+            "203.0.113.20",
+            "203.0.113.21",
+            "203.0.113.22",
+            "203.0.113.23",
+            "203.0.113.32/28",
+        ]
+    }
+    parsed = nmap.parse(fixture("nmap", "edge_cases"), params)
+    assert_all_valid(parsed)
+    hosts = {h["ip"]: h["nmap_state"] for h in by_type(parsed, "host")}
+    assert hosts == {
+        "203.0.113.20": "up",  # filtered and closed ports only
+        "203.0.113.21": "up",
+        "203.0.113.23": "up",  # a stray stderr line inside the host is just text
+        "203.0.113.40": "up",  # inside the 203.0.113.32/28 target
+        "203.0.113.41": "down",
+    }
+    services = {(s["ip"], s["port"]): s for s in by_type(parsed, "service")}
+    assert set(services) == {("203.0.113.21", 8443), ("203.0.113.23", 80), ("203.0.113.40", 3306)}
+    odd = services[("203.0.113.21", 8443)]
+    assert len(odd["product"]) == nmap.MAX_FIELD and odd["version"] == "1.0 <script>"
+    assert odd["tunnel"] == "ssl" and len(odd["cpe"]) == nmap.MAX_CPES
+    # Skipped: a host not in the input, UDP, port 0, a non-numeric port, an undefined entity,
+    # a MAC-only address, IPv6 in an IPv4 scan. The cut-off last host is not a complete element.
+    assert parsed.skipped == 7
+    assert parsed.notes["filtered"] == 2 and parsed.notes["closed"] == 1
+    assert parsed.notes["finished"] is None
+
+
+def test_nmap_refuses_entity_declarations():
+    doc = (
+        b'<?xml version="1.0"?><!DOCTYPE x [<!ENTITY a "aaaa">]>'
+        b'<host><status state="up"/><address addr="203.0.113.10" addrtype="ipv4"/></host>'
+    )
+    parsed = nmap.parse(doc, {"targets": ["203.0.113.10"]})
+    assert parsed.entities == () and parsed.notes == {"refused": "entity declaration in the report"}
+
+
+def test_nmap_ipv6_scan():
+    doc = (
+        b'<host><status state="up"/><address addr="2001:DB8::10" addrtype="ipv6"/><ports>'
+        b'<port protocol="tcp" portid="443"><state state="open" reason="syn-ack"/></port>'
+        b"</ports></host>"
+    )
+    parsed = nmap.parse(doc, {"targets": ["www.example.com"], "ipv6": True}, resolutions=LAB_PINS)
+    assert_all_valid(parsed)
+    assert [h["ip"] for h in by_type(parsed, "host")] == ["2001:db8::10"]
+    assert [s["port"] for s in by_type(parsed, "service")] == [443]
+
+
+def test_nmap_caps_results(monkeypatch):
+    monkeypatch.setattr(nmap, "MAX_ENTITIES", 3)
+    parsed = nmap.parse(fixture("nmap", "lab"), LAB, resolutions=LAB_PINS)
+    assert parsed.capped and len(parsed.entities) <= 3
+
+
+def test_nmap_without_valid_params_is_a_bug():
+    with pytest.raises(ValueError):
+        nmap.parse(b"", {"targets": []})

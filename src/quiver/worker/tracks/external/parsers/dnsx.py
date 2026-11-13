@@ -17,7 +17,9 @@ from typing import Any
 from quiver.core.graph.record import Link, Observed
 from quiver.worker.tracks.external.parsers.common import (
     MAX_ENTITIES,
+    NO_RESOLUTIONS,
     Parsed,
+    Resolutions,
     domain,
     ip,
     lines,
@@ -30,7 +32,9 @@ _UNRESOLVED = re.compile(r"^\[WRN\] (\d{1,9}) domains? failed to resolve")
 _RCODE = re.compile(r"^[A-Z]{1,20}$")
 
 
-def parse(output: bytes, params: Mapping[str, Any]) -> Parsed:
+def parse(
+    output: bytes, params: Mapping[str, Any], *, resolutions: Resolutions = NO_RESOLUTIONS
+) -> Parsed:
     hosts = params.get("hosts")
     asked = {d for d in map(domain, hosts if isinstance(hosts, list) else []) if d}
     if not asked:
