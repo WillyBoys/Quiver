@@ -21,8 +21,8 @@ from quiver.executor import protocol as p
 from quiver.executor.runner import Executor
 from quiver.worker import queue
 from quiver.worker.scheduler import Scheduler
-from quiver.worker.tracks.external.parsers import Parsed, ct, dnsx, nmap, subfinder
-from quiver.worker.tracks.external.tools import PORT_SCAN
+from quiver.worker.tracks.external.parsers import Parsed, ct, dnsx, httpx, nmap, subfinder
+from quiver.worker.tracks.external.tools import HTTP_PROBE, PORT_SCAN
 from tests.api_helpers import activate
 from tests.test_scheduler import DNS, PATH_ENV, PY, get_job
 
@@ -30,7 +30,8 @@ TOOLS = Path(__file__).parent / "fixtures" / "tools"
 FIXTURE = TOOLS / "subfinder" / "example_com.log"
 CT_FIXTURE = TOOLS / "quiver-ct" / "example_com.log"
 FAKE_DNSX = TOOLS / "fake_dnsx.py"
-FAKE_NMAP = TOOLS / "fake_nmap.py"  # an absolute path: never read as a target by the gate
+FAKE_NMAP = TOOLS / "fake_nmap.py"
+FAKE_HTTPX = TOOLS / "fake_httpx.py"  # an absolute path: never read as a target by the gate
 
 
 @pytest.fixture
@@ -103,6 +104,15 @@ REGISTRY = ToolRegistry(
             build_stdin=PORT_SCAN.build_stdin,
             bind_stdin=PORT_SCAN.bind_stdin,
         ),
+        # The real http_probe argv (Host header, SNI) after a stand-in program.
+        ToolSpec(
+            "fake_http_probe",
+            RiskTier.DISCOVERY,
+            {"host": TargetParam()},
+            build_argv=lambda params: [PY, str(FAKE_HTTPX), *HTTP_PROBE.argv_for(params)[1:]],
+            build_stdin=HTTP_PROBE.build_stdin,
+            bind_stdin=HTTP_PROBE.bind_stdin,
+        ),
         ToolSpec(
             "no_parser",
             RiskTier.PASSIVE,
@@ -128,6 +138,7 @@ PARSERS = {
     "fake_resolve": dnsx.parse,
     "fake_ct": ct.parse,
     "fake_port_scan": nmap.parse,
+    "fake_http_probe": httpx.parse,
     "broken": _boom,
     "half": _half_valid,
 }
@@ -400,3 +411,18 @@ def test_unbindable_targets_are_not_dispatched(active, settings, run_db, monkeyp
     assert job.status is JobStatus.DEFERRED
     assert "could not bind targets" in job.reason
     assert not p.spec_path(settings.job_spec_dir, str(job_id)).exists()
+
+
+def test_http_probe_connects_to_the_pin_and_speaks_to_the_name(active, settings, executor, run_db):
+    job_id = submit(run_db, active, "fake_http_probe", host="www.example.com", ports=[443])
+    job = run_to_success(settings, executor, run_db, job_id)
+    assert job.status is JobStatus.SUCCEEDED, job.reason
+    [line] = output_of(settings, job_id).splitlines()
+    answer = json.loads(line)
+    assert answer["host_ip"] == "203.0.113.10"  # stdin: the pinned address, not the name
+    assert answer["title"] == "vhost=www.example.com sni=www.example.com"
+
+    scheduler_call(settings, "parse")
+    endpoints = entities(run_db, "web_endpoint")
+    assert set(endpoints) == {"web_endpoint:https://www.example.com:443/"}
+    assert endpoints["web_endpoint:https://www.example.com:443/"].scope_status == "in_scope"

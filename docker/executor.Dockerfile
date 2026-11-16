@@ -17,6 +17,12 @@ ARG SUBFINDER_SHA256_ARM64=24913d49dddc1d3a5e99a4a7580da5be980959b9415b96f52c4f7
 ARG DNSX_VERSION=1.3.1
 ARG DNSX_SHA256_AMD64=438b964653056dd51dcfe614b1a16f8bced3cc48a1d27bc07cc6fdf2ef2a9533
 ARG DNSX_SHA256_ARM64=dd657dd1ccee5e137eca2dbad0e97dbd067555f744adb97efcda774f1b2fbde1
+ARG HTTPX_VERSION=1.12.0
+ARG HTTPX_SHA256_AMD64=9d8439e8b6c9aa7d1e2314817a392e00d5178da3af5652f7475f88868f418f76
+ARG HTTPX_SHA256_ARM64=fd7b123c1dfbc3d69f19f524e4eebcd6ec06b9a6cbd56813c76f11645197331e
+ARG TLSX_VERSION=1.4.0
+ARG TLSX_SHA256_AMD64=05628cec246e292e2f9afc6e7bc5de95aaa0fbe78fd556d5ad220b9f4702d364
+ARG TLSX_SHA256_ARM64=b757125d94c7d0e1f1f109534f0ed88d2a4b1c3856e1fa35efc1ef9e36781b0e
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl unzip ca-certificates \
@@ -26,8 +32,10 @@ WORKDIR /dl
 # fetch <name> <version> <sha256>: download a ProjectDiscovery release zip, verify, unpack.
 RUN set -eu; \
     case "${TARGETARCH:-amd64}" in \
-      amd64) arch=amd64; sf="$SUBFINDER_SHA256_AMD64"; dx="$DNSX_SHA256_AMD64" ;; \
-      arm64) arch=arm64; sf="$SUBFINDER_SHA256_ARM64"; dx="$DNSX_SHA256_ARM64" ;; \
+      amd64) arch=amd64; sf="$SUBFINDER_SHA256_AMD64"; dx="$DNSX_SHA256_AMD64"; \
+             hx="$HTTPX_SHA256_AMD64"; tx="$TLSX_SHA256_AMD64" ;; \
+      arm64) arch=arm64; sf="$SUBFINDER_SHA256_ARM64"; dx="$DNSX_SHA256_ARM64"; \
+             hx="$HTTPX_SHA256_ARM64"; tx="$TLSX_SHA256_ARM64" ;; \
       *) echo "unsupported architecture: ${TARGETARCH}" >&2; exit 1 ;; \
     esac; \
     fetch() { \
@@ -40,6 +48,8 @@ RUN set -eu; \
     mkdir /out; \
     fetch subfinder "$SUBFINDER_VERSION" "$sf"; \
     fetch dnsx "$DNSX_VERSION" "$dx"; \
+    fetch httpx "$HTTPX_VERSION" "$hx"; \
+    fetch tlsx "$TLSX_VERSION" "$tx"; \
     chmod 0755 /out/*
 
 # --- executor ------------------------------------------------------------------------------

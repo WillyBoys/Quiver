@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from quiver.core.graph.types import default_graph
-from quiver.worker.tracks.external.parsers import common, ct, dnsx, nmap, subfinder
+from quiver.worker.tracks.external.parsers import common, ct, dnsx, httpx, nmap, subfinder, tlsx
 
 FIXTURES = Path(__file__).parent / "fixtures" / "tools"
 GRAPH = default_graph()
@@ -107,6 +107,8 @@ def test_parsers_never_raise_on_junk(output):
     dnsx.parse(output, {"hosts": ["www.example.com"]})
     ct.parse(output, {"domain": "example.com"})
     nmap.parse(output, {"targets": ["203.0.113.0/24"]})
+    httpx.parse(output, {"host": "203.0.113.10"})
+    tlsx.parse(output, {"host": "203.0.113.10"})
 
 
 # --- dnsx ----------------------------------------------------------------------------------
@@ -365,3 +367,122 @@ def test_nmap_caps_results(monkeypatch):
 def test_nmap_without_valid_params_is_a_bug():
     with pytest.raises(ValueError):
         nmap.parse(b"", {"targets": []})
+
+
+# --- http_probe (httpx) ------------------------------------------------------------------------
+
+WWW = {"www.example.com": ["203.0.113.10"]}
+
+
+def test_httpx_recorded_output():
+    params = {"host": "www.example.com", "ports": [80, 443, 8080]}
+    parsed = httpx.parse(fixture("httpx", "lab"), params, resolutions=WWW)
+    assert_all_valid(parsed)
+    endpoints = {e["url"]: e for e in by_type(parsed, "web_endpoint")}
+    assert set(endpoints) == {"http://www.example.com:80/", "https://www.example.com:443/"}
+    https = endpoints["https://www.example.com:443/"]
+    assert https["title"] == "WWW Example" and https["webserver"] == "nginx/1.27.5"
+    assert https["tech"] == ["MySQL", "Nginx:1.27.5", "PHP:8.2.1", "WordPress:6.4.2"]
+    assert https["tls_sha256"] == "d3e14c563664d59b7e649bc8e25a7a81d3f2d79423ade5911843d068d7423aed"
+    assert https["ip"] == "203.0.113.10" and https["status_code"] == 200
+    assert sorted((s["port"]) for s in by_type(parsed, "service")) == [80, 443]
+    assert by_type(parsed, "domain") == [{"name": "www.example.com"}]
+    assert sorted(link.type for link in parsed.links) == ["on_domain"] * 2 + ["serves"] * 2
+    assert parsed.notes == {"endpoints": 2, "failed": 0, "redirects_to": []}
+
+
+def test_httpx_off_site_redirect_becomes_an_entity_to_scope_check():
+    parsed = httpx.parse(
+        fixture("httpx", "redirect"),
+        {"host": "go.example.com", "ports": [80]},
+        resolutions={"go.example.com": ["203.0.113.10"]},
+    )
+    assert_all_valid(parsed)
+    [endpoint] = by_type(parsed, "web_endpoint")
+    assert endpoint["status_code"] == 301
+    assert endpoint["location"] == "https://evil.example.org/landing?from=go"
+    assert {d["name"] for d in by_type(parsed, "domain")} == {"go.example.com", "evil.example.org"}
+    assert parsed.notes["redirects_to"] == ["evil.example.org"]
+
+
+def test_httpx_edge_cases():
+    parsed = httpx.parse(
+        fixture("httpx", "edge_cases"), {"host": "www.example.com"}, resolutions=WWW
+    )
+    assert_all_valid(parsed)
+    endpoints = {e["url"]: e for e in by_type(parsed, "web_endpoint")}
+    odd = endpoints["https://www.example.com:8443/"]
+    assert len(odd["title"]) == 200 and "tech" not in odd and "status_code" not in odd
+    assert "tls_sha256" not in odd and odd["location"] == "/login"
+    # Redirects: same host and javascript: make nothing; another host or an IP does.
+    assert {d["name"] for d in by_type(parsed, "domain")} == {"www.example.com", "evil.example.org"}
+    assert by_type(parsed, "host") == [{"ip": "198.51.100.20"}]
+    assert parsed.notes["redirects_to"] == ["198.51.100.20", "evil.example.org"]  # not ftp://
+    # Skipped: an address not given to the job, ftp, two bad ports, the cut-off last line.
+    assert parsed.skipped == 5 and parsed.notes["failed"] == 1
+
+
+def test_httpx_on_an_address_has_no_domain():
+    parsed = httpx.parse(fixture("httpx", "lab"), {"host": "203.0.113.10"})
+    assert {e["url"] for e in by_type(parsed, "web_endpoint")} == {
+        "http://203.0.113.10:80/",
+        "https://203.0.113.10:443/",
+    }
+    assert by_type(parsed, "domain") == [] and {link.type for link in parsed.links} == {"serves"}
+
+
+def test_httpx_ignores_answers_from_addresses_it_was_not_given():
+    parsed = httpx.parse(fixture("httpx", "lab"), {"host": "www.example.com"})  # no pins
+    assert parsed.entities == () and parsed.skipped == 2
+
+
+# --- tls_scan (tlsx) ---------------------------------------------------------------------------
+
+
+def test_tlsx_recorded_output():
+    params = {"host": "www.example.com", "ports": [443, 80]}
+    parsed = tlsx.parse(fixture("tlsx", "lab"), params, resolutions=WWW)
+    assert_all_valid(parsed)
+    [cert] = by_type(parsed, "certificate")
+    assert cert["sha256"] == "d3e14c563664d59b7e649bc8e25a7a81d3f2d79423ade5911843d068d7423aed"
+    assert cert["subject_cn"] == "www.example.com" and cert["self_signed"] is True
+    assert cert["san"] == ["www.example.com", "api.example.com"]
+    [svc] = by_type(parsed, "service")
+    assert svc["port"] == 443 and svc["tls_version"] == "tls13"
+    assert svc["tls_versions"] == ["tls12", "tls13"]
+    assert len(svc["tls_ciphers"]["weak"]) == 8 and len(svc["tls_ciphers"]["secure"]) == 3
+    assert {d["name"] for d in by_type(parsed, "domain")} == {"www.example.com", "api.example.com"}
+    assert sorted(link.type for link in parsed.links) == ["names", "names", "presents"]
+    assert parsed.notes == {"certificates": 1, "no_tls_ports": [80]}
+
+
+def test_tlsx_edge_cases():
+    parsed = tlsx.parse(fixture("tlsx", "edge_cases"), {"host": "www.example.com"}, resolutions=WWW)
+    assert_all_valid(parsed)
+    [cert] = by_type(parsed, "certificate")
+    assert cert["expired"] is True and "self_signed" not in cert
+    services = {s["port"]: s for s in by_type(parsed, "service")}
+    assert set(services) == {443, 9443}
+    assert services[443]["tls_versions"] == ["tls10", "tls12"]  # tls99 dropped
+    assert services[443]["tls_ciphers"] == {
+        "insecure": ["TLS_RSA_WITH_RC4_128_SHA"],
+        "weak": ["AES128-SHA", "AES256-SHA"],
+        "secure": ["ECDHE-RSA-AES128-GCM-SHA256"],
+    }
+    # *.example.com names example.com; free text and e-mail addresses name nothing.
+    assert {d["name"] for d in by_type(parsed, "domain")} == {
+        "www.example.com",
+        "example.com",
+        "other.example.net",
+    }
+    # Skipped: an address not given, no fingerprint, the cut-off last line.
+    assert parsed.skipped == 3 and parsed.notes["no_tls_ports"] == [8443]
+
+
+def test_tlsx_bad_timestamp_is_dropped():
+    line = (
+        b'{"ip":"203.0.113.10","port":"443","probe_status":true,"not_after":"soon",'
+        b'"fingerprint_hash":{"sha256":"' + b"b" * 64 + b'"}}'
+    )
+    [cert] = by_type(tlsx.parse(line, {"host": "203.0.113.10"}), "certificate")
+    assert cert == {"sha256": "b" * 64}

@@ -14,14 +14,13 @@ A, B = "a" * 64, "b" * 64
 
 
 def dockerfile(**overrides):
-    args = {
-        "SUBFINDER_VERSION": "2.17.0",
-        "SUBFINDER_SHA256_AMD64": A,
-        "SUBFINDER_SHA256_ARM64": B,
-        "DNSX_VERSION": "1.3.1",
-        "DNSX_SHA256_AMD64": B,
-        "DNSX_SHA256_ARM64": A,
-    } | overrides
+    """A Dockerfile pinning every tool in the table, each checksum distinct."""
+    args = {}
+    for i, tool in enumerate(update_tools.TOOLS):
+        args[f"{tool.upper()}_VERSION"] = "1.0.0"
+        args[f"{tool.upper()}_SHA256_AMD64"] = f"{2 * i:064x}"
+        args[f"{tool.upper()}_SHA256_ARM64"] = f"{2 * i + 1:064x}"
+    args |= overrides
     return "FROM x\nARG TARGETARCH\n" + "".join(f"ARG {k}={v}\n" for k, v in args.items())
 
 
@@ -35,7 +34,7 @@ def test_committed_dockerfile_pins_every_tool():
     [
         ({"DNSX_VERSION": "latest"}, "DNSX_VERSION"),
         ({"SUBFINDER_SHA256_ARM64": "abc"}, "SUBFINDER_SHA256_ARM64"),
-        ({"SUBFINDER_SHA256_ARM64": A}, "same checksum"),
+        ({"SUBFINDER_SHA256_ARM64": f"{0:064x}"}, "same checksum"),  # = its AMD64 pin
     ],
 )
 def test_check_reports_bad_pins(override, problem):
@@ -44,7 +43,8 @@ def test_check_reports_bad_pins(override, problem):
 
 
 def test_check_reports_missing_pins():
-    assert len(update_tools.check("FROM x\n")) == 6
+    assert update_tools.check(dockerfile()) == []
+    assert len(update_tools.check("FROM x\n")) == 3 * len(update_tools.TOOLS)
 
 
 CHECKSUMS = f"""{A}  dnsx_1.3.2_linux_amd64.zip

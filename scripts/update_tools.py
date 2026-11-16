@@ -25,6 +25,8 @@ ARCHES = ("amd64", "arm64")
 TOOLS = {
     "subfinder": "projectdiscovery/subfinder",
     "dnsx": "projectdiscovery/dnsx",
+    "httpx": "projectdiscovery/httpx",
+    "tlsx": "projectdiscovery/tlsx",
 }
 MAX_DOWNLOAD = 1_000_000
 
