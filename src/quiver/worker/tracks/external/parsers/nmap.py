@@ -18,17 +18,16 @@ network targets) are kept. Each becomes a `host`, each **open** TCP port a `serv
 `resolves_to`. Banner fields (product, version, extra info) are target-controlled data.
 """
 
-import ipaddress
 import re
 import xml.etree.ElementTree as ET
 from collections.abc import Iterator, Mapping
 from typing import Any
 
 from quiver.core.graph.record import Link, Observed
-from quiver.core.policy.tools import BindError, bind_targets
 from quiver.worker.tracks.external.parsers.common import (
     MAX_ENTITIES,
     NO_RESOLUTIONS,
+    BoundInput,
     Parsed,
     Resolutions,
     ip,
@@ -64,44 +63,12 @@ def _host_elements(output: bytes) -> Iterator[ET.Element | None]:
             yield None
 
 
-class _Allowed:
-    """The addresses the job was given: what a result may be about."""
-
-    def __init__(self, params: Mapping[str, Any], resolutions: Resolutions):
-        from quiver.worker.tracks.external.tools import PORT_SCAN  # tools imports parsers
-
-        self.names: dict[str, set[str]] = {}  # address -> hostnames pinned to it
-        lines = PORT_SCAN.stdin_for(params)
-        version = PORT_SCAN.bind_stdin(params)
-        hostnames = [line for line in lines if not _is_network(line)]
-        try:
-            bound = bind_targets(lines, resolutions, version=version).lines
-        except BindError:  # unknown pins: keep only the job's own IP and network targets
-            bound = tuple(line for line in lines if _is_network(line))
-        self.networks = [ipaddress.ip_network(line) for line in bound]
-        for name in hostnames:
-            for address in resolutions.get(name, ()):
-                canonical = ip(address)
-                if canonical:
-                    self.names.setdefault(canonical, set()).add(name)
-
-    def __contains__(self, address: str) -> bool:
-        addr = ipaddress.ip_address(address)
-        return any(addr in net for net in self.networks)
-
-
-def _is_network(line: str) -> bool:
-    try:
-        ipaddress.ip_network(line)
-    except ValueError:
-        return False
-    return True
-
-
 def parse(
     output: bytes, params: Mapping[str, Any], *, resolutions: Resolutions = NO_RESOLUTIONS
 ) -> Parsed:
-    allowed = _Allowed(params, resolutions)  # a ValueError here is a bug (bad job params)
+    from quiver.worker.tracks.external.tools import PORT_SCAN  # tools imports parsers
+
+    allowed = BoundInput(PORT_SCAN, params, resolutions)
     if b"<!ENTITY" in output:
         return Parsed(skipped=1, notes={"refused": "entity declaration in the report"})
 

@@ -284,4 +284,137 @@ PORT_SCAN = ToolSpec(
 )
 
 
-TOOLS = (SUBDOMAIN_ENUM, DNS_RESOLVE, CERT_TRANSPARENCY, PORT_SCAN)
+# --- http_probe (httpx) and tls_scan (tlsx): one host per job ---------------------------------
+#
+# Both tools take one global Host/SNI per run, so a job probes one host: a hostname (bound to
+# its pinned IPv4 addresses on standard input, and sent as the Host header and TLS SNI) or an
+# IPv4 address. IPv6 is not supported yet (httpx needs bracketed IPv6 input).
+
+MAX_PROBE_PORTS = 20
+WEB_PORTS = [80, 443]
+PROBE_PARAMS = {"host", "ports"}
+
+
+def _probe_host(params: Mapping[str, Any]) -> tuple[str, bool]:
+    """The job's host, normalized, and whether it is a hostname (rather than an address)."""
+    value = params.get("host")
+    if not isinstance(value, str):
+        raise ValueError("host must be a hostname or an IPv4 address")
+    try:
+        target = normalize_scope_value(value, ScopeMode.INCLUDE)
+    except ValueError as exc:
+        raise ValueError(f"host: {exc}") from exc
+    if target.kind is ScopeKind.HOSTNAME:
+        return target.value, True
+    if target.kind is ScopeKind.IP and ipaddress.ip_address(target.value).version == 4:
+        return target.value, False
+    raise ValueError(f"host: {target.value} is not a hostname or an IPv4 address")
+
+
+def _probe_ports(params: Mapping[str, Any], default: list[int]) -> str:
+    ports = params.get("ports", default)
+    if not isinstance(ports, list) or not ports or len(ports) > MAX_PROBE_PORTS:
+        raise ValueError(f"ports must be a list of 1 to {MAX_PROBE_PORTS} ports")
+    return ",".join(str(p) for p in dict.fromkeys(_port(p) for p in ports))
+
+
+def _probe_stdin(params: Mapping[str, Any]) -> list[str]:
+    _only(params, PROBE_PARAMS)
+    return [_probe_host(params)[0]]
+
+
+def _ipv4(params: Mapping[str, Any]) -> int:
+    return 4
+
+
+def _httpx_argv(params: Mapping[str, Any]) -> list[str]:
+    _only(params, PROBE_PARAMS)
+    host, is_name = _probe_host(params)
+    argv = [
+        "httpx",
+        "-json",
+        "-duc",
+        "-nc",
+        "-silent",
+        "-p",
+        _probe_ports(params, WEB_PORTS),  # each port: HTTPS first, then HTTP
+        "-sc",
+        "-title",
+        "-server",
+        "-td",  # technology detection (Wappalyzer data): tech_fingerprint
+        "-location",  # redirects are reported, never followed
+        "-tls-grab",
+        "-ob",  # no response bodies in the output
+        "-timeout",
+        "10",
+        "-retries",
+        "1",
+        "-rl",
+        "20",
+        "-t",
+        "10",
+    ]
+    if is_name:
+        # Connect to the pinned addresses on stdin, but speak to this virtual host.
+        argv += ["-H", f"Host: {host}", "-sni", host]
+    return argv
+
+
+HTTP_PROBE = ToolSpec(
+    "http_probe",
+    RiskTier.DISCOVERY,
+    target_params={"host": TargetParam()},
+    build_argv=_httpx_argv,
+    build_stdin=_probe_stdin,
+    bind_stdin=_ipv4,
+)
+
+
+def _tlsx_argv(params: Mapping[str, Any]) -> list[str]:
+    _only(params, PROBE_PARAMS)
+    host, is_name = _probe_host(params)
+    argv = [
+        "tlsx",
+        "-json",
+        "-duc",
+        "-nc",
+        "-silent",
+        "-sm",
+        "ctls",  # Go's TLS stack: never shells out to openssl
+        "-p",
+        _probe_ports(params, [443]),
+        "-tls-version",
+        "-cipher",
+        "-hash",
+        "sha256",
+        "-se",
+        "-so",
+        "-ex",
+        "-ss",
+        "-un",
+        "-ve",  # supported TLS versions
+        "-ce",  # supported ciphers, by strength
+        "-tps",  # report failed handshakes too
+        "-timeout",
+        "10",
+        "-retry",
+        "2",
+        "-c",
+        "10",
+    ]
+    if is_name:
+        argv += ["-sni", host]
+    return argv
+
+
+TLS_SCAN = ToolSpec(
+    "tls_scan",
+    RiskTier.DISCOVERY,
+    target_params={"host": TargetParam()},
+    build_argv=_tlsx_argv,
+    build_stdin=_probe_stdin,
+    bind_stdin=_ipv4,
+)
+
+
+TOOLS = (SUBDOMAIN_ENUM, DNS_RESOLVE, CERT_TRANSPARENCY, PORT_SCAN, HTTP_PROBE, TLS_SCAN)

@@ -7,6 +7,7 @@ validated against the graph types, so one bad line can never make `record()` (wh
 all-or-nothing) reject the whole job. Only a bug in the parser itself raises.
 """
 
+import ipaddress
 import json
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -15,6 +16,7 @@ from typing import Any
 
 from quiver.core.graph import keys
 from quiver.core.graph.record import FindingIn, Link, Observed
+from quiver.core.policy.tools import BindError, ToolSpec, bind_targets
 
 # The addresses the gate pinned for each hostname in the job's last decision (Job.resolutions):
 # what a tool with bound targets was actually given. Passive tools ignore them.
@@ -91,3 +93,61 @@ def strings(value: Any, *, limit: int, max_len: int = 255) -> list[str] | None:
     if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
         return None
     return list(dict.fromkeys(v for v in value if 0 < len(v) <= max_len))[:limit]
+
+
+class BoundInput:
+    """What a tool with bound targets was given (Blueprint §4.1): the pinned addresses of its
+    hostnames plus its own IP and network targets. A result about any other address is not
+    about this job and is skipped. `names` maps each pinned address to its hostnames.
+
+    Recomputed from the job's parameters and the decision's resolutions, exactly as the
+    worker bound them at dispatch. If a name's pins are unknown, only the job's own IP and
+    network targets count."""
+
+    def __init__(self, spec: ToolSpec, params: Mapping[str, Any], resolutions: Resolutions):
+        lines = spec.stdin_for(params)  # ValueError for bad params: a bug, not bad output
+        version = spec.bind_stdin(params) if spec.bind_stdin else None
+        hostnames = [line for line in lines if not _is_network(line)]
+        try:
+            bound = bind_targets(lines, resolutions, version=version).lines
+        except BindError:
+            bound = tuple(line for line in lines if _is_network(line))
+        self.networks = [ipaddress.ip_network(line) for line in bound]
+        self.names: dict[str, set[str]] = {}
+        for name in hostnames:
+            for address in resolutions.get(name, ()):
+                canonical = ip(address)
+                if canonical and canonical in self:
+                    self.names.setdefault(canonical, set()).add(name)
+
+    def __contains__(self, address: str) -> bool:
+        try:
+            addr = ipaddress.ip_address(address)
+        except ValueError:
+            return False
+        return any(addr in net for net in self.networks)
+
+
+def _is_network(line: str) -> bool:
+    try:
+        ipaddress.ip_network(line)
+    except ValueError:
+        return False
+    return True
+
+
+def port(value: Any) -> int | None:
+    """A TCP port from tool output (a number or a numeric string), or None."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, str) and value.isdigit() and len(value) <= 5:
+        value = int(value)
+    return value if isinstance(value, int) and 1 <= value <= 65535 else None
+
+
+def text(value: Any, limit: int = 200) -> str | None:
+    """A short, stripped string from tool output, or None."""
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    return value[:limit] if value else None

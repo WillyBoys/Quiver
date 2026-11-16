@@ -240,3 +240,12 @@ def test_a_wildcard_base_is_not_scanned():
     scope = _scope("include wildcard *.example.com")
     decision = evaluate(request(targets=["example.com"]), replace(CTX, scope=scope))
     assert decision.verdict is Verdict.DENY
+
+
+def test_bound_input_maps_only_bound_addresses_to_names():
+    from quiver.worker.tracks.external.parsers.common import BoundInput
+
+    bound = BoundInput(PORT_SCAN, {"targets": ["www.example.com", "203.0.113.32/30"]}, PINS)
+    assert bound.names == {"203.0.113.10": {"www.example.com"}}  # not the IPv6 pin
+    assert "203.0.113.10" in bound and "203.0.113.33" in bound
+    assert "2001:db8::10" not in bound and "203.0.113.11" not in bound and "x" not in bound
