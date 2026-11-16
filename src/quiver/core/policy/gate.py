@@ -19,6 +19,7 @@ import uuid
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
+from typing import Any
 from urllib.parse import urlsplit
 
 from quiver.core.models.engagement import EngagementStatus
@@ -90,6 +91,8 @@ class GateContext:
     pins: Mapping[str, frozenset[str]] = field(default_factory=dict)
     providers: ProviderIndex | None = None  # None: third-party hosting cannot be checked
     limits: Mapping[str, int] = field(default_factory=lambda: dict(DEFAULT_LIMITS))
+    # The engagement's tool settings overrides ({tool: {setting: value}}), as stored.
+    tool_settings: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
     load: Load | None = None  # None: not gating a job (no limits apply)
     org_id: uuid.UUID | None = None  # for recording; not used by evaluate()
 
@@ -115,6 +118,7 @@ def evaluate(request: ActionRequest, ctx: GateContext, *, approved: bool = False
     pinned: dict[str, tuple[str, ...]] = {}
     new_pins: dict[str, tuple[str, ...]] = {}
     if spec is not None and tier is not None:
+        _settings(request, spec, ctx, add)
         _scope(request, spec, tier, ctx, add, targets, suggest)
         if tier is not RiskTier.PASSIVE and ctx.scope is not None:
             _resolution(targets, ctx, add, suggest, pinned, new_pins)
@@ -237,6 +241,19 @@ def _tool(request: ActionRequest, spec: ToolSpec | None, add: AddCheck) -> RiskT
         return RiskTier.ARBITRARY
     add("tool", Verdict.ALLOW, f"{spec.name} ({tier})")
     return tier
+
+
+def _settings(request: ActionRequest, spec: ToolSpec, ctx: GateContext, add: AddCheck) -> None:
+    """The job against the engagement's tool settings: going beyond them needs approval (a
+    one-off exception); the operator changes the settings to allow it for good."""
+    if not spec.settings.specs:
+        return
+    settings = spec.settings.effective(ctx.tool_settings.get(spec.name))
+    problems = spec.settings.problems(request.params, settings)
+    for reason in problems:
+        add("tool_settings", Verdict.NEEDS_APPROVAL, reason)
+    if not problems:
+        add("tool_settings", Verdict.ALLOW, "within this engagement's tool settings")
 
 
 def _scope(

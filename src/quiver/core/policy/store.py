@@ -85,6 +85,7 @@ async def load_context(
         scope_error=scope_error,
         autonomy=effective_autonomy(eng.autonomy),
         limits=effective_limits(eng.limits),
+        tool_settings=dict(eng.tool_settings or {}),
         windows=tuple(WindowSpec.from_row(w) for w in windows),
         global_kill=_kill_reason(org),
         engagement_kill=_kill_reason(eng),
