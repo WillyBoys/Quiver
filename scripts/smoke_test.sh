@@ -97,6 +97,24 @@ DENIED="$(post "/engagements/$ENG_ID/jobs" \
   '{"tool":"run_command","params":{"argv":["curl","http://198.51.100.7/"]}}' | field '["id"]')"
 wait_for "$DENIED" denied
 
+# Engagement tool settings: missing parameters come from them, and a job asking for more
+# than they allow waits for approval.
+curl -s -b "$JAR" "$API/tool-settings" | grep -q '"max_rate"' || fail "tool settings schema missing"
+curl -s -b "$JAR" -X PATCH -H 'Content-Type: application/json' \
+  -d '{"tool_settings":{"port_scan":{"max_rate":100}}}' "$API/engagements/$ENG_ID" \
+  | grep -q '"max_rate":100' || fail "tool settings not saved"
+FAST="$(post "/engagements/$ENG_ID/jobs" \
+  '{"tool":"port_scan","params":{"targets":["203.0.113.5"],"max_rate":500,"ports":[80]}}' | field '["id"]')"
+wait_for "$FAST" awaiting_approval
+curl -s -b "$JAR" "$API/engagements/$ENG_ID/jobs/$FAST" | grep -q "above this engagement's limit" \
+  || fail "approval reason does not name the setting"
+FILLED="$(post "/engagements/$ENG_ID/jobs" \
+  '{"tool":"port_scan","params":{"targets":["203.0.113.5"],"ports":[80]}}')"
+echo "$FILLED" | grep -q '"--max-rate","100"' || fail "setting not applied to the argv: $FILLED"
+for J in "$FAST" "$(echo "$FILLED" | field '["id"]')"; do
+  post "/engagements/$ENG_ID/jobs/$J/cancel" '{}' >/dev/null
+done
+
 # The tools run as the unprivileged user with a job's scrubbed environment (no PYTHONPATH).
 [ "$(docker compose exec -T executor id -u)" = "10001" ] || fail "executor not running as 10001"
 tool() { docker compose exec -T executor env -i PATH=/usr/local/bin:/usr/bin:/bin HOME=/tmp "$@"; }

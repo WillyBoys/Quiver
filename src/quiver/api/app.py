@@ -15,6 +15,7 @@ from quiver.api import (
     kill_switch,
     resolutions,
     suggestions,
+    tool_settings,
 )
 from quiver.core.config import Settings, get_settings
 from quiver.core.db import make_engine, make_sessionmaker
@@ -65,4 +66,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(approvals.router)
     app.include_router(graph.router)
     app.include_router(kill_switch.router)
+    app.include_router(tool_settings.router)
     return app

@@ -1,5 +1,5 @@
 """Engagement API: engagements, scope (with audit log), testing windows, authorization,
-autonomy, and the engagement kill switch.
+autonomy, limits, tool settings, and the engagement kill switch.
 
 All routes require an operator session and only see the operator's organization; another
 organization's engagement is indistinguishable from a missing one (404).
@@ -8,7 +8,7 @@ organization's engagement is indistinguishable from a missing one (404).
 import uuid
 import zoneinfo
 from datetime import UTC, date, datetime, time
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -34,7 +34,9 @@ from quiver.core.policy import (
     validate_autonomy,
     validate_limits,
 )
+from quiver.core.policy.tools import effective_tool_settings, validate_tool_settings
 from quiver.core.scope import ScopeKind, ScopeMode, ScopeValueError, normalize_scope_value
+from quiver.worker.registry import default_registry
 
 router = APIRouter(
     prefix="/engagements", tags=["engagements"], dependencies=[Depends(require_operator)]
@@ -90,6 +92,8 @@ class EngagementUpdate(BaseModel):
     autonomy: dict[RiskTier, Autonomy] | None = None
     # Job limit overrides (gate check 6); replaces the previous overrides.
     limits: dict[str, int] | None = None
+    # Tool settings overrides ({tool: {setting: value}}); replaces the previous overrides.
+    tool_settings: dict[str, dict[str, Any]] | None = None
 
     @field_validator("autonomy")
     @classmethod
@@ -103,6 +107,11 @@ class EngagementUpdate(BaseModel):
     def _valid_limits(cls, v):
         return None if v is None else validate_limits(v)
 
+    @field_validator("tool_settings")
+    @classmethod
+    def _valid_tool_settings(cls, v):
+        return None if v is None else validate_tool_settings(v, default_registry())
+
 
 class EngagementOut(OrmOut):
     id: uuid.UUID
@@ -112,6 +121,7 @@ class EngagementOut(OrmOut):
     status: EngagementStatus
     autonomy: dict[RiskTier, Autonomy]  # effective: defaults plus overrides
     limits: dict[str, int]  # effective: defaults plus overrides
+    tool_settings: dict[str, dict[str, Any]]  # effective, for every configurable tool
     kill_switch_at: datetime | None
     kill_switch_reason: str
     created_at: datetime
@@ -126,6 +136,11 @@ class EngagementOut(OrmOut):
     @classmethod
     def _effective_limits(cls, v):
         return effective_limits(v)
+
+    @field_validator("tool_settings", mode="before")
+    @classmethod
+    def _effective_tool_settings(cls, v):
+        return effective_tool_settings(v, default_registry())
 
 
 class ScopeEntryCreate(BaseModel):
@@ -352,6 +367,17 @@ async def update_engagement(
         eng.autonomy = validate_autonomy(body.autonomy)
     if body.limits is not None:
         eng.limits = body.limits
+    if body.tool_settings is not None and body.tool_settings != (eng.tool_settings or {}):
+        db.add(
+            Event(
+                org_id=user.org_id,
+                engagement_id=eng.id,
+                user_id=user.id,
+                kind="engagement.tool_settings_changed",
+                payload={"before": eng.tool_settings or {}, "after": body.tool_settings},
+            )
+        )
+        eng.tool_settings = body.tool_settings
 
     try:
         await db.commit()

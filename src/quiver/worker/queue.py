@@ -9,7 +9,7 @@ from typing import Any
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from quiver.core.models import Job, JobStatus
+from quiver.core.models import Engagement, Job, JobStatus
 from quiver.core.policy import Load, ToolRegistry
 
 # A job deferred with no end time (no window, paused engagement) is gated again this often.
@@ -29,12 +29,21 @@ async def enqueue(
 ) -> Job:
     """Record a job request. It is gated by the scheduler, never here.
 
-    The argv (and any standard input) is built now from the tool's structured parameters, so
+    Parameters the job leaves out are filled from the engagement's tool settings, then the
+    argv (and any standard input) is built now from the tool's structured parameters, so
     what the operator or agent sees is exactly what the gate checks and the executor runs.
     Raises ValueError when a known tool cannot use the parameters; an unknown tool is recorded
     and the gate denies it.
     """
     spec = registry.get(tool)
+    if spec is not None and spec.settings.specs:
+        # Parameters the job leaves out come from the engagement's settings now, so the
+        # stored parameters and argv show exactly what will run.
+        stored = await db.scalar(
+            select(Engagement.tool_settings).where(Engagement.id == engagement_id)
+        )
+        settings = spec.settings.effective((stored or {}).get(tool))
+        params = spec.settings.with_defaults(params, settings)
     argv = spec.argv_for(params) if spec is not None and spec.build_argv else []
     stdin = spec.stdin_for(params) if spec is not None else []
     job = Job(

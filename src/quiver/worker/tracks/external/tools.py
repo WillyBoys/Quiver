@@ -16,10 +16,11 @@ the tools run with DNS disabled, so they reach exactly the addresses that were c
 """
 
 import ipaddress
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from quiver.core.policy import RiskTier, TargetParam, ToolSpec
+from quiver.core.policy.settings import SettingKind, SettingMode, SettingSpec, ToolSettings
 from quiver.core.scope import NormalizedScope, ScopeKind, ScopeMode, normalize_scope_value
 
 MAX_RESOLVE_HOSTS = 1000
@@ -48,6 +49,27 @@ def _int(params: Mapping[str, Any], name: str, default: int, low: int, high: int
     if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high:
         raise ValueError(f"{name} must be a whole number from {low} to {high}")
     return value
+
+
+# --- engagement settings shared by several tools ---------------------------------------------
+#
+# Each tool's tunable behaviour (Blueprint §4 check 3a). The defaults keep what the tools did
+# before settings existed; an operator tightens them per engagement.
+
+MAX_MINUTES = ToolSettings(
+    {
+        "max_minutes": SettingSpec(
+            "max_minutes",
+            SettingMode.CEILING,
+            SettingKind.INT,
+            default=30,
+            minimum=1,
+            maximum=30,
+            param_default=10,
+            help="Longest run time a job may ask for, in minutes (default run time 10).",
+        )
+    }
+)
 
 
 # --- subdomain_enum: subfinder ---------------------------------------------------------------
@@ -79,6 +101,7 @@ SUBDOMAIN_ENUM = ToolSpec(
     RiskTier.PASSIVE,
     target_params={"domain": TargetParam(domain_subtree=True)},
     build_argv=_subfinder_argv,
+    settings=MAX_MINUTES,
 )
 
 
@@ -144,6 +167,7 @@ CERT_TRANSPARENCY = ToolSpec(
     RiskTier.PASSIVE,
     target_params={"domain": TargetParam(domain_subtree=True)},
     build_argv=_ct_argv,
+    settings=MAX_MINUTES,
 )
 
 
@@ -281,6 +305,46 @@ PORT_SCAN = ToolSpec(
     build_argv=_nmap_argv,
     build_stdin=_nmap_stdin,
     bind_stdin=_nmap_version,
+    settings=ToolSettings(
+        {
+            "max_rate": SettingSpec(
+                "max_rate",
+                SettingMode.CEILING,
+                SettingKind.INT,
+                default=1000,
+                minimum=10,
+                maximum=1000,
+                param_default=300,
+                help="Highest packet rate (per second) a scan may ask for (default rate 300).",
+            ),
+            "top_ports": SettingSpec(
+                "top_ports",
+                SettingMode.DEFAULT,
+                SettingKind.INT,
+                default=100,
+                minimum=1,
+                maximum=1000,
+                unless=("ports",),
+                help="How many of the most common ports a scan covers when no ports are given.",
+            ),
+            "version_detection": SettingSpec(
+                "version_detection",
+                SettingMode.ALLOW,
+                SettingKind.BOOL,
+                default=True,
+                param_default=True,
+                help="Allow service version detection (-sV): more requests per open port.",
+            ),
+            "ipv6": SettingSpec(
+                "ipv6",
+                SettingMode.ALLOW,
+                SettingKind.BOOL,
+                default=True,
+                param_default=False,
+                help="Allow scanning IPv6 addresses.",
+            ),
+        }
+    ),
 )
 
 
@@ -318,9 +382,23 @@ def _probe_ports(params: Mapping[str, Any], default: list[int]) -> str:
     return ",".join(str(p) for p in dict.fromkeys(_port(p) for p in ports))
 
 
-def _probe_stdin(params: Mapping[str, Any]) -> list[str]:
-    _only(params, PROBE_PARAMS)
-    return [_probe_host(params)[0]]
+def _probe_stdin(allowed: set[str]) -> Callable[[Mapping[str, Any]], list[str]]:
+    def build(params: Mapping[str, Any]) -> list[str]:
+        _only(params, allowed)
+        return [_probe_host(params)[0]]
+
+    return build
+
+
+def _probe_ports_setting(default: list[int]) -> SettingSpec:
+    return SettingSpec(
+        "ports",
+        SettingMode.DEFAULT,
+        SettingKind.PORTS,
+        default=default,
+        max_items=MAX_PROBE_PORTS,
+        help="Ports probed when a job gives none.",
+    )
 
 
 def _ipv4(params: Mapping[str, Any]) -> int:
@@ -365,13 +443,17 @@ HTTP_PROBE = ToolSpec(
     RiskTier.DISCOVERY,
     target_params={"host": TargetParam()},
     build_argv=_httpx_argv,
-    build_stdin=_probe_stdin,
+    build_stdin=_probe_stdin(PROBE_PARAMS),
     bind_stdin=_ipv4,
+    settings=ToolSettings({"ports": _probe_ports_setting(WEB_PORTS)}),
 )
 
 
+TLS_PARAMS = PROBE_PARAMS | {"enumerate"}
+
+
 def _tlsx_argv(params: Mapping[str, Any]) -> list[str]:
-    _only(params, PROBE_PARAMS)
+    _only(params, TLS_PARAMS)
     host, is_name = _probe_host(params)
     argv = [
         "tlsx",
@@ -392,8 +474,6 @@ def _tlsx_argv(params: Mapping[str, Any]) -> list[str]:
         "-ex",
         "-ss",
         "-un",
-        "-ve",  # supported TLS versions
-        "-ce",  # supported ciphers, by strength
         "-tps",  # report failed handshakes too
         "-timeout",
         "10",
@@ -402,6 +482,9 @@ def _tlsx_argv(params: Mapping[str, Any]) -> list[str]:
         "-c",
         "10",
     ]
+    if _flag(params, "enumerate", True):
+        # Supported versions and ciphers by strength: many extra handshakes per port.
+        argv += ["-ve", "-ce"]
     if is_name:
         argv += ["-sni", host]
     return argv
@@ -412,8 +495,21 @@ TLS_SCAN = ToolSpec(
     RiskTier.DISCOVERY,
     target_params={"host": TargetParam()},
     build_argv=_tlsx_argv,
-    build_stdin=_probe_stdin,
+    build_stdin=_probe_stdin(TLS_PARAMS),
     bind_stdin=_ipv4,
+    settings=ToolSettings(
+        {
+            "ports": _probe_ports_setting([443]),
+            "enumerate": SettingSpec(
+                "enumerate",
+                SettingMode.ALLOW,
+                SettingKind.BOOL,
+                default=True,
+                param_default=True,
+                help="Allow enumerating supported TLS versions and ciphers (many handshakes).",
+            ),
+        }
+    ),
 )
 
 

@@ -74,6 +74,9 @@ class Engagement(IdMixin, TimestampMixin, OwnedMixin, Base):
     kill_switch_reason: Mapped[str] = mapped_column(Text, default="", server_default="")
     # Per-engagement job limit overrides (gate check 6); defaults live in quiver.core.policy.
     limits: Mapped[dict[str, int]] = mapped_column(JSONB, default=dict, server_default="{}")
+    # Per-tool settings overrides ({"port_scan": {"max_rate": 100}}); the schema and defaults
+    # live with each tool (quiver.core.policy.settings).
+    tool_settings: Mapped[dict[str, dict]] = mapped_column(JSONB, default=dict, server_default="{}")
     # Bumped on every scope change, so running jobs gated before it are checked again.
     scope_changed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 

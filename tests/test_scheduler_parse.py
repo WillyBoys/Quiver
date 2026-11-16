@@ -103,6 +103,7 @@ REGISTRY = ToolRegistry(
             build_argv=lambda params: [PY, str(FAKE_NMAP), "-n"],
             build_stdin=PORT_SCAN.build_stdin,
             bind_stdin=PORT_SCAN.bind_stdin,
+            settings=PORT_SCAN.settings,
         ),
         # The real http_probe argv (Host header, SNI) after a stand-in program.
         ToolSpec(
@@ -426,3 +427,36 @@ def test_http_probe_connects_to_the_pin_and_speaks_to_the_name(active, settings,
     endpoints = entities(run_db, "web_endpoint")
     assert set(endpoints) == {"web_endpoint:https://www.example.com:443/"}
     assert endpoints["web_endpoint:https://www.example.com:443/"].scope_status == "in_scope"
+
+
+# --- engagement tool settings ----------------------------------------------------------------
+
+
+def set_tool_settings(run_db, eng, value):
+    async def go(db):
+        from quiver.core.models import Engagement
+
+        row = await db.get(Engagement, uuid.UUID(eng["id"]))
+        row.tool_settings = value
+        await db.commit()
+
+    run_db(go)
+
+
+def test_tightened_setting_stops_a_queued_job_for_approval(active, settings, run_db):
+    job_id = submit(run_db, active, "fake_port_scan", targets=["203.0.113.11"])
+    assert get_job(run_db, job_id).params["max_rate"] == 300  # filled at submission
+    set_tool_settings(run_db, active, {"fake_port_scan": {"max_rate": 100}})
+    scheduler_call(settings, "tick")
+    job = get_job(run_db, job_id)
+    assert job.status is JobStatus.AWAITING_APPROVAL
+    assert job.reason == "max_rate 300 is above this engagement's limit (100)"
+    assert not p.spec_path(settings.job_spec_dir, str(job_id)).exists()
+
+
+def test_settings_fill_new_jobs_so_they_run_without_asking(active, settings, executor, run_db):
+    set_tool_settings(run_db, active, {"fake_port_scan": {"max_rate": 100}})
+    job_id = submit(run_db, active, "fake_port_scan", targets=["203.0.113.11"])
+    assert get_job(run_db, job_id).params["max_rate"] == 100
+    job = run_to_success(settings, executor, run_db, job_id)
+    assert job.status is JobStatus.SUCCEEDED, job.reason

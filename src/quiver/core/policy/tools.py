@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
 
+from quiver.core.policy.settings import NO_SETTINGS, ToolSettings
 from quiver.core.policy.types import TIER_ORDER, Autonomy, RiskTier
 
 
@@ -48,6 +49,8 @@ class ToolSpec:
     # same decision (see bind_targets), so the tool never resolves names itself. It returns
     # the IP version the tool can use for these parameters (4 or 6), or None for both.
     bind_stdin: Callable[[Mapping[str, Any]], int | None] | None = None
+    # What an operator may tune per engagement (quiver.core.policy.settings).
+    settings: ToolSettings = NO_SETTINGS
 
     def __post_init__(self):
         for name, param in self.target_params.items():
@@ -59,6 +62,9 @@ class ToolSpec:
                 )
         if self.bind_stdin is not None and self.build_stdin is None:
             raise ValueError(f"{self.name}: binding targets needs standard input")
+        for name, setting in self.settings.specs.items():
+            if setting.param in self.target_params:
+                raise ValueError(f"{self.name}.{name}: a target is never a setting")
 
     def stdin_for(self, params: Mapping[str, Any]) -> list[str]:
         """The tool's standard input as lines (empty when it takes none). Raises ValueError
@@ -152,6 +158,41 @@ def _run_command_argv(params: Mapping[str, Any]) -> list[str]:
 RUN_COMMAND = ToolSpec("run_command", RiskTier.ARBITRARY, build_argv=_run_command_argv)
 
 
+def validate_tool_settings(
+    overrides: Mapping[str, Any], registry: "ToolRegistry"
+) -> dict[str, dict[str, Any]]:
+    """Check an engagement's tool settings ({tool: {setting: value}}); returns them in
+    canonical form. Raises ValueError for unknown tools or settings and values outside what
+    the code allows."""
+    if not isinstance(overrides, Mapping):
+        raise ValueError("tool settings must be an object of {tool: {setting: value}}")
+    clean = {}
+    for tool, values in overrides.items():
+        spec = registry.get(tool)
+        if spec is None or not spec.settings.specs:
+            configurable = sorted(n for n, s in registry.items() if s.settings.specs)
+            raise ValueError(f"{tool!r} has no settings; configurable tools: {configurable}")
+        try:
+            validated = spec.settings.validate(values)
+        except ValueError as exc:
+            raise ValueError(f"{tool}: {exc}") from exc
+        if validated:
+            clean[tool] = validated
+    return clean
+
+
+def effective_tool_settings(
+    overrides: Mapping[str, Any] | None, registry: "ToolRegistry"
+) -> dict[str, dict[str, Any]]:
+    """Every configurable tool's settings: defaults merged with the engagement's overrides."""
+    stored = overrides if isinstance(overrides, Mapping) else {}
+    return {
+        name: spec.settings.effective(stored.get(name))
+        for name, spec in registry.items()
+        if spec.settings.specs
+    }
+
+
 class ToolRegistry:
     def __init__(self, specs: Iterable[ToolSpec] = (RUN_COMMAND,)):
         self._specs: dict[str, ToolSpec] = {}
@@ -165,6 +206,9 @@ class ToolRegistry:
 
     def __contains__(self, name: str) -> bool:
         return name in self._specs
+
+    def items(self) -> Iterable[tuple[str, ToolSpec]]:
+        return tuple(self._specs.items())
 
 
 # --- autonomy -------------------------------------------------------------------------------
