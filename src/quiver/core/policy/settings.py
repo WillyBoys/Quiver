@@ -6,7 +6,9 @@ setting governs one job parameter:
 - `default`  fills the parameter when a job leaves it out (e.g. which ports to probe);
 - `ceiling`  bounds an integer parameter: a job asking for more needs approval;
 - `allow`    gates a true/false feature: a job asking for it while the engagement turns it
-             off needs approval.
+             off needs approval;
+- `choices`  lists which values of a choice parameter the engagement allows (e.g. nuclei
+             template profiles): any other value needs approval.
 
 Settings move only within the bounds the code allows, and safety invariants (name
 resolution off, pinned addresses, no off-host redirects, no shell, no out-of-band callbacks,
@@ -25,12 +27,14 @@ class SettingMode(StrEnum):
     DEFAULT = "default"
     CEILING = "ceiling"
     ALLOW = "allow"
+    CHOICES = "choices"
 
 
 class SettingKind(StrEnum):
     INT = "int"
     BOOL = "bool"
     PORTS = "ports"  # a list of TCP ports, deduplicated in order
+    CHOICES = "choices"  # a non-empty subset of the spec's choices
 
 
 @dataclass(frozen=True)
@@ -43,6 +47,7 @@ class SettingSpec:
     minimum: int | None = None  # INT bounds (inclusive)
     maximum: int | None = None
     max_items: int = 20  # PORTS
+    choices: tuple[str, ...] = ()  # CHOICES: the values the parameter can take
     # CEILING / ALLOW: the parameter's own default, used to fill a job that leaves it out
     # (capped by the ceiling, or switched off when the feature is not allowed).
     param_default: Any = None
@@ -55,6 +60,10 @@ class SettingSpec:
             raise ValueError(f"{self.param}: a ceiling must be a whole number")
         if self.mode is SettingMode.ALLOW and self.kind is not SettingKind.BOOL:
             raise ValueError(f"{self.param}: an allow setting must be true or false")
+        if (self.mode is SettingMode.CHOICES) != (self.kind is SettingKind.CHOICES):
+            raise ValueError(f"{self.param}: a choices setting is a list of choices")
+        if self.mode is SettingMode.CHOICES and self.param_default not in self.choices:
+            raise ValueError(f"{self.param}: the parameter's default must be a choice")
         self.validate(self.default)  # the code's own default must be valid
 
     def validate(self, value: Any) -> Any:
@@ -69,6 +78,14 @@ class SettingSpec:
             if not self.minimum <= value <= self.maximum:
                 raise ValueError(f"must be from {self.minimum} to {self.maximum}")
             return value
+        if self.kind is SettingKind.CHOICES:
+            if (
+                not isinstance(value, list)
+                or not value
+                or not all(isinstance(v, str) and v in self.choices for v in value)
+            ):
+                raise ValueError(f"must be a non-empty list of: {', '.join(self.choices)}")
+            return [c for c in self.choices if c in value]  # canonical order
         if not isinstance(value, list) or not 1 <= len(value) <= self.max_items:
             raise ValueError(f"must be a list of 1 to {self.max_items} ports")
         ports = []
@@ -91,6 +108,8 @@ class SettingSpec:
             out |= {"minimum": self.minimum, "maximum": self.maximum}
         if self.kind is SettingKind.PORTS:
             out["max_items"] = self.max_items
+        if self.kind is SettingKind.CHOICES:
+            out["choices"] = list(self.choices)
         return out
 
 
@@ -145,6 +164,8 @@ class ToolSettings:
                 filled[spec.param] = min(spec.param_default, value)
             elif spec.mode is SettingMode.ALLOW and spec.param_default is not None:
                 filled[spec.param] = bool(spec.param_default and value)
+            elif spec.mode is SettingMode.CHOICES:
+                filled[spec.param] = spec.param_default if spec.param_default in value else value[0]
         return filled
 
     def problems(self, params: Mapping[str, Any], settings: Mapping[str, Any]) -> list[str]:
@@ -160,6 +181,11 @@ class ToolSettings:
                     )
             elif spec.mode is SettingMode.ALLOW and value is True and limit is not True:
                 reasons.append(f"{spec.param} is turned off for this engagement")
+            elif spec.mode is SettingMode.CHOICES and isinstance(value, str) and value not in limit:
+                reasons.append(
+                    f"{spec.param} {value} is not allowed for this engagement "
+                    f"(allowed: {', '.join(limit)})"
+                )
         return reasons
 
     def describe(self) -> dict[str, dict[str, Any]]:

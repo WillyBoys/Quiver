@@ -3,7 +3,7 @@
 from collections.abc import Mapping
 from typing import Any, Protocol
 
-from quiver.worker.tracks.external.parsers import ct, dnsx, httpx, nmap, subfinder, tlsx
+from quiver.worker.tracks.external.parsers import ct, dnsx, httpx, nmap, nuclei, subfinder, tlsx
 from quiver.worker.tracks.external.parsers.common import Parsed, Resolutions
 
 
@@ -22,6 +22,7 @@ PARSERS: Mapping[str, Parser] = {
     "port_scan": nmap.parse,
     "http_probe": httpx.parse,
     "tls_scan": tlsx.parse,
+    "nuclei_scan": nuclei.parse,
 }
 
 __all__ = ["PARSERS", "Parsed", "Parser"]

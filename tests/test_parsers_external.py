@@ -11,7 +11,16 @@ from pathlib import Path
 import pytest
 
 from quiver.core.graph.types import default_graph
-from quiver.worker.tracks.external.parsers import common, ct, dnsx, httpx, nmap, subfinder, tlsx
+from quiver.worker.tracks.external.parsers import (
+    common,
+    ct,
+    dnsx,
+    httpx,
+    nmap,
+    nuclei,
+    subfinder,
+    tlsx,
+)
 
 FIXTURES = Path(__file__).parent / "fixtures" / "tools"
 GRAPH = default_graph()
@@ -109,6 +118,7 @@ def test_parsers_never_raise_on_junk(output):
     nmap.parse(output, {"targets": ["203.0.113.0/24"]})
     httpx.parse(output, {"host": "203.0.113.10"})
     tlsx.parse(output, {"host": "203.0.113.10"})
+    nuclei.parse(output, {"url": "http://203.0.113.10/"})
 
 
 # --- dnsx ----------------------------------------------------------------------------------
@@ -486,3 +496,76 @@ def test_tlsx_bad_timestamp_is_dropped():
     )
     [cert] = by_type(tlsx.parse(line, {"host": "203.0.113.10"}), "certificate")
     assert cert == {"sha256": "b" * 64}
+
+
+# --- nuclei_scan (nuclei through quiver-bind) ---------------------------------------------------
+
+NUCLEI = {"url": "http://www.example.com/"}
+
+
+def assert_findings_valid(parsed):
+    from quiver.core.graph import keys
+
+    for f in parsed.findings:
+        entity_key = GRAPH.entity(f.entity.type).key(f.entity.attributes)
+        keys.finding_key(f.issue_type, entity_key, f.location)
+
+
+def test_nuclei_recorded_output():
+    parsed = nuclei.parse(fixture("nuclei", "lab"), NUCLEI, resolutions=WWW)
+    assert_all_valid(parsed)
+    assert_findings_valid(parsed)
+    assert {e["url"] for e in by_type(parsed, "web_endpoint")} == {
+        "http://www.example.com:80/",
+        "http://www.example.com:80/.git/config",
+    }
+    assert parsed.notes == {"matches": 16, "by_severity": {"info": 15, "medium": 1}}
+    git = next(f for f in parsed.findings if f.issue_type == "git-config")
+    assert git.severity == "medium" and git.title == "Git Configuration - Detect"
+    assert git.entity.attributes["url"] == "http://www.example.com:80/.git/config"
+    assert git.details["cwe"] == ["cwe-200"] and git.details["cvss_score"] == 5.3
+    assert "matched-at: http://203.0.113.10:80/.git/config" in git.evidence[0].excerpt
+    headers = [f for f in parsed.findings if f.issue_type == "http-missing-security-headers"]
+    assert len(headers) == 10 and len({f.location for f in headers}) == 10  # one per header
+    version = next(f for f in parsed.findings if f.issue_type == "nginx-version")
+    assert version.location == "" and version.details["extracted"] == ["nginx/1.27.5"]
+    assert sorted(link.type for link in parsed.links) == ["on_domain"] * 2 + ["serves"] * 2
+
+
+def test_nuclei_finding_identity_is_stable_across_runs():
+    from quiver.core.graph import keys
+
+    def ids(parsed):
+        return sorted(
+            keys.finding_key(
+                f.issue_type, GRAPH.entity(f.entity.type).key(f.entity.attributes), f.location
+            )
+            for f in parsed.findings
+        )
+
+    first = nuclei.parse(fixture("nuclei", "lab"), NUCLEI, resolutions=WWW)
+    again = nuclei.parse(fixture("nuclei", "lab"), NUCLEI, resolutions=WWW)
+    assert ids(first) == ids(again) and len(set(ids(first))) == 16
+    assert "finding:git-config|web_endpoint:http://www.example.com:80/.git/config|" in ids(first)
+
+
+def test_nuclei_edge_cases():
+    parsed = nuclei.parse(fixture("nuclei", "edge_cases"), NUCLEI, resolutions=WWW)
+    assert_all_valid(parsed)
+    assert_findings_valid(parsed)
+    by_id = {f.issue_type: f for f in parsed.findings}
+    assert set(by_id) == {"odd-sev", "big-extract", "no-info", "other-port", "dup"}
+    assert by_id["odd-sev"].severity == "info"  # unknown severity
+    assert by_id["no-info"].title == "no-info" and by_id["no-info"].severity == "info"
+    extracted = by_id["big-extract"].details["extracted"]
+    assert extracted == ["v" * 200]  # truncated, deduplicated
+    # A template may probe another port on the pinned address: recorded under that port.
+    assert by_id["other-port"].entity.attributes["url"] == "http://www.example.com:5814/autopass"
+    assert {s["port"] for s in by_type(parsed, "service")} == {80, 5814}
+    # Skipped: an address not given, a DNS match, a | in the id, a non-URL, the cut-off line.
+    assert parsed.skipped == 5 and parsed.notes["matches"] == 5
+
+
+def test_nuclei_ignores_matches_from_addresses_it_was_not_given():
+    parsed = nuclei.parse(fixture("nuclei", "lab"), NUCLEI)  # no pins known
+    assert parsed.findings == () and parsed.skipped == 16

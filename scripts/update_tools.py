@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Bump the pinned tool binaries in docker/executor.Dockerfile.
+"""Bump the pinned tools (and template archives) in docker/executor.Dockerfile.
 
     python3 scripts/update_tools.py                      # every tool to its latest release
     python3 scripts/update_tools.py subfinder=2.17.0     # one tool to a given version
     python3 scripts/update_tools.py --check              # validate the pins only (offline)
 
 Stdlib only. For each tool it reads the GitHub release's checksums file and rewrites the
-`<TOOL>_VERSION` and `<TOOL>_SHA256_<ARCH>` build args. The Docker build verifies every
+`<TOOL>_VERSION` and `<TOOL>_SHA256_<ARCH>` build args (`<NAME>_SHA256` for an archive that
+is the same on every architecture, such as nuclei's templates). The Docker build verifies every
 download against these checksums, so the result is reviewed and committed like code: bumping
 a tool changes what runs against targets.
 """
@@ -20,14 +21,19 @@ from pathlib import Path
 
 DOCKERFILE = Path(__file__).resolve().parent.parent / "docker/executor.Dockerfile"
 ARCHES = ("amd64", "arm64")
-# Tool name -> GitHub repository. Release assets follow ProjectDiscovery's naming:
-# <name>_<version>_linux_<arch>.zip and <name>_<version>_checksums.txt.
+# Name -> GitHub repository. Binaries follow ProjectDiscovery's release naming:
+# <name>_<version>_linux_<arch>.zip listed in <name>_<version>_checksums.txt.
 TOOLS = {
     "subfinder": "projectdiscovery/subfinder",
     "dnsx": "projectdiscovery/dnsx",
     "httpx": "projectdiscovery/httpx",
     "tlsx": "projectdiscovery/tlsx",
+    "nuclei": "projectdiscovery/nuclei",
+    "nuclei-templates": "projectdiscovery/nuclei-templates",
 }
+# Architecture-independent archives: the tag's source tarball, <name>-<version>.tar.gz,
+# listed in the release's <name>-<version>_checksums.txt.
+ARCHIVES = {"nuclei-templates"}
 MAX_DOWNLOAD = 1_000_000
 
 _VERSION = re.compile(r"^\d+\.\d+\.\d+$")
@@ -35,7 +41,13 @@ _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
 def arg_name(tool: str, field: str) -> str:
-    return f"{tool.upper()}_{field}"
+    return f"{tool.upper().replace('-', '_')}_{field}"
+
+
+def fields(tool: str) -> list[str]:
+    if tool in ARCHIVES:
+        return ["VERSION", "SHA256"]
+    return ["VERSION", *(f"SHA256_{a.upper()}" for a in ARCHES)]
 
 
 def read_args(text: str) -> dict[str, str]:
@@ -48,8 +60,7 @@ def pins(text: str) -> dict[str, dict[str, str]]:
     args = read_args(text)
     result = {}
     for tool in TOOLS:
-        fields = ["VERSION", *(f"SHA256_{a.upper()}" for a in ARCHES)]
-        result[tool] = {f: args.get(arg_name(tool, f), "") for f in fields}
+        result[tool] = {f: args.get(arg_name(tool, f), "") for f in fields(tool)}
     return result
 
 
@@ -68,12 +79,18 @@ def check(text: str) -> list[str]:
 
 
 def checksums_for(tool: str, version: str, checksums_txt: str) -> dict[str, str]:
-    """Per-architecture SHA-256 of the Linux release zips, from a release's checksums file."""
+    """The SHA-256 pins from a release's checksums file: per architecture for a binary's
+    Linux zips, or the one source tarball for an archive."""
     found = {}
     for line in checksums_txt.splitlines():
         parts = line.split()
         if len(parts) == 2 and _SHA256.match(parts[0]):
             found[parts[1].lstrip("*")] = parts[0]
+    if tool in ARCHIVES:
+        asset = f"{tool}-{version}.tar.gz"
+        if asset not in found:
+            raise ValueError(f"{asset} is not in the checksums file")
+        return {"SHA256": found[asset]}
     result = {}
     for arch in ARCHES:
         asset = f"{tool}_{version}_linux_{arch}.zip"
@@ -113,7 +130,9 @@ def latest_version(repo: str) -> str:
 def fetch_pin(tool: str, version: str | None) -> dict[str, str]:
     repo = TOOLS[tool]
     version = version or latest_version(repo)
-    url = f"https://github.com/{repo}/releases/download/v{version}/{tool}_{version}_checksums.txt"
+    sep = "-" if tool in ARCHIVES else "_"
+    sums = f"{tool}{sep}{version}_checksums.txt"
+    url = f"https://github.com/{repo}/releases/download/v{version}/{sums}"
     return {"VERSION": version, **checksums_for(tool, version, _get(url).decode())}
 
 
