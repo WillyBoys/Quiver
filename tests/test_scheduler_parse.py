@@ -21,8 +21,8 @@ from quiver.executor import protocol as p
 from quiver.executor.runner import Executor
 from quiver.worker import queue
 from quiver.worker.scheduler import Scheduler
-from quiver.worker.tracks.external.parsers import Parsed, ct, dnsx, httpx, nmap, subfinder
-from quiver.worker.tracks.external.tools import HTTP_PROBE, PORT_SCAN
+from quiver.worker.tracks.external.parsers import Parsed, ct, dnsx, httpx, nmap, nuclei, subfinder
+from quiver.worker.tracks.external.tools import HTTP_PROBE, NUCLEI_SCAN, PORT_SCAN
 from tests.api_helpers import activate
 from tests.test_scheduler import DNS, PATH_ENV, PY, get_job
 
@@ -31,7 +31,11 @@ FIXTURE = TOOLS / "subfinder" / "example_com.log"
 CT_FIXTURE = TOOLS / "quiver-ct" / "example_com.log"
 FAKE_DNSX = TOOLS / "fake_dnsx.py"
 FAKE_NMAP = TOOLS / "fake_nmap.py"
-FAKE_HTTPX = TOOLS / "fake_httpx.py"  # an absolute path: never read as a target by the gate
+FAKE_HTTPX = TOOLS / "fake_httpx.py"
+FAKE_NUCLEI = TOOLS / "fake_nuclei.py"
+BIND = (
+    Path(__file__).parent.parent / "src" / "quiver" / "executor" / "tools" / "bind.py"
+)  # an absolute path: never read as a target by the gate
 
 
 @pytest.fixture
@@ -114,6 +118,23 @@ REGISTRY = ToolRegistry(
             build_stdin=HTTP_PROBE.build_stdin,
             bind_stdin=HTTP_PROBE.bind_stdin,
         ),
+        # The real nuclei_scan argv, with quiver-bind and nuclei swapped for the real wrapper
+        # script and a stand-in program.
+        ToolSpec(
+            "fake_nuclei_scan",
+            RiskTier.DISCOVERY,
+            {"url": TargetParam(url_subtree=True)},
+            build_argv=lambda params: [
+                PY,
+                str(BIND),
+                *NUCLEI_SCAN.argv_for(params)[1:3],
+                PY,
+                str(FAKE_NUCLEI),
+                *NUCLEI_SCAN.argv_for(params)[4:],
+            ],
+            build_stdin=NUCLEI_SCAN.build_stdin,
+            bind_stdin=NUCLEI_SCAN.bind_stdin,
+        ),
         ToolSpec(
             "no_parser",
             RiskTier.PASSIVE,
@@ -140,6 +161,7 @@ PARSERS = {
     "fake_ct": ct.parse,
     "fake_port_scan": nmap.parse,
     "fake_http_probe": httpx.parse,
+    "fake_nuclei_scan": nuclei.parse,
     "broken": _boom,
     "half": _half_valid,
 }
@@ -460,3 +482,40 @@ def test_settings_fill_new_jobs_so_they_run_without_asking(active, settings, exe
     assert get_job(run_db, job_id).params["max_rate"] == 100
     job = run_to_success(settings, executor, run_db, job_id)
     assert job.status is JobStatus.SUCCEEDED, job.reason
+
+
+def findings_of(run_db, eng):
+    async def go(db):
+        from quiver.core.models import Evidence, Finding
+
+        rows = list(
+            await db.scalars(select(Finding).where(Finding.engagement_id == uuid.UUID(eng["id"])))
+        )
+        evidence = list(await db.scalars(select(Evidence)))
+        return rows, evidence
+
+    return run_db(go)
+
+
+def test_nuclei_findings_through_quiver_bind(active, settings, executor, run_db):
+    url = "https://www.example.com/"
+    first = submit(run_db, active, "fake_nuclei_scan", url=url)
+    job = run_to_success(settings, executor, run_db, first)
+    assert job.status is JobStatus.SUCCEEDED, job.reason
+    out = output_of(settings, first)
+    assert "[quiver-bind]" in out and '"ip": "203.0.113.10"' in out  # the pinned address
+    scheduler_call(settings, "parse")
+    [finding], evidence = findings_of(run_db, active)
+    assert finding.status == "candidate" and finding.severity == "high"
+    assert finding.title == "Fake exposure (vhost=www.example.com)"  # Host header bound
+    assert finding.key == (
+        "finding:fake-exposure|web_endpoint:https://www.example.com:443/secret.txt|body"
+    )
+    assert len(evidence) == 1 and "203.0.113.10" in evidence[0].excerpt
+
+    # The same check again updates the same finding rather than creating another.
+    second = submit(run_db, active, "fake_nuclei_scan", url=url)
+    run_to_success(settings, executor, run_db, second)
+    scheduler_call(settings, "parse")
+    findings, evidence = findings_of(run_db, active)
+    assert [f.id for f in findings] == [finding.id] and len(evidence) == 2

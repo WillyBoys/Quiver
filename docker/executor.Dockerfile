@@ -23,6 +23,12 @@ ARG HTTPX_SHA256_ARM64=fd7b123c1dfbc3d69f19f524e4eebcd6ec06b9a6cbd56813c76f11645
 ARG TLSX_VERSION=1.4.0
 ARG TLSX_SHA256_AMD64=05628cec246e292e2f9afc6e7bc5de95aaa0fbe78fd556d5ad220b9f4702d364
 ARG TLSX_SHA256_ARM64=b757125d94c7d0e1f1f109534f0ed88d2a4b1c3856e1fa35efc1ef9e36781b0e
+ARG NUCLEI_VERSION=3.11.1
+ARG NUCLEI_SHA256_AMD64=ea63d4ae232808cd7c6bc00d0142428e231fab59dae01042246097d195835ab6
+ARG NUCLEI_SHA256_ARM64=8044e3d9768ba0a744b2872c1a87e813006f013da97ca9f50f7661a4203bec07
+# Templates: the release's source tarball, checksum from the release's checksums file.
+ARG NUCLEI_TEMPLATES_VERSION=10.5.2
+ARG NUCLEI_TEMPLATES_SHA256=016b7abbf931d4d1a851a5a568e44510dc61691dc8a5202e3b24e701515ec574
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl unzip ca-certificates \
@@ -33,9 +39,9 @@ WORKDIR /dl
 RUN set -eu; \
     case "${TARGETARCH:-amd64}" in \
       amd64) arch=amd64; sf="$SUBFINDER_SHA256_AMD64"; dx="$DNSX_SHA256_AMD64"; \
-             hx="$HTTPX_SHA256_AMD64"; tx="$TLSX_SHA256_AMD64" ;; \
+             hx="$HTTPX_SHA256_AMD64"; tx="$TLSX_SHA256_AMD64"; nu="$NUCLEI_SHA256_AMD64" ;; \
       arm64) arch=arm64; sf="$SUBFINDER_SHA256_ARM64"; dx="$DNSX_SHA256_ARM64"; \
-             hx="$HTTPX_SHA256_ARM64"; tx="$TLSX_SHA256_ARM64" ;; \
+             hx="$HTTPX_SHA256_ARM64"; tx="$TLSX_SHA256_ARM64"; nu="$NUCLEI_SHA256_ARM64" ;; \
       *) echo "unsupported architecture: ${TARGETARCH}" >&2; exit 1 ;; \
     esac; \
     fetch() { \
@@ -50,7 +56,21 @@ RUN set -eu; \
     fetch dnsx "$DNSX_VERSION" "$dx"; \
     fetch httpx "$HTTPX_VERSION" "$hx"; \
     fetch tlsx "$TLSX_VERSION" "$tx"; \
+    fetch nuclei "$NUCLEI_VERSION" "$nu"; \
     chmod 0755 /out/*
+
+# nuclei templates: only the HTTP templates (and the helper files they use), read-only in the
+# final image. nuclei never downloads or updates templates at run time (Blueprint §7.3).
+RUN set -eu; \
+    tgz="nuclei-templates-${NUCLEI_TEMPLATES_VERSION}.tar.gz"; \
+    curl -fsSL --retry 3 -o "$tgz" \
+      "https://github.com/projectdiscovery/nuclei-templates/archive/refs/tags/v${NUCLEI_TEMPLATES_VERSION}.tar.gz"; \
+    echo "${NUCLEI_TEMPLATES_SHA256}  $tgz" | sha256sum -c -; \
+    mkdir -p /templates; \
+    tar -xzf "$tgz" -C /templates --strip-components=1 \
+      "nuclei-templates-${NUCLEI_TEMPLATES_VERSION}/http" \
+      "nuclei-templates-${NUCLEI_TEMPLATES_VERSION}/helpers"; \
+    test -d /templates/http/technologies
 
 # --- executor ------------------------------------------------------------------------------
 FROM python:3.12-slim
@@ -69,8 +89,11 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=tools /out/ /usr/local/bin/
+COPY --from=tools /templates/ /opt/nuclei-templates/
 # Certificate transparency client (crt.sh), stdlib only; runs as `python3 -I` from its shebang.
 COPY --chmod=0755 src/quiver/executor/tools/crtsh.py /usr/local/bin/quiver-ct
+# Runs URL tools (nuclei, ffuf) against the gate's pinned addresses; stdlib only.
+COPY --chmod=0755 src/quiver/executor/tools/bind.py /usr/local/bin/quiver-bind
 
 WORKDIR /app
 COPY src/quiver/__init__.py quiver/__init__.py

@@ -124,13 +124,8 @@ def test_effective_settings_ignore_corrupted_values():
     effective = effective_tool_settings(stored, REG)
     assert effective["port_scan"]["max_rate"] == 1000  # the code default
     assert effective["port_scan"]["top_ports"] == 10
-    assert set(effective) == {
-        "subdomain_enum",
-        "cert_transparency",
-        "port_scan",
-        "http_probe",
-        "tls_scan",
-    }
+    assert set(effective) == {name for name, spec in REG.items() if spec.settings.specs}
+    assert {"port_scan", "http_probe", "tls_scan", "nuclei_scan"} <= set(effective)
 
 
 def test_schema_rules():

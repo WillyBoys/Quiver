@@ -18,10 +18,17 @@ the tools run with DNS disabled, so they reach exactly the addresses that were c
 import ipaddress
 from collections.abc import Callable, Mapping
 from typing import Any
+from urllib.parse import urlsplit
 
 from quiver.core.policy import RiskTier, TargetParam, ToolSpec
 from quiver.core.policy.settings import SettingKind, SettingMode, SettingSpec, ToolSettings
 from quiver.core.scope import NormalizedScope, ScopeKind, ScopeMode, normalize_scope_value
+from quiver.worker.tracks.external.nuclei_profiles import (
+    EXCLUDED_TYPES,
+    PROFILES,
+    TEMPLATES,
+    Profile,
+)
 
 MAX_RESOLVE_HOSTS = 1000
 
@@ -513,4 +520,134 @@ TLS_SCAN = ToolSpec(
 )
 
 
-TOOLS = (SUBDOMAIN_ENUM, DNS_RESOLVE, CERT_TRANSPARENCY, PORT_SCAN, HTTP_PROBE, TLS_SCAN)
+# --- nuclei_scan: nuclei through quiver-bind ---------------------------------------------------
+#
+# nuclei takes a URL, so it runs through quiver-bind (src/quiver/executor/tools/bind.py): the
+# job's standard input is bound to the host's pinned addresses, and quiver-bind runs nuclei
+# once per address with {url} = the URL on that address and {host} = the name (Host header
+# and SNI). Templates request arbitrary paths, so the target is the whole host:port: the URL
+# is a root URL checked as a subtree (an excluded path anywhere on the host denies the job),
+# and the host on standard input is checked as a host-level target (a URL-only scope entry
+# does not cover it). Interactsh (out-of-band callbacks to third-party servers) is off and
+# redirects are never followed.
+
+NUCLEI_PARAMS = {"url", "profile", "rate_limit"}
+
+
+def _root_url(params: Mapping[str, Any]) -> tuple[str, str, bool]:
+    """The job's root URL (scheme://host:port/), its host, and whether the host is a name."""
+    value = params.get("url")
+    if not isinstance(value, str):
+        raise ValueError("url must be an http(s) root URL such as https://www.example.com/")
+    try:
+        parts = urlsplit(value.strip())
+        port = parts.port
+    except ValueError as exc:
+        raise ValueError(f"url: {exc}") from exc
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        raise ValueError("url must be an http(s) URL")
+    if parts.username or parts.password or parts.query or parts.fragment:
+        raise ValueError("url must not have credentials, a query or a fragment")
+    if parts.path not in ("", "/"):
+        raise ValueError("url must be the site root (templates request paths of their own)")
+    host, is_name = _probe_host({"host": parts.hostname})
+    port = port or (443 if parts.scheme == "https" else 80)
+    return f"{parts.scheme}://{host}:{port}/", host, is_name
+
+
+def _profile(params: Mapping[str, Any]) -> Profile:
+    name = params.get("profile", "discovery")
+    if name not in PROFILES:
+        raise ValueError(f"profile must be one of {sorted(PROFILES)}")
+    return PROFILES[name]
+
+
+def _nuclei_argv(params: Mapping[str, Any]) -> list[str]:
+    _only(params, NUCLEI_PARAMS)
+    url, _host, is_name = _root_url(params)
+    profile = _profile(params)
+    argv = ["quiver-bind", url, "--", "nuclei", "-u", "{url}"]
+    if is_name:
+        argv += ["-H", "Host: {host}", "-sni", "{host}"]
+    for directory in profile.directories:
+        argv += ["-t", f"{TEMPLATES}/{directory}"]
+    argv += [
+        "-etags",
+        ",".join(profile.exclude_tags),
+        "-ept",
+        EXCLUDED_TYPES,
+        "-ni",  # no interactsh: nothing about the target reaches third-party servers
+        "-dr",  # never follow redirects: requests stay on the pinned host
+        "-duc",  # no update checks; templates are the pinned, baked-in release
+        "-nc",
+        "-jsonl",
+        "-or",  # no request/response pairs in the output
+        "-ot",
+        "-rl",
+        str(_int(params, "rate_limit", 30, 1, 100)),
+        "-c",
+        "10",
+        "-bs",
+        "10",
+        "-timeout",
+        "10",
+        "-retries",
+        "1",
+        "-mhe",
+        "20",
+    ]
+    return argv
+
+
+def _nuclei_stdin(params: Mapping[str, Any]) -> list[str]:
+    _only(params, NUCLEI_PARAMS)
+    return [_root_url(params)[1]]
+
+
+def _nuclei_tier(params: Mapping[str, Any]) -> RiskTier:
+    return _profile(params).tier
+
+
+NUCLEI_SCAN = ToolSpec(
+    "nuclei_scan",
+    RiskTier.DISCOVERY,
+    target_params={"url": TargetParam(url_subtree=True)},
+    tier_for=_nuclei_tier,
+    build_argv=_nuclei_argv,
+    build_stdin=_nuclei_stdin,
+    bind_stdin=_ipv4,
+    settings=ToolSettings(
+        {
+            "profiles": SettingSpec(
+                "profile",
+                SettingMode.CHOICES,
+                SettingKind.CHOICES,
+                default=list(PROFILES),
+                choices=tuple(PROFILES),
+                param_default="discovery",
+                help="Template profiles jobs may use (intrusive also always needs approval).",
+            ),
+            "rate_limit": SettingSpec(
+                "rate_limit",
+                SettingMode.CEILING,
+                SettingKind.INT,
+                default=100,
+                minimum=1,
+                maximum=100,
+                param_default=30,
+                help="Highest request rate (per second) a scan may ask for (default 30).",
+            ),
+        }
+    ),
+)
+
+
+TOOLS = (
+    SUBDOMAIN_ENUM,
+    DNS_RESOLVE,
+    CERT_TRANSPARENCY,
+    PORT_SCAN,
+    HTTP_PROBE,
+    TLS_SCAN,
+    NUCLEI_SCAN,
+)

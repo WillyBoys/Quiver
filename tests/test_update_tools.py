@@ -16,10 +16,12 @@ A, B = "a" * 64, "b" * 64
 def dockerfile(**overrides):
     """A Dockerfile pinning every tool in the table, each checksum distinct."""
     args = {}
-    for i, tool in enumerate(update_tools.TOOLS):
-        args[f"{tool.upper()}_VERSION"] = "1.0.0"
-        args[f"{tool.upper()}_SHA256_AMD64"] = f"{2 * i:064x}"
-        args[f"{tool.upper()}_SHA256_ARM64"] = f"{2 * i + 1:064x}"
+    n = 0
+    for tool in update_tools.TOOLS:
+        for field in update_tools.fields(tool):
+            n += 1
+            value = "1.0.0" if field == "VERSION" else f"{n:064x}"
+            args[update_tools.arg_name(tool, field)] = value
     args |= overrides
     return "FROM x\nARG TARGETARCH\n" + "".join(f"ARG {k}={v}\n" for k, v in args.items())
 
@@ -34,7 +36,7 @@ def test_committed_dockerfile_pins_every_tool():
     [
         ({"DNSX_VERSION": "latest"}, "DNSX_VERSION"),
         ({"SUBFINDER_SHA256_ARM64": "abc"}, "SUBFINDER_SHA256_ARM64"),
-        ({"SUBFINDER_SHA256_ARM64": f"{0:064x}"}, "same checksum"),  # = its AMD64 pin
+        ({"SUBFINDER_SHA256_ARM64": f"{2:064x}"}, "same checksum"),  # = its AMD64 pin
     ],
 )
 def test_check_reports_bad_pins(override, problem):
@@ -44,7 +46,8 @@ def test_check_reports_bad_pins(override, problem):
 
 def test_check_reports_missing_pins():
     assert update_tools.check(dockerfile()) == []
-    assert len(update_tools.check("FROM x\n")) == 3 * len(update_tools.TOOLS)
+    expected = sum(len(update_tools.fields(t)) for t in update_tools.TOOLS)
+    assert len(update_tools.check("FROM x\n")) == expected
 
 
 CHECKSUMS = f"""{A}  dnsx_1.3.2_linux_amd64.zip
@@ -74,3 +77,11 @@ def test_rewrite_replaces_only_that_tools_args():
     assert pins["subfinder"] == update_tools.pins(dockerfile())["subfinder"]
     with pytest.raises(ValueError, match="exactly one"):
         update_tools.rewrite("FROM x\n", "dnsx", {"VERSION": "1.3.2"})
+
+
+def test_archive_pins_are_one_checksum():
+    sums = f"{A}  nuclei-templates-10.5.2.tar.gz\n{B}  nuclei-templates-10.5.2.zip\n"
+    assert update_tools.checksums_for("nuclei-templates", "10.5.2", sums) == {"SHA256": A}
+    assert update_tools.arg_name("nuclei-templates", "SHA256") == "NUCLEI_TEMPLATES_SHA256"
+    with pytest.raises(ValueError, match=r"10\.5\.2\.tar\.gz"):
+        update_tools.checksums_for("nuclei-templates", "10.5.2", f"{B}  other.tar.gz\n")

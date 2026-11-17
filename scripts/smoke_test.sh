@@ -124,6 +124,18 @@ tool quiver-ct --help | grep -q 'quiver-ct' || fail "quiver-ct does not run"
 tool nmap --version | grep -q '^Nmap version' || fail "nmap does not run"
 tool httpx -version >/dev/null 2>&1 || fail "httpx does not run"
 tool tlsx -version >/dev/null 2>&1 || fail "tlsx does not run"
+tool nuclei -version >/dev/null 2>&1 || fail "nuclei does not run"
+# Usage errors exit 2 (pipefail): capture the message instead of piping it.
+BIND_USAGE="$(tool quiver-bind </dev/null 2>&1 || true)"
+grep -q 'usage: quiver-bind' <<<"$BIND_USAGE" || fail "quiver-bind does not run"
+# Every template directory a nuclei profile names exists in the image, read-only.
+DIRS="$(docker compose exec -T api python -c 'from quiver.worker.tracks.external.nuclei_profiles import PROFILES, TEMPLATES
+print(" ".join(f"{TEMPLATES}/{d}" for p in PROFILES.values() for d in p.directories))')"
+for d in $DIRS; do
+  docker compose exec -T executor test -d "$d" || fail "nuclei templates missing: $d"
+done
+docker compose exec -T executor sh -c 'touch /opt/nuclei-templates/http/x' >/dev/null 2>&1 \
+  && fail "nuclei templates are writable"
 
 # The executor is isolated: no secrets, no database, and job specs are read-only.
 docker compose exec -T executor sh -c 'ls /run/secrets' >/dev/null 2>&1 \
