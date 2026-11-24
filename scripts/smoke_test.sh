@@ -136,6 +136,13 @@ for d in $DIRS; do
 done
 docker compose exec -T executor sh -c 'touch /opt/nuclei-templates/http/x' >/dev/null 2>&1 \
   && fail "nuclei templates are writable"
+tool ffuf -V | grep -q '^ffuf version' || fail "ffuf does not run"
+# The content-discovery wordlist is the vendored, checked one, owned by root.
+WANT="$(python3 -c 'import json; print(json.load(open("src/quiver/executor/wordlists/SOURCES.json"))["common.txt"]["sha256"])')"
+GOT="$(docker compose exec -T executor sha256sum /opt/wordlists/common.txt | cut -d' ' -f1)"
+[ "$GOT" = "$WANT" ] || fail "wordlist in the image does not match SOURCES.json"
+[ "$(docker compose exec -T executor stat -c %U /opt/wordlists/common.txt)" = "root" ] \
+  || fail "wordlist is not owned by root"
 
 # The executor is isolated: no secrets, no database, and job specs are read-only.
 docker compose exec -T executor sh -c 'ls /run/secrets' >/dev/null 2>&1 \

@@ -1,0 +1,12 @@
+{
+  "common.txt": {
+    "repository": "danielmiessler/SecLists",
+    "commit": "6b19c2f5088c45b5dadb4d8918d2ab4f7efb03a9",
+    "path": "Discovery/Web-Content/common.txt",
+    "upstream_sha256": "47fb86ca6fb3f97e5491161581900d6d99851fb16764eacddf16aa85617c956a",
+    "sha256": "c7b0532517be36b220d9862a7afe6f498d08f786ed8b87740d77aba5170f1899",
+    "entries": 4742,
+    "dropped": 9,
+    "license": "MIT"
+  }
+}

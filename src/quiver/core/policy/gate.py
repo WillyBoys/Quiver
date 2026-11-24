@@ -188,7 +188,7 @@ def hostnames_to_resolve(request: ActionRequest, ctx: GateContext) -> set[str]:
         tier = RiskTier.ARBITRARY
     if tier is RiskTier.PASSIVE:
         return set()
-    targets, _ = _collect_targets(request, spec, tier, ctx.scope)
+    targets, _, _ = _collect_targets(request, spec, tier, ctx.scope)
     hosts = _resolvable(targets)
     return set(hosts) if len(hosts) <= MAX_RESOLVE else set()
 
@@ -270,10 +270,12 @@ def _scope(
         add("scope", Verdict.DENY, f"engagement scope cannot be read: {ctx.scope_error}")
         return
 
-    collected, problems = _collect_targets(request, spec, tier, scope)
+    collected, problems, denials = _collect_targets(request, spec, tier, scope)
     targets.extend(collected)
     for reason in problems:
         add("scope", Verdict.NEEDS_APPROVAL, reason)
+    for reason in denials:
+        add("scope", Verdict.DENY, reason)
 
     if not targets and tier is not RiskTier.PASSIVE:
         add("scope", Verdict.NEEDS_APPROVAL, "no target could be identified")
@@ -284,11 +286,15 @@ def _scope(
 
 def _collect_targets(
     request: ActionRequest, spec: ToolSpec, tier: RiskTier, scope: Scope
-) -> tuple[list[TargetCheck], list[str]]:
+) -> tuple[list[TargetCheck], list[str], list[str]]:
     """Every target in the request with its scope decision, plus reasons for approval when
-    part of the request cannot be read."""
+    part of the request cannot be read, and reasons to deny when it is definitely wrong."""
     targets: list[TargetCheck] = []
     problems: list[str] = []
+    denials: list[str] = []
+    # Host of a URL parameter -> that parameter's decision, for tools whose standard input is
+    # only the host of that URL (ToolSpec.stdin_host_of).
+    url_hosts: dict[str, ScopeDecision] = {}
     # Normalized domain -> decision, for declared domain-subtree parameters (passive only).
     # The same name in the argv stands for the same subtree.
     subtrees: dict[str, ScopeDecision] = {}
@@ -306,6 +312,10 @@ def _collect_targets(
         for v in values:
             decision = scope.check(v, url_subtree=param.url_subtree, domain_subtree=subtree_param)
             targets.append(TargetCheck(v, f"param:{name}", decision))
+            if name == spec.stdin_host_of:
+                host = _url_host(v)
+                if host is not None:
+                    url_hosts[host] = decision
             key = _domain_key(v) if subtree_param else None
             if key is not None:
                 subtrees[key] = decision
@@ -340,13 +350,45 @@ def _collect_targets(
     for line in request.stdin:
         if line.lstrip().startswith("-"):
             problems.append(f"input line {line!r} starts with '-' and may be read as an option")
-    if request.stdin:
+    if request.stdin and spec.stdin_host_of is not None:
+        # The input only binds the URL's host to its pinned addresses (quiver-bind): the tool
+        # stays under that URL, so the URL's decision is the line's, not a host-level check.
+        source = f"stdin:host-of:{spec.stdin_host_of}"
+        for line in request.stdin:
+            host = _bare_host(line)
+            if host is None or host not in url_hosts:
+                denials.append(f"input line {line[:100]!r} is not the host of {spec.stdin_host_of}")
+                continue
+            targets.append(TargetCheck(line.strip(), source, url_hosts[host]))
+    elif request.stdin:
         extraction = extract_targets(("-", *request.stdin))
         for t in (*extraction.definite, *extraction.possible_hosts):
             targets.append(TargetCheck(t, "stdin", check(t)))
         for token, reason in extraction.uncertain:
             problems.append(f"cannot read input token {token!r}: {reason}")
-    return targets, problems
+    return targets, problems, denials
+
+
+def _bare_host(value: str) -> str | None:
+    """A line that is exactly one hostname or IP address, normalized; None for anything else
+    (ports, paths, networks, options)."""
+    value = value.strip()
+    try:
+        return str(ipaddress.ip_address(value))
+    except ValueError:
+        pass
+    return _domain_key(value) if value else None  # rejects ports, paths, networks, options
+
+
+def _url_host(url: str) -> str | None:
+    """The normalized host of an http(s) URL: a hostname or a canonical IP address."""
+    try:
+        host = urlsplit(url.strip()).hostname
+    except ValueError:
+        return None
+    if not host:
+        return None
+    return _bare_host(host)
 
 
 def _domain_key(value: str) -> str | None:

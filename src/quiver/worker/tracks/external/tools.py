@@ -16,6 +16,7 @@ the tools run with DNS disabled, so they reach exactly the addresses that were c
 """
 
 import ipaddress
+import re
 from collections.abc import Callable, Mapping
 from typing import Any
 from urllib.parse import urlsplit
@@ -642,6 +643,141 @@ NUCLEI_SCAN = ToolSpec(
 )
 
 
+# --- content_discovery: ffuf through quiver-bind ----------------------------------------------
+#
+# Requests <base>/<word> for each word of a vendored, cleaned wordlist. Unlike nuclei it stays
+# below its URL, so standard input is only that URL's host (stdin_host_of): a URL-only scope
+# entry covers it. Redirects are never followed.
+#
+# Recursion is not ffuf's: its own needs a redirect to the very URL it requested + "/", but
+# through pinned addresses the server redirects to the name, not the address, so it never
+# triggers (and greedy mode recurses into every file). Instead the parser turns directories
+# it finds into follow-up jobs one level deeper (`depth`), each gated on its own, up to
+# `max_depth` — off unless the engagement allows `recursion`.
+
+WORDLIST = "/opt/wordlists/common.txt"
+CONTENT_PARAMS = {"url", "recursion", "max_depth", "depth", "rate", "max_minutes"}
+MAX_DEPTH = 3
+MATCH_CODES = "200-299,301,302,307,401,403,405"
+_BASE_PATH = re.compile(r"^/(?:[A-Za-z0-9._~-]+/)*$")
+
+
+def _base_url(params: Mapping[str, Any]) -> tuple[str, str, bool]:
+    """The job's base URL (scheme://host:port/path/), its host, and whether it is a name."""
+    value = params.get("url")
+    if not isinstance(value, str):
+        raise ValueError(
+            "url must be an http(s) URL ending in '/' such as https://x.example.com/app/"
+        )
+    try:
+        parts = urlsplit(value.strip())
+        port = parts.port
+    except ValueError as exc:
+        raise ValueError(f"url: {exc}") from exc
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        raise ValueError("url must be an http(s) URL")
+    if parts.username or parts.password or parts.query or parts.fragment:
+        raise ValueError("url must not have credentials, a query or a fragment")
+    path = parts.path or "/"
+    if not _BASE_PATH.match(path) or any(seg in (".", "..") for seg in path.split("/")):
+        raise ValueError(
+            "url path must be a directory ending in '/', made of letters, digits and . _ ~ -"
+        )
+    host, is_name = _probe_host({"host": parts.hostname})
+    port = port or (443 if parts.scheme == "https" else 80)
+    return f"{parts.scheme}://{host}:{port}{path}", host, is_name
+
+
+def _content_argv(params: Mapping[str, Any]) -> list[str]:
+    _only(params, CONTENT_PARAMS)
+    url, _host, is_name = _base_url(params)
+    minutes = _int(params, "max_minutes", 10, 1, 30)
+    argv = ["quiver-bind", url, "--", "ffuf", "-u", "{url}FUZZ"]
+    if is_name:
+        argv += ["-H", "Host: {host}", "-sni", "{host}"]
+    argv += [
+        "-w",
+        WORDLIST,
+        "-ac",  # calibrate away the site's catch-all responses
+        "-mc",
+        MATCH_CODES,
+        "-t",
+        "10",
+        "-rate",
+        str(_int(params, "rate", 20, 1, 100)),
+        "-timeout",
+        "10",
+        "-maxtime",
+        str(minutes * 60),
+        "-json",
+        "-noninteractive",
+        "-s",
+    ]
+    # No -r: redirects are recorded, never followed (they could leave the pinned host). No
+    # -recursion: see above.
+    _recursion(params)  # validated here so a bad job is refused at submission
+    return argv
+
+
+def _recursion(params: Mapping[str, Any]) -> tuple[bool, int, int]:
+    """Whether found directories become follow-up jobs, the deepest level, and this job's."""
+    recursion = _flag(params, "recursion", False)
+    max_depth = _int(params, "max_depth", 2, 1, MAX_DEPTH)
+    depth = _int(params, "depth", 0, 0, MAX_DEPTH)
+    if depth > max_depth:
+        raise ValueError(f"depth {depth} is deeper than max_depth {max_depth}")
+    return recursion, max_depth, depth
+
+
+def _content_stdin(params: Mapping[str, Any]) -> list[str]:
+    _only(params, CONTENT_PARAMS)
+    return [_base_url(params)[1]]
+
+
+CONTENT_DISCOVERY = ToolSpec(
+    "content_discovery",
+    RiskTier.DISCOVERY,
+    target_params={"url": TargetParam(url_subtree=True)},
+    build_argv=_content_argv,
+    build_stdin=_content_stdin,
+    bind_stdin=_ipv4,
+    stdin_host_of="url",
+    settings=ToolSettings(
+        {
+            "recursion": SettingSpec(
+                "recursion",
+                SettingMode.ALLOW,
+                SettingKind.BOOL,
+                default=False,
+                param_default=False,
+                help="Allow follow-up jobs into directories that are found (off until enabled).",
+            ),
+            "max_depth": SettingSpec(
+                "max_depth",
+                SettingMode.CEILING,
+                SettingKind.INT,
+                default=3,
+                minimum=1,
+                maximum=3,
+                param_default=2,
+                help="Deepest level of follow-up jobs a job may ask for (default 2).",
+            ),
+            "rate": SettingSpec(
+                "rate",
+                SettingMode.CEILING,
+                SettingKind.INT,
+                default=100,
+                minimum=1,
+                maximum=100,
+                param_default=20,
+                help="Highest request rate (per second) a job may ask for (default 20).",
+            ),
+            **MAX_MINUTES.specs,
+        }
+    ),
+)
+
+
 TOOLS = (
     SUBDOMAIN_ENUM,
     DNS_RESOLVE,
@@ -650,4 +786,5 @@ TOOLS = (
     HTTP_PROBE,
     TLS_SCAN,
     NUCLEI_SCAN,
+    CONTENT_DISCOVERY,
 )

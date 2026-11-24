@@ -21,8 +21,8 @@ from pathlib import Path
 
 DOCKERFILE = Path(__file__).resolve().parent.parent / "docker/executor.Dockerfile"
 ARCHES = ("amd64", "arm64")
-# Name -> GitHub repository. Binaries follow ProjectDiscovery's release naming:
-# <name>_<version>_linux_<arch>.zip listed in <name>_<version>_checksums.txt.
+# Name -> GitHub repository. Binaries follow goreleaser's naming (ProjectDiscovery, ffuf):
+# <name>_<version>_linux_<arch>.<ext> listed in <name>_<version>_checksums.txt.
 TOOLS = {
     "subfinder": "projectdiscovery/subfinder",
     "dnsx": "projectdiscovery/dnsx",
@@ -30,7 +30,10 @@ TOOLS = {
     "tlsx": "projectdiscovery/tlsx",
     "nuclei": "projectdiscovery/nuclei",
     "nuclei-templates": "projectdiscovery/nuclei-templates",
+    "ffuf": "ffuf/ffuf",
 }
+# Binary release packaging other than a zip.
+EXTENSIONS = {"ffuf": "tar.gz"}
 # Architecture-independent archives: the tag's source tarball, <name>-<version>.tar.gz,
 # listed in the release's <name>-<version>_checksums.txt.
 ARCHIVES = {"nuclei-templates"}
@@ -80,7 +83,7 @@ def check(text: str) -> list[str]:
 
 def checksums_for(tool: str, version: str, checksums_txt: str) -> dict[str, str]:
     """The SHA-256 pins from a release's checksums file: per architecture for a binary's
-    Linux zips, or the one source tarball for an archive."""
+    Linux packages, or the one source tarball for an archive."""
     found = {}
     for line in checksums_txt.splitlines():
         parts = line.split()
@@ -93,7 +96,7 @@ def checksums_for(tool: str, version: str, checksums_txt: str) -> dict[str, str]
         return {"SHA256": found[asset]}
     result = {}
     for arch in ARCHES:
-        asset = f"{tool}_{version}_linux_{arch}.zip"
+        asset = f"{tool}_{version}_linux_{arch}.{EXTENSIONS.get(tool, 'zip')}"
         if asset not in found:
             raise ValueError(f"{asset} is not in the checksums file")
         result[f"SHA256_{arch.upper()}"] = found[asset]

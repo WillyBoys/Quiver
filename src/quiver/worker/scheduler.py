@@ -54,7 +54,7 @@ from quiver.core.policy.store import gate
 from quiver.worker import handoff, queue
 from quiver.worker.parsing import record_parsed
 from quiver.worker.registry import default_parsers, default_registry
-from quiver.worker.tracks.external.parsers import Parser
+from quiver.worker.tracks.external.parsers import Parsed, Parser
 
 log = logging.getLogger("quiver.worker")
 
@@ -389,6 +389,7 @@ class Scheduler:
                     run_id=job.run_id,
                     now=now,
                 )
+                follow_ups = await self._follow_ups(db, job, parsed)
         except Exception as exc:  # a parser bug or a record() rejection: never crash the loop
             log.exception("job %s: parsing %s output failed", job.id, job.tool)
             await self._parse_failed(db, job, now, f"{type(exc).__name__}: {exc}")
@@ -410,7 +411,51 @@ class Scheduler:
             capped=parsed.capped,
             truncated=output.truncated or job.truncated,
             notes=dict(parsed.notes),
+            follow_ups=follow_ups,
         )
+
+    async def _follow_ups(self, db: AsyncSession, job: Job, parsed: Parsed) -> list[str]:
+        """Enqueue the jobs a parser asked for (content discovery recursion). Each is an
+        ordinary job: the gate judges it on its own when the scheduler next gates it. A
+        follow-up already waiting or running for the same URL, or already in this run, is not
+        queued again."""
+        queued: list[str] = []
+        for follow_up in parsed.follow_ups:
+            params = dict(follow_up.params)
+            same = (
+                (Job.engagement_id == job.engagement_id)
+                & (Job.tool == follow_up.tool)
+                & (Job.params["url"].astext == str(params.get("url")))
+            )
+            pending = Job.status.not_in(FINAL_JOB_STATUSES)
+            if job.run_id is not None:
+                pending = pending | (Job.run_id == job.run_id)
+            if await db.scalar(select(Job.id).where(same & pending).limit(1)) is not None:
+                continue
+            try:
+                child = await queue.enqueue(
+                    db,
+                    engagement_id=job.engagement_id,
+                    tool=follow_up.tool,
+                    params=params,
+                    requester=f"follow-up:{job.id}",
+                    registry=self.registry,
+                    run_id=job.run_id,
+                )
+            except ValueError as exc:
+                log.warning("job %s: follow-up %s refused: %s", job.id, follow_up.tool, exc)
+                continue
+            await self._event(
+                db,
+                child,
+                "job.submitted",
+                f"follow-up of job {job.id}",
+                parent_job_id=str(job.id),
+                argv=child.argv,
+                stdin=child.stdin,
+            )
+            queued.append(str(child.id))
+        return queued
 
     async def _parse_failed(self, db: AsyncSession, job: Job, now: datetime, error: str) -> None:
         job.parse_status = ParseStatus.FAILED
