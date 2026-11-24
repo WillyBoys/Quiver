@@ -66,6 +66,17 @@ def test_checksums_for_reads_the_release_file():
         update_tools.checksums_for("dnsx", "1.3.2", CHECKSUMS.replace("arm64", "armv6"))
 
 
+def test_ffuf_pins_its_linux_tarballs():
+    sums = f"{A}  ffuf_2.3.0_linux_amd64.tar.gz\n{B}  ffuf_2.3.0_linux_arm64.tar.gz\n"
+    assert update_tools.checksums_for("ffuf", "2.3.0", sums) == {
+        "SHA256_AMD64": A,
+        "SHA256_ARM64": B,
+    }
+    with pytest.raises(ValueError, match=r"tar\.gz"):
+        update_tools.checksums_for("ffuf", "2.3.0", sums.replace("tar.gz", "zip"))
+    assert update_tools.TOOLS["ffuf"] == "ffuf/ffuf"
+
+
 def test_rewrite_replaces_only_that_tools_args():
     text = update_tools.rewrite(
         dockerfile(),

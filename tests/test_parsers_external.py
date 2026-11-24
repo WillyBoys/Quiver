@@ -15,6 +15,7 @@ from quiver.worker.tracks.external.parsers import (
     common,
     ct,
     dnsx,
+    ffuf,
     httpx,
     nmap,
     nuclei,
@@ -119,6 +120,7 @@ def test_parsers_never_raise_on_junk(output):
     httpx.parse(output, {"host": "203.0.113.10"})
     tlsx.parse(output, {"host": "203.0.113.10"})
     nuclei.parse(output, {"url": "http://203.0.113.10/"})
+    ffuf.parse(output, {"url": "http://203.0.113.10/"})
 
 
 # --- dnsx ----------------------------------------------------------------------------------
@@ -569,3 +571,82 @@ def test_nuclei_edge_cases():
 def test_nuclei_ignores_matches_from_addresses_it_was_not_given():
     parsed = nuclei.parse(fixture("nuclei", "lab"), NUCLEI)  # no pins known
     assert parsed.findings == () and parsed.skipped == 16
+
+
+# --- content_discovery (ffuf through quiver-bind) ---------------------------------------------
+
+FFUF = {"url": "http://www.example.com:8080/app/"}
+WWW_LAB = {"www.example.com": ["203.0.113.10"]}
+APP = "http://www.example.com:8080/app/"
+
+
+def test_ffuf_recorded_output():
+    parsed = ffuf.parse(fixture("ffuf", "lab"), FFUF, resolutions=WWW_LAB)
+    assert_all_valid(parsed)
+    endpoints = {e["url"]: e for e in by_type(parsed, "web_endpoint")}
+    assert set(endpoints) == {
+        APP + p
+        for p in (".git", ".git/HEAD", "admin", "backup", "images", "index.html", "login", "old")
+    }
+    admin = endpoints[APP + "admin"]
+    assert admin["status_code"] == 301 and admin["location"] == APP + "admin/"
+    assert admin["ip"] == "203.0.113.10" and admin["found_by"] == "content_discovery"
+    assert endpoints[APP + "login"]["content_length"] == 11
+    assert [s["port"] for s in by_type(parsed, "service")] == [8080]
+    # The off-site redirect is recorded as a host to consider, never followed.
+    assert names(parsed) == ["www.example.com", "evil.example.org"]
+    assert parsed.notes == {
+        "hits": 8,
+        "by_status": {"301": 5, "200": 3},
+        "directories": 4,
+        "follow_ups": 0,
+        "redirects_to": ["evil.example.org"],
+    }
+    assert parsed.follow_ups == () and parsed.findings == () and parsed.skipped == 0
+
+
+def test_ffuf_directories_become_follow_ups_only_with_recursion():
+    parsed = ffuf.parse(
+        fixture("ffuf", "lab"), {**FFUF, "recursion": True, "rate": 50}, resolutions=WWW_LAB
+    )
+    assert [(f.tool, dict(f.params)) for f in parsed.follow_ups] == [
+        ("content_discovery", {"recursion": True, "rate": 50, "url": APP + d, "depth": 1})
+        for d in (".git/", "admin/", "backup/", "images/")  # not "old": it leaves the host
+    ]
+
+
+def test_ffuf_follow_ups_stop_at_max_depth():
+    child = {"url": APP + "admin/", "recursion": True, "max_depth": 2, "depth": 1}
+    parsed = ffuf.parse(fixture("ffuf", "recursion"), child, resolutions=WWW_LAB)
+    assert {e["url"] for e in by_type(parsed, "web_endpoint")} == {
+        APP + "admin/config",
+        APP + "admin/index.html",
+    }
+    [follow] = parsed.follow_ups
+    assert dict(follow.params) == {**child, "url": APP + "admin/config/", "depth": 2}
+    deepest = ffuf.parse(
+        fixture("ffuf", "recursion"), {**child, "max_depth": 1}, resolutions=WWW_LAB
+    )
+    assert deepest.follow_ups == () and deepest.notes["directories"] == 1
+
+
+def test_ffuf_edge_cases():
+    params = {**FFUF, "recursion": True}
+    parsed = ffuf.parse(fixture("ffuf", "edge_cases"), params, resolutions=WWW_LAB)
+    assert_all_valid(parsed)
+    endpoints = {e["url"]: e for e in by_type(parsed, "web_endpoint")}
+    assert set(endpoints) == {APP + p for p in ("k", "l/", "m", "n", "o", "p")}
+    # Junk counters are dropped, the hit is kept.
+    assert endpoints[APP + "k"].keys() == {"url", "ip", "status_code", "content_type", "found_by"}
+    # Directories: a path ending in "/", a relative redirect, a redirect by address.
+    assert [f.params["url"] for f in parsed.follow_ups] == [APP + "l/", APP + "m/", APP + "n/"]
+    assert names(parsed) == ["www.example.com", "login.example.net"]
+    # Skipped: another address, outside the base (twice), another port, another scheme, a
+    # string status, a bad status, a query, a bad URL, a non-string URL, the base itself, the
+    # cut-off line.
+    assert parsed.skipped == 12 and parsed.notes["hits"] == 6
+
+
+def test_ffuf_ignores_hits_from_addresses_it_was_not_given():
+    parsed = ffuf.parse(fixture("ffuf", "lab"), FFUF)  # no pins known
+    assert parsed.entities == () and parsed.skipped == 8

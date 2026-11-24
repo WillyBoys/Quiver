@@ -13,6 +13,7 @@ from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
+from urllib.parse import urlsplit
 
 from quiver.core.graph import keys
 from quiver.core.graph.record import FindingIn, Link, Observed
@@ -30,6 +31,15 @@ MAX_ENTITIES = 50_000
 
 
 @dataclass(frozen=True)
+class FollowUp:
+    """A job a parser asks for next (content discovery recursion). The worker enqueues it like
+    any other job, so the gate judges it on its own."""
+
+    tool: str
+    params: Mapping[str, Any]
+
+
+@dataclass(frozen=True)
 class Parsed:
     entities: tuple[Observed, ...] = ()
     links: tuple[Link, ...] = ()
@@ -38,6 +48,7 @@ class Parsed:
     capped: bool = False  # more results than MAX_ENTITIES; the rest were dropped
     # What the tool reported about itself (source errors, unresolved names), for the event.
     notes: Mapping[str, Any] = field(default_factory=dict)
+    follow_ups: tuple[FollowUp, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -151,3 +162,22 @@ def text(value: Any, limit: int = 200) -> str | None:
         return None
     value = value.strip()
     return value[:limit] if value else None
+
+
+def redirect_target(location: str | None, probed: str) -> Observed | None:
+    """The other host an absolute redirect points to, as an entity, or None."""
+    if not location:
+        return None
+    try:
+        parts = urlsplit(location)
+    except ValueError:
+        return None
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        return None
+    name = domain(parts.hostname)
+    if name is not None:
+        return None if name == probed else Observed("domain", {"name": name})
+    address = ip(parts.hostname)
+    if address is not None and address != probed:
+        return Observed("host", {"ip": address})
+    return None

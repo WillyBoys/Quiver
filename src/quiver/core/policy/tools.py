@@ -51,6 +51,11 @@ class ToolSpec:
     bind_stdin: Callable[[Mapping[str, Any]], int | None] | None = None
     # What an operator may tune per engagement (quiver.core.policy.settings).
     settings: ToolSettings = NO_SETTINGS
+    # For tools that stay under a URL (content discovery): standard input is only the host of
+    # this URL-subtree target parameter, bound to its pinned addresses at dispatch. The gate
+    # then judges the input line by that URL's decision instead of host level, and denies any
+    # other line. Tools that may roam the host (nuclei: any path or port) leave it unset.
+    stdin_host_of: str | None = None
 
     def __post_init__(self):
         for name, param in self.target_params.items():
@@ -62,6 +67,14 @@ class ToolSpec:
                 )
         if self.bind_stdin is not None and self.build_stdin is None:
             raise ValueError(f"{self.name}: binding targets needs standard input")
+        if self.stdin_host_of is not None:
+            param = self.target_params.get(self.stdin_host_of)
+            if param is None or not param.url_subtree:
+                raise ValueError(
+                    f"{self.name}: stdin_host_of must name a URL-subtree target parameter"
+                )
+            if self.bind_stdin is None:
+                raise ValueError(f"{self.name}: stdin_host_of needs bound standard input")
         for name, setting in self.settings.specs.items():
             if setting.param in self.target_params:
                 raise ValueError(f"{self.name}.{name}: a target is never a setting")

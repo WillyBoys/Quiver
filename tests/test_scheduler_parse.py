@@ -21,8 +21,23 @@ from quiver.executor import protocol as p
 from quiver.executor.runner import Executor
 from quiver.worker import queue
 from quiver.worker.scheduler import Scheduler
-from quiver.worker.tracks.external.parsers import Parsed, ct, dnsx, httpx, nmap, nuclei, subfinder
-from quiver.worker.tracks.external.tools import HTTP_PROBE, NUCLEI_SCAN, PORT_SCAN
+from quiver.worker.tracks.external.parsers import (
+    Parsed,
+    ct,
+    dnsx,
+    ffuf,
+    httpx,
+    nmap,
+    nuclei,
+    subfinder,
+)
+from quiver.worker.tracks.external.parsers.common import FollowUp
+from quiver.worker.tracks.external.tools import (
+    CONTENT_DISCOVERY,
+    HTTP_PROBE,
+    NUCLEI_SCAN,
+    PORT_SCAN,
+)
 from tests.api_helpers import activate
 from tests.test_scheduler import DNS, PATH_ENV, PY, get_job
 
@@ -33,6 +48,7 @@ FAKE_DNSX = TOOLS / "fake_dnsx.py"
 FAKE_NMAP = TOOLS / "fake_nmap.py"
 FAKE_HTTPX = TOOLS / "fake_httpx.py"
 FAKE_NUCLEI = TOOLS / "fake_nuclei.py"
+FAKE_FFUF = TOOLS / "fake_ffuf.py"
 BIND = (
     Path(__file__).parent.parent / "src" / "quiver" / "executor" / "tools" / "bind.py"
 )  # an absolute path: never read as a target by the gate
@@ -64,6 +80,20 @@ def executor(settings):
 def active(client, eng):
     activate(client, eng, "*.example.com", "203.0.113.0/24")
     return eng
+
+
+def _as_fake(parsed: Parsed) -> Parsed:
+    # Follow-ups name the real tool; here they go to its stand-in.
+    follow = tuple(FollowUp(f"fake_{f.tool}", f.params) for f in parsed.follow_ups)
+    return Parsed(
+        entities=parsed.entities,
+        links=parsed.links,
+        findings=parsed.findings,
+        skipped=parsed.skipped,
+        capped=parsed.capped,
+        notes=parsed.notes,
+        follow_ups=follow,
+    )
 
 
 def _boom(output, params, **_):
@@ -135,6 +165,25 @@ REGISTRY = ToolRegistry(
             build_stdin=NUCLEI_SCAN.build_stdin,
             bind_stdin=NUCLEI_SCAN.bind_stdin,
         ),
+        # The real content_discovery argv, stdin binding and settings behind the real
+        # quiver-bind, with a stand-in ffuf.
+        ToolSpec(
+            "fake_content_discovery",
+            RiskTier.DISCOVERY,
+            {"url": TargetParam(url_subtree=True)},
+            build_argv=lambda params: [
+                PY,
+                str(BIND),
+                *CONTENT_DISCOVERY.argv_for(params)[1:3],
+                PY,
+                str(FAKE_FFUF),
+                *CONTENT_DISCOVERY.argv_for(params)[4:],
+            ],
+            build_stdin=CONTENT_DISCOVERY.build_stdin,
+            bind_stdin=CONTENT_DISCOVERY.bind_stdin,
+            stdin_host_of="url",
+            settings=CONTENT_DISCOVERY.settings,
+        ),
         ToolSpec(
             "no_parser",
             RiskTier.PASSIVE,
@@ -162,6 +211,9 @@ PARSERS = {
     "fake_port_scan": nmap.parse,
     "fake_http_probe": httpx.parse,
     "fake_nuclei_scan": nuclei.parse,
+    "fake_content_discovery": lambda output, params, **kw: _as_fake(
+        ffuf.parse(output, params, **kw)
+    ),
     "broken": _boom,
     "half": _half_valid,
 }
@@ -519,3 +571,82 @@ def test_nuclei_findings_through_quiver_bind(active, settings, executor, run_db)
     scheduler_call(settings, "parse")
     findings, evidence = findings_of(run_db, active)
     assert [f.id for f in findings] == [finding.id] and len(evidence) == 2
+
+
+def jobs_of(run_db, eng, tool):
+    async def go(db):
+        from quiver.core.models import Job
+
+        return list(
+            await db.scalars(
+                select(Job)
+                .where(Job.engagement_id == uuid.UUID(eng["id"]), Job.tool == tool)
+                .order_by(Job.created_at, Job.id)
+            )
+        )
+
+    return run_db(go)
+
+
+def test_content_discovery_through_quiver_bind(active, settings, executor, run_db):
+    job_id = submit(run_db, active, "fake_content_discovery", url="https://www.example.com/app/")
+    job = run_to_success(settings, executor, run_db, job_id)
+    assert job.status is JobStatus.SUCCEEDED, job.reason
+    out = output_of(settings, job_id)
+    assert '"url": "https://203.0.113.10:443/app/found.txt"' in out  # the pinned address
+    assert '"host": "www.example.com"' in out  # Host header bound
+    scheduler_call(settings, "parse")
+    urls = {e.attributes["url"] for e in entities(run_db, "web_endpoint").values()}
+    assert urls == {
+        "https://www.example.com:443/app/found.txt",
+        "https://www.example.com:443/app/dir",
+    }
+    # Recursion was not asked for: the directory is recorded, nothing more is queued.
+    assert len(jobs_of(run_db, active, "fake_content_discovery")) == 1
+    [parsed] = events(run_db, job_id, "job.parsed")
+    assert parsed["follow_ups"] == [] and parsed["notes"]["directories"] == 1
+
+
+def test_recursion_is_follow_up_jobs_each_gated(active, settings, executor, run_db):
+    url = "https://www.example.com/app/"
+    # Off for the engagement by default: asking for it needs approval.
+    asked = submit(run_db, active, "fake_content_discovery", url=url, recursion=True)
+    scheduler_call(settings, "tick")
+    job = get_job(run_db, asked)
+    assert job.status is JobStatus.AWAITING_APPROVAL
+    assert "recursion is turned off for this engagement" in job.reason
+
+    set_tool_settings(run_db, active, {"fake_content_discovery": {"recursion": True}})
+    parent = submit(run_db, active, "fake_content_discovery", url=url, recursion=True, max_depth=1)
+    assert run_to_success(settings, executor, run_db, parent).status is JobStatus.SUCCEEDED
+    scheduler_call(settings, "parse")
+    [_, _, child] = jobs_of(run_db, active, "fake_content_discovery")
+    assert child.params["url"] == "https://www.example.com:443/app/dir/"
+    assert child.params["depth"] == 1 and child.params["max_depth"] == 1
+    assert child.requester == f"follow-up:{parent}" and child.status is JobStatus.SUBMITTED
+    [submitted] = events(run_db, child.id, "job.submitted")
+    assert submitted["parent_job_id"] == str(parent)
+
+    # The child is gated and run like any job; at max_depth it queues nothing further.
+    assert run_to_success(settings, executor, run_db, child.id).status is JobStatus.SUCCEEDED
+    scheduler_call(settings, "parse")
+    assert len(jobs_of(run_db, active, "fake_content_discovery")) == 3
+    assert "https://www.example.com:443/app/dir/found.txt" in {
+        e.attributes["url"] for e in entities(run_db, "web_endpoint").values()
+    }
+
+
+def test_a_directory_already_queued_is_not_queued_again(active, settings, executor, run_db):
+    set_tool_settings(run_db, active, {"fake_content_discovery": {"recursion": True}})
+    url = "https://www.example.com/app/"
+    # Two scans find the same directory; both are parsed while the first child still waits.
+    parents = [
+        submit(run_db, active, "fake_content_discovery", url=url, recursion=True) for _ in range(2)
+    ]
+    for parent in parents:
+        assert run_to_success(settings, executor, run_db, parent).status is JobStatus.SUCCEEDED
+    assert scheduler_call(settings, "parse") == 2
+    children = [
+        j for j in jobs_of(run_db, active, "fake_content_discovery") if j.params.get("depth")
+    ]
+    assert [c.params["url"] for c in children] == ["https://www.example.com:443/app/dir/"]

@@ -1,0 +1,19 @@
+[quiver-bind] ffuf -> http://203.0.113.10:8080/app/FUZZ
+{"input":{"FUZZ":"YQ=="},"status":200,"length":10,"words":1,"lines":1,"content-type":"text/html","redirectlocation":"","url":"http://198.51.100.99:8080/app/a","host":"www.example.com"}
+{"input":{"FUZZ":"Yg=="},"status":200,"length":10,"words":1,"lines":1,"content-type":"text/html","redirectlocation":"","url":"http://203.0.113.10:8080/other/b","host":"www.example.com"}
+{"input":{"FUZZ":"Yw=="},"status":200,"length":10,"words":1,"lines":1,"content-type":"text/html","redirectlocation":"","url":"http://203.0.113.10:9999/app/c","host":"www.example.com"}
+{"input":{"FUZZ":"ZA=="},"status":200,"length":10,"words":1,"lines":1,"content-type":"text/html","redirectlocation":"","url":"https://203.0.113.10:8080/app/d","host":"www.example.com"}
+{"input":{"FUZZ":"ZQ=="},"status":"200","length":10,"words":1,"lines":1,"url":"http://203.0.113.10:8080/app/e","host":"www.example.com"}
+{"input":{"FUZZ":"Zg=="},"status":999,"length":10,"url":"http://203.0.113.10:8080/app/f"}
+{"input":{"FUZZ":"Zw=="},"status":200,"url":"http://203.0.113.10:8080/app/../g"}
+{"input":{"FUZZ":"aA=="},"status":200,"url":"http://203.0.113.10:8080/app/h?x=1"}
+{"input":{"FUZZ":"aQ=="},"status":200,"url":"http://[::1:8080/app/i"}
+{"input":{"FUZZ":"ag=="},"status":200,"url":5}
+{"input":{"FUZZ":"aw=="},"status":200,"length":-5,"words":true,"lines":99999999999999999999,"content-type":"text/html","redirectlocation":"","url":"http://203.0.113.10:8080/app/k","host":"www.example.com"}
+{"input":{"FUZZ":"bA=="},"status":403,"length":153,"words":4,"lines":8,"content-type":"text/html","redirectlocation":"","url":"http://203.0.113.10:8080/app/l/","host":"www.example.com"}
+{"input":{"FUZZ":"bQ=="},"status":302,"length":0,"redirectlocation":"m/","url":"http://203.0.113.10:8080/app/m","host":"www.example.com"}
+{"input":{"FUZZ":"bg=="},"status":301,"length":0,"redirectlocation":"http://203.0.113.10:8080/app/n/","url":"http://203.0.113.10:8080/app/n","host":"www.example.com"}
+{"input":{"FUZZ":"bw=="},"status":301,"length":0,"redirectlocation":"http://www.example.com:8080/elsewhere/","url":"http://203.0.113.10:8080/app/o","host":"www.example.com"}
+{"input":{"FUZZ":"cA=="},"status":302,"length":0,"redirectlocation":"https://login.example.net/sso","url":"http://203.0.113.10:8080/app/p","host":"www.example.com"}
+{"input":{"FUZZ":"cQ=="},"status":200,"length":1,"url":"http://203.0.113.10:8080/app/"}
+{"input":{"FUZZ":"cg=="},"status":200,"url":"http://203.0.113.10:8080/app/r

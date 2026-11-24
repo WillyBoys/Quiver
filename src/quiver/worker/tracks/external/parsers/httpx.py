@@ -16,7 +16,6 @@ a `domain` (or `host`) entity, so the graph's scope check suggests it when it is
 
 from collections.abc import Mapping
 from typing import Any
-from urllib.parse import urlsplit
 
 from quiver.core.graph import keys
 from quiver.core.graph.record import Link, Observed
@@ -26,10 +25,10 @@ from quiver.worker.tracks.external.parsers.common import (
     BoundInput,
     Parsed,
     Resolutions,
-    domain,
     ip,
     lines,
     port,
+    redirect_target,
     strings,
     text,
 )
@@ -43,25 +42,6 @@ def _fingerprint(value: Any) -> str | None:
         return keys.canonical_fingerprint(value) if isinstance(value, str) else None
     except ValueError:
         return None
-
-
-def _redirect_target(location: str | None, probed: str) -> Observed | None:
-    """The other host an absolute redirect points to, as an entity, or None."""
-    if not location:
-        return None
-    try:
-        parts = urlsplit(location)
-    except ValueError:
-        return None
-    if parts.scheme not in ("http", "https") or not parts.hostname:
-        return None
-    name = domain(parts.hostname)
-    if name is not None:
-        return None if name == probed else Observed("domain", {"name": name})
-    address = ip(parts.hostname)
-    if address is not None and address != probed:
-        return Observed("host", {"ip": address})
-    return None
 
 
 def parse(
@@ -143,7 +123,7 @@ def parse(
         if probed_domain is not None:
             entities.setdefault(f"domain:{probed}", probed_domain)
             links.append(Link("on_domain", endpoint, probed_domain))
-        target = _redirect_target(location, probed)
+        target = redirect_target(location, probed)
         if target is not None:
             key = f"{target.type}:{target.attributes.get('name') or target.attributes['ip']}"
             entities.setdefault(key, target)

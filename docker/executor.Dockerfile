@@ -26,6 +26,9 @@ ARG TLSX_SHA256_ARM64=b757125d94c7d0e1f1f109534f0ed88d2a4b1c3856e1fa35efc1ef9e36
 ARG NUCLEI_VERSION=3.11.1
 ARG NUCLEI_SHA256_AMD64=ea63d4ae232808cd7c6bc00d0142428e231fab59dae01042246097d195835ab6
 ARG NUCLEI_SHA256_ARM64=8044e3d9768ba0a744b2872c1a87e813006f013da97ca9f50f7661a4203bec07
+ARG FFUF_VERSION=2.3.0
+ARG FFUF_SHA256_AMD64=b2a3c725fcb9da175159682f54d6e9149f2905b00d84d155e7efc5d599975ceb
+ARG FFUF_SHA256_ARM64=e2d712615d53da797ee929006e41f2df5a7960a5353133db9c150ddaa22ae4e8
 # Templates: the release's source tarball, checksum from the release's checksums file.
 ARG NUCLEI_TEMPLATES_VERSION=10.5.2
 ARG NUCLEI_TEMPLATES_SHA256=016b7abbf931d4d1a851a5a568e44510dc61691dc8a5202e3b24e701515ec574
@@ -36,12 +39,15 @@ RUN apt-get update \
 
 WORKDIR /dl
 # fetch <name> <version> <sha256>: download a ProjectDiscovery release zip, verify, unpack.
+# ffuf ships a tarball from its own repository; same checksum flow.
 RUN set -eu; \
     case "${TARGETARCH:-amd64}" in \
       amd64) arch=amd64; sf="$SUBFINDER_SHA256_AMD64"; dx="$DNSX_SHA256_AMD64"; \
-             hx="$HTTPX_SHA256_AMD64"; tx="$TLSX_SHA256_AMD64"; nu="$NUCLEI_SHA256_AMD64" ;; \
+             hx="$HTTPX_SHA256_AMD64"; tx="$TLSX_SHA256_AMD64"; nu="$NUCLEI_SHA256_AMD64"; \
+             ff="$FFUF_SHA256_AMD64" ;; \
       arm64) arch=arm64; sf="$SUBFINDER_SHA256_ARM64"; dx="$DNSX_SHA256_ARM64"; \
-             hx="$HTTPX_SHA256_ARM64"; tx="$TLSX_SHA256_ARM64"; nu="$NUCLEI_SHA256_ARM64" ;; \
+             hx="$HTTPX_SHA256_ARM64"; tx="$TLSX_SHA256_ARM64"; nu="$NUCLEI_SHA256_ARM64"; \
+             ff="$FFUF_SHA256_ARM64" ;; \
       *) echo "unsupported architecture: ${TARGETARCH}" >&2; exit 1 ;; \
     esac; \
     fetch() { \
@@ -57,6 +63,11 @@ RUN set -eu; \
     fetch httpx "$HTTPX_VERSION" "$hx"; \
     fetch tlsx "$TLSX_VERSION" "$tx"; \
     fetch nuclei "$NUCLEI_VERSION" "$nu"; \
+    tgz="ffuf_${FFUF_VERSION}_linux_${arch}.tar.gz"; \
+    curl -fsSL --retry 3 -o "$tgz" \
+      "https://github.com/ffuf/ffuf/releases/download/v${FFUF_VERSION}/$tgz"; \
+    echo "$ff  $tgz" | sha256sum -c -; \
+    tar -xzf "$tgz" -C /out ffuf; \
     chmod 0755 /out/*
 
 # nuclei templates: only the HTTP templates (and the helper files they use), read-only in the
@@ -94,6 +105,8 @@ COPY --from=tools /templates/ /opt/nuclei-templates/
 COPY --chmod=0755 src/quiver/executor/tools/crtsh.py /usr/local/bin/quiver-ct
 # Runs URL tools (nuclei, ffuf) against the gate's pinned addresses; stdlib only.
 COPY --chmod=0755 src/quiver/executor/tools/bind.py /usr/local/bin/quiver-bind
+# Content-discovery wordlists, vendored and cleaned (scripts/update_wordlists.py); read-only.
+COPY src/quiver/executor/wordlists/common.txt /opt/wordlists/common.txt
 
 WORKDIR /app
 COPY src/quiver/__init__.py quiver/__init__.py

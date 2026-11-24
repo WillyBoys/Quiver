@@ -13,6 +13,7 @@ uvx pre-commit install               # once per clone: gitleaks, ruff, file chec
 python3 scripts/init_secrets.py      # once: generate ./secrets (gitignored)
 python3 scripts/update_providers.py  # refresh third-party provider ranges (commit + review the diff)
 python3 scripts/update_tools.py      # bump pinned tool binaries in docker/executor.Dockerfile (review the diff)
+python3 scripts/update_wordlists.py  # re-vendor content-discovery wordlists from SecLists (review the diff)
 docker compose up -d --build         # full stack; API on 127.0.0.1:8000, UI on 127.0.0.1:3000
 docker compose logs -f api           # follow a service's logs
 docker compose down                  # stop (add -v to also delete the database volume)
@@ -69,7 +70,7 @@ One Python package, `src/quiver/`, built into separate container images per serv
 - Parsers are pure functions; each new tool lands with a parser and at least one recorded fixture in `tests/fixtures/tools/<tool>/` (kept byte for byte: the whitespace hooks skip that directory). Parsers never raise on bad output; they skip it and validate every item against the graph types.
 - Typed tools put only targets and integers in argv (no resolver IPs or provider URLs: the gate checks them as targets). Target lists go on standard input via `ToolSpec.build_stdin`.
 - Tool behaviour that may differ per engagement (rates, run times, default ports, optional noisy features) is a `SettingSpec` on the tool (`quiver.core.policy.settings`), never a hard-coded parameter default. Safety invariants are never settings.
-- Tools that contact the asset take their targets on standard input with `ToolSpec.bind_stdin` set, and run with name resolution off: the worker binds hostnames to the gate's pinned addresses at dispatch. Never let a discovery tool resolve names itself. Tools that take a URL in argv run through `quiver-bind <url> -- <tool … {url} … {host} …>`, with the host on stdin (`bind_stdin`).
+- Tools that contact the asset take their targets on standard input with `ToolSpec.bind_stdin` set, and run with name resolution off: the worker binds hostnames to the gate's pinned addresses at dispatch. Never let a discovery tool resolve names itself. Tools that take a URL in argv run through `quiver-bind <url> -- <tool … {url} … {host} …>`, with the host on stdin (`bind_stdin`). Stdin lines are checked as host-level targets; a tool that only requests paths under its URL (content discovery) sets `ToolSpec.stdin_host_of` to that URL parameter instead, so a URL-only scope entry covers it. Tools that may roam the host (nuclei) must not set it.
 - Tool binaries in `docker/executor.Dockerfile` are pinned by version and per-arch SHA-256 from the release's checksums file; bump them with `scripts/update_tools.py` in a reviewed PR. Our own tool clients live in `src/quiver/executor/tools/` as stdlib-only standalone scripts (jobs run with a cleared environment, so they cannot import Quiver). No tool gets an API key (the executor holds no secrets).
 - Policy gate and reconciliation changes need unit tests covering the edge cases listed in Blueprint §12.
 - Tests pass `Settings(...)` explicitly; never mutate `QUIVER_*` environment variables in tests.
